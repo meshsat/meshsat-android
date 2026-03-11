@@ -2,6 +2,7 @@ package com.cubeos.meshsat
 
 import android.Manifest
 import android.app.role.RoleManager
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -42,6 +43,9 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         requestMissingPermissions()
+
+        // Start gateway service so BLE/SPP transports are always available
+        startService(Intent(this, com.cubeos.meshsat.service.GatewayService::class.java))
 
         setContent {
             MeshSatTheme {

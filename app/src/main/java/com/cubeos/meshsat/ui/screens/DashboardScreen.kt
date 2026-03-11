@@ -13,7 +13,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.produceState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -36,10 +35,12 @@ fun DashboardScreen() {
     val context = LocalContext.current
     val db = AppDatabase.getInstance(context)
 
-    val totalMessages by produceState(0) { value = db.messageDao().count() }
-    val smsCount by produceState(0) { value = db.messageDao().countByTransport("sms") }
-    val meshCount by produceState(0) { value = db.messageDao().countByTransport("mesh") }
-    val encryptedCount by produceState(0) { value = db.messageDao().countEncrypted() }
+    // Use Flow for reactive updates — counters update live when new messages arrive
+    val allMessages by db.messageDao().getRecent(999).collectAsState(initial = emptyList())
+    val totalMessages = allMessages.size
+    val smsCount = allMessages.count { it.transport == "sms" }
+    val meshCount = allMessages.count { it.transport == "mesh" }
+    val encryptedCount = allMessages.count { it.encrypted }
 
     // Observe real transport state
     val meshState = GatewayService.meshtasticBle?.state?.collectAsState()

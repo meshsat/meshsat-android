@@ -1,5 +1,8 @@
 package com.cubeos.meshsat.ui.screens
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -10,11 +13,14 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.DropdownMenuItem
@@ -235,6 +241,7 @@ fun MessagesScreen() {
 
 @Composable
 private fun MessageCard(msg: Message) {
+    val context = LocalContext.current
     val transportColor = when (msg.transport) {
         "mesh" -> ColorMesh
         "iridium" -> ColorIridium
@@ -314,11 +321,34 @@ private fun MessageCard(msg: Message) {
                 }
             }
 
-            Text(
-                text = timeStr,
-                style = MaterialTheme.typography.bodySmall,
-                color = MeshSatTextMuted,
-            )
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = timeStr,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MeshSatTextMuted,
+                )
+
+                // Copy button
+                IconButton(
+                    onClick = {
+                        val copyText = if (msg.encrypted && msg.rawText.isNotEmpty()) msg.rawText else msg.text
+                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                        clipboard.setPrimaryClip(ClipData.newPlainText("MeshSat Message", copyText))
+                        Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
+                    },
+                    modifier = Modifier.size(24.dp),
+                ) {
+                    Icon(
+                        Icons.Default.ContentCopy,
+                        contentDescription = "Copy message",
+                        tint = MeshSatTextMuted,
+                        modifier = Modifier.size(16.dp),
+                    )
+                }
+            }
         }
 
         // Sender
@@ -329,11 +359,13 @@ private fun MessageCard(msg: Message) {
             modifier = Modifier.padding(top = 4.dp),
         )
 
-        // Message text
-        Text(
-            text = msg.text,
-            style = MaterialTheme.typography.bodyLarge,
-            modifier = Modifier.padding(top = 4.dp),
-        )
+        // Message text (selectable)
+        SelectionContainer {
+            Text(
+                text = msg.text,
+                style = MaterialTheme.typography.bodyLarge,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+        }
     }
 }

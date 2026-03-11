@@ -4,6 +4,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.provider.Telephony
+import android.util.Log
 import com.cubeos.meshsat.crypto.AesGcmCrypto
 import com.cubeos.meshsat.data.AppDatabase
 import com.cubeos.meshsat.data.Message
@@ -49,9 +50,17 @@ class SmsReceiver : BroadcastReceiver() {
                     try {
                         decryptedText = AesGcmCrypto.decryptFromBase64(text.trim(), key)
                         wasEncrypted = true
-                    } catch (_: Exception) {
-                        // Not a valid encrypted message or wrong key — keep original
+                        Log.d("MeshSat", "SMS auto-decrypted from $sender")
+                    } catch (e: Exception) {
+                        Log.w("MeshSat", "SMS decrypt failed from $sender: ${e.message}")
+                        // Store as encrypted but undecrypted — user can manually try in Crypto tab
+                        wasEncrypted = false
+                        // Keep original text
                     }
+                } else {
+                    if (key.isEmpty()) Log.d("MeshSat", "SMS received but no encryption key configured")
+                    else if (!autoDecrypt) Log.d("MeshSat", "SMS received but auto-decrypt disabled")
+                    else Log.d("MeshSat", "SMS from $sender does not look encrypted (len=${text.length})")
                 }
 
                 db.messageDao().insert(
