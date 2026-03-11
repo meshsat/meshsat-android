@@ -11,8 +11,9 @@ import androidx.room.RoomDatabase
         ForwardingRuleEntity::class,
         SignalRecord::class,
         NodePosition::class,
+        ConversationKey::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -21,6 +22,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun forwardingRuleDao(): ForwardingRuleDao
     abstract fun signalDao(): SignalDao
     abstract fun nodePositionDao(): NodePositionDao
+    abstract fun conversationKeyDao(): ConversationKeyDao
 
     companion object {
         @Volatile

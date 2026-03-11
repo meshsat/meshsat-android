@@ -17,6 +17,9 @@ import kotlinx.coroutines.launch
 /**
  * Receives incoming SMS and auto-decrypts MeshSat encrypted messages.
  * Stores all received SMS in the local database for the message feed.
+ *
+ * Uses goAsync() to keep the BroadcastReceiver alive while the coroutine
+ * reads settings and writes to the database.
  */
 class SmsReceiver : BroadcastReceiver() {
 
@@ -40,43 +43,65 @@ class SmsReceiver : BroadcastReceiver() {
         val db = AppDatabase.getInstance(context)
         val settings = SettingsRepository(context)
 
+        // goAsync() keeps the receiver alive while coroutine runs (up to ~30s)
+        val pendingResult = goAsync()
+
         CoroutineScope(Dispatchers.IO).launch {
-            val key = settings.encryptionKey.first()
-            val autoDecrypt = settings.autoDecryptSms.first()
+            try {
+                val globalKey = settings.encryptionKey.first()
+                val autoDecrypt = settings.autoDecryptSms.first()
 
-            for ((sender, body) in grouped) {
-                val text = body.toString()
-                var decryptedText = text
-                var wasEncrypted = false
+                for ((sender, body) in grouped) {
+                    val text = body.toString()
+                    var decryptedText = text
+                    var wasEncrypted = false
+                    var rawCiphertext = ""
 
-                // Try to decrypt if it looks like a MeshSat encrypted message
-                if (autoDecrypt && key.isNotEmpty() && AesGcmCrypto.looksEncrypted(text)) {
-                    try {
-                        decryptedText = AesGcmCrypto.decryptFromBase64(text.trim(), key)
+                    val looksEnc = AesGcmCrypto.looksEncrypted(text)
+
+                    if (looksEnc) {
+                        // Mark as encrypted regardless of whether decryption succeeds
                         wasEncrypted = true
-                        Log.d("MeshSat", "SMS auto-decrypted from $sender")
-                    } catch (e: Exception) {
-                        Log.w("MeshSat", "SMS decrypt failed from $sender: ${e.message}")
-                        // Store as encrypted but undecrypted — user can manually try in Crypto tab
-                        wasEncrypted = false
-                        // Keep original text
-                    }
-                } else {
-                    if (key.isEmpty()) Log.d("MeshSat", "SMS received but no encryption key configured")
-                    else if (!autoDecrypt) Log.d("MeshSat", "SMS received but auto-decrypt disabled")
-                    else Log.d("MeshSat", "SMS from $sender does not look encrypted (len=${text.length})")
-                }
+                        rawCiphertext = text
 
-                db.messageDao().insert(
-                    Message(
-                        transport = "sms",
-                        direction = "rx",
-                        sender = sender,
-                        text = decryptedText,
-                        rawText = if (wasEncrypted) text else "",
-                        encrypted = wasEncrypted,
+                        if (autoDecrypt) {
+                            // Try per-conversation key first, then global key
+                            val convKey = db.conversationKeyDao().getBySender(sender)?.hexKey
+                            val keyToUse = convKey?.ifEmpty { null } ?: globalKey
+
+                            if (keyToUse.isNotEmpty()) {
+                                try {
+                                    decryptedText = AesGcmCrypto.decryptFromBase64(text.trim(), keyToUse)
+                                    Log.d("MeshSat", "SMS auto-decrypted from $sender (${if (convKey != null) "conv key" else "global key"})")
+                                } catch (e: Exception) {
+                                    Log.w("MeshSat", "SMS decrypt failed from $sender: ${e.message}")
+                                    // Keep original text — user can manually decrypt in Crypto tab
+                                }
+                            } else {
+                                Log.d("MeshSat", "SMS looks encrypted from $sender but no key configured")
+                            }
+                        } else {
+                            Log.d("MeshSat", "SMS looks encrypted from $sender but auto-decrypt disabled")
+                        }
+                    } else {
+                        Log.d("MeshSat", "SMS from $sender plain text (len=${text.length})")
+                    }
+
+                    db.messageDao().insert(
+                        Message(
+                            transport = "sms",
+                            direction = "rx",
+                            sender = sender,
+                            text = decryptedText,
+                            rawText = rawCiphertext,
+                            encrypted = wasEncrypted,
+                        )
                     )
-                )
+                }
+            } catch (e: Exception) {
+                Log.e("MeshSat", "SmsReceiver processing failed", e)
+            } finally {
+                pendingResult.finish()
             }
         }
     }

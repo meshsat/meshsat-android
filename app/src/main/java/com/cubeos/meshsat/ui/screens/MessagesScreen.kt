@@ -18,13 +18,17 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Send
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
@@ -42,14 +46,20 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.cubeos.meshsat.ble.MeshtasticBle
 import com.cubeos.meshsat.bt.IridiumSpp
+import com.cubeos.meshsat.crypto.AesGcmCrypto
 import com.cubeos.meshsat.data.AppDatabase
+import com.cubeos.meshsat.data.ConversationKey
 import com.cubeos.meshsat.data.ConversationSummary
 import com.cubeos.meshsat.data.Message
 import com.cubeos.meshsat.service.GatewayService
@@ -61,6 +71,7 @@ import com.cubeos.meshsat.ui.theme.MeshSatBorder
 import com.cubeos.meshsat.ui.theme.MeshSatSurface
 import com.cubeos.meshsat.ui.theme.MeshSatTeal
 import com.cubeos.meshsat.ui.theme.MeshSatTextMuted
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -414,13 +425,23 @@ private fun ConversationDetailView(
     db: AppDatabase,
     onBack: () -> Unit,
 ) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val messages by db.messageDao().getBySender(sender).collectAsState(initial = emptyList())
+
+    // Per-conversation encryption key
+    val allConvKeys by db.conversationKeyDao().getAll().collectAsState(initial = emptyList())
+    val convKey = allConvKeys.find { it.sender == sender }
+    var keyInput by remember(convKey) { mutableStateOf(convKey?.hexKey ?: "") }
+    var showKeySection by remember { mutableStateOf(false) }
+    var showKey by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(16.dp),
     ) {
+        // Header with back button and key toggle
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.padding(bottom = 8.dp),
@@ -431,10 +452,148 @@ private fun ConversationDetailView(
             Text(
                 text = sender,
                 style = MaterialTheme.typography.headlineMedium,
+                modifier = Modifier.weight(1f),
             )
+            IconButton(onClick = { showKeySection = !showKeySection }) {
+                Icon(
+                    Icons.Default.Lock,
+                    contentDescription = "Encryption key",
+                    tint = if (convKey != null) MeshSatAmber else MeshSatTextMuted,
+                )
+            }
+        }
+
+        // Per-conversation key management (collapsible)
+        if (showKeySection) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MeshSatSurface, RoundedCornerShape(8.dp))
+                    .border(1.dp, MeshSatBorder, RoundedCornerShape(8.dp))
+                    .padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    text = "Conversation Encryption Key",
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                Text(
+                    text = "Set a per-conversation AES-256-GCM key. Overrides the global key for this sender.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MeshSatTextMuted,
+                )
+
+                OutlinedTextField(
+                    value = keyInput,
+                    onValueChange = { keyInput = it },
+                    label = { Text("Hex key (64 chars)", style = MaterialTheme.typography.bodySmall) },
+                    visualTransformation = if (showKey) VisualTransformation.None else PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    textStyle = MaterialTheme.typography.labelMedium,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = MeshSatTeal,
+                        unfocusedBorderColor = MeshSatBorder,
+                    ),
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Button(
+                        onClick = { showKey = !showKey },
+                        colors = ButtonDefaults.buttonColors(containerColor = MeshSatSurface),
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text(if (showKey) "Hide" else "Show", style = MaterialTheme.typography.bodySmall)
+                    }
+
+                    Button(
+                        onClick = {
+                            keyInput = AesGcmCrypto.generateKey()
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = MeshSatAmber),
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text("Generate", style = MaterialTheme.typography.bodySmall)
+                    }
+
+                    Button(
+                        onClick = {
+                            if (keyInput.length == 64 && keyInput.all { it in "0123456789abcdefABCDEF" }) {
+                                scope.launch {
+                                    db.conversationKeyDao().upsert(
+                                        ConversationKey(sender = sender, hexKey = keyInput)
+                                    )
+                                }
+                                Toast.makeText(context, "Key saved for $sender", Toast.LENGTH_SHORT).show()
+                            } else {
+                                Toast.makeText(context, "Invalid key — must be 64 hex chars", Toast.LENGTH_LONG).show()
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = MeshSatTeal),
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text("Save", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Button(
+                        onClick = {
+                            if (keyInput.isNotBlank()) {
+                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                clipboard.setPrimaryClip(ClipData.newPlainText("MeshSat Key", keyInput))
+                                Toast.makeText(context, "Key copied", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = MeshSatSurface),
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text("Copy", style = MaterialTheme.typography.bodySmall)
+                    }
+
+                    Button(
+                        onClick = {
+                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                            val clip = clipboard.primaryClip?.getItemAt(0)?.text?.toString() ?: ""
+                            if (clip.length == 64 && clip.all { it in "0123456789abcdefABCDEF" }) {
+                                keyInput = clip
+                                Toast.makeText(context, "Key pasted", Toast.LENGTH_SHORT).show()
+                            } else {
+                                Toast.makeText(context, "Clipboard doesn't contain a valid 64-char hex key", Toast.LENGTH_LONG).show()
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = MeshSatSurface),
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text("Paste", style = MaterialTheme.typography.bodySmall)
+                    }
+
+                    if (convKey != null) {
+                        Button(
+                            onClick = {
+                                scope.launch { db.conversationKeyDao().deleteBySender(sender) }
+                                keyInput = ""
+                                Toast.makeText(context, "Key removed — will use global key", Toast.LENGTH_SHORT).show()
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = MeshSatSurface),
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text("Remove", style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+            }
         }
 
         LazyColumn(
+            modifier = Modifier.padding(top = 8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             items(messages, key = { it.id }) { msg ->
@@ -536,7 +695,7 @@ private fun MessageCard(msg: Message) {
                     color = MeshSatTextMuted,
                 )
 
-                // Copy button
+                // Copy button — copies raw ciphertext if encrypted, otherwise plaintext
                 IconButton(
                     onClick = {
                         val copyText = if (msg.encrypted && msg.rawText.isNotEmpty()) msg.rawText else msg.text
@@ -571,6 +730,19 @@ private fun MessageCard(msg: Message) {
                 style = MaterialTheme.typography.bodyLarge,
                 modifier = Modifier.padding(top = 4.dp),
             )
+        }
+
+        // Show raw ciphertext below if message was encrypted but text differs (decrypted)
+        if (msg.encrypted && msg.rawText.isNotEmpty() && msg.rawText != msg.text) {
+            SelectionContainer {
+                Text(
+                    text = msg.rawText,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MeshSatTextMuted,
+                    maxLines = 1,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+            }
         }
     }
 }

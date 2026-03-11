@@ -71,9 +71,12 @@ fun DashboardScreen() {
     val iridiumState = GatewayService.iridiumSpp?.state?.collectAsState()
     val iridiumSignal = GatewayService.iridiumSpp?.signal?.collectAsState()
     val modemInfo = GatewayService.iridiumSpp?.modemInfo?.collectAsState()
+    val meshRssi = GatewayService.meshtasticBle?.rssi?.collectAsState()
 
     // Signal history for sparklines
     val iridiumHistory by db.signalDao().getRecent("iridium", 30).collectAsState(initial = emptyList())
+    val meshHistory by db.signalDao().getRecent("mesh", 30).collectAsState(initial = emptyList())
+    val cellularHistory by db.signalDao().getRecent("cellular", 30).collectAsState(initial = emptyList())
 
     // SOS state
     val sosActive by GatewayService.sosActive.collectAsState()
@@ -130,15 +133,16 @@ fun DashboardScreen() {
             val meshConnected = meshState?.value == MeshtasticBle.State.Connected
             val meshConnecting = meshState?.value == MeshtasticBle.State.Connecting
                     || meshState?.value == MeshtasticBle.State.Scanning
+            val rssi = meshRssi?.value ?: 0
             StatusCard(
                 title = "Meshtastic",
                 status = when {
-                    meshConnected -> "Connected"
+                    meshConnected -> if (rssi != 0) "RSSI: ${rssi}dBm" else "Connected"
                     meshConnecting -> "Connecting..."
                     else -> "Disconnected"
                 },
                 isOnline = meshConnected,
-                color = ColorMesh,
+                color = if (meshConnected && rssi != 0) rssiColor(rssi) else ColorMesh,
                 detail = "BLE",
                 modifier = Modifier.weight(1f),
             )
@@ -154,7 +158,7 @@ fun DashboardScreen() {
                     else -> "Disconnected"
                 },
                 isOnline = iridiumConnected,
-                color = if (iridiumConnected) signalColor(sig) else ColorIridium,
+                color = if (iridiumConnected) iridiumSignalColor(sig) else ColorIridium,
                 detail = modemInfo?.value?.let {
                     if (it.imei.isNotBlank()) "IMEI: ${it.imei}" else "HC-05 SPP"
                 } ?: "HC-05 SPP",
@@ -162,22 +166,48 @@ fun DashboardScreen() {
             )
         }
 
+        // Cellular status with live signal from history
+        val latestCell = cellularHistory.firstOrNull()?.value
         StatusCard(
             title = "Cellular SMS",
-            status = "Ready",
+            status = if (latestCell != null) "Signal: ${latestCell}dBm" else "Ready",
             isOnline = true,
-            color = ColorCellular,
+            color = if (latestCell != null) cellularSignalColor(latestCell) else ColorCellular,
             detail = "Native SMS",
             modifier = Modifier.fillMaxWidth(),
         )
 
-        // Iridium signal sparkline
+        // Signal history graphs
         if (iridiumHistory.isNotEmpty()) {
             SignalSparkline(
-                title = "Iridium Signal History",
+                title = "Iridium Signal",
                 records = iridiumHistory,
-                maxValue = 5,
+                maxValue = 5f,
+                minValue = 0f,
                 color = ColorIridium,
+                formatValue = { "${it.toInt()}/5" },
+            )
+        }
+
+        if (meshHistory.isNotEmpty()) {
+            SignalSparkline(
+                title = "Mesh BLE RSSI",
+                records = meshHistory,
+                maxValue = -30f,
+                minValue = -100f,
+                color = ColorMesh,
+                formatValue = { "${it.toInt()}dBm" },
+            )
+        }
+
+        if (cellularHistory.isNotEmpty()) {
+            SignalSparkline(
+                title = "Cellular Signal",
+                records = cellularHistory,
+                maxValue = -50f,
+                minValue = -120f,
+                color = ColorCellular,
+                formatValue = { "${it.toInt()}dBm" },
             )
         }
 
@@ -236,8 +266,10 @@ fun DashboardScreen() {
 private fun SignalSparkline(
     title: String,
     records: List<SignalRecord>,
-    maxValue: Int,
+    maxValue: Float,
+    minValue: Float,
     color: Color,
+    formatValue: (Float) -> String,
 ) {
     Column(
         modifier = Modifier
@@ -251,11 +283,11 @@ private fun SignalSparkline(
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
             Text(title, style = MaterialTheme.typography.titleMedium)
-            val latest = records.firstOrNull()?.value ?: 0
-            Text("$latest/$maxValue", style = MaterialTheme.typography.bodyMedium, color = color)
+            val latest = records.firstOrNull()?.value?.toFloat() ?: 0f
+            Text(formatValue(latest), style = MaterialTheme.typography.bodyMedium, color = color)
         }
 
-        // Draw sparkline with Canvas
+        val range = maxValue - minValue
         val points = records.reversed().map { it.value.toFloat() }
         Canvas(
             modifier = Modifier
@@ -269,13 +301,13 @@ private fun SignalSparkline(
             val h = size.height
             val stepX = w / (points.size - 1).coerceAtLeast(1)
 
+            fun yFor(v: Float): Float = h - ((v - minValue) / range).coerceIn(0f, 1f) * h
+
             // Area fill
             val areaPath = Path().apply {
                 moveTo(0f, h)
                 points.forEachIndexed { i, v ->
-                    val x = i * stepX
-                    val y = h - (v / maxValue.toFloat()) * h
-                    lineTo(x, y)
+                    lineTo(i * stepX, yFor(v))
                 }
                 lineTo((points.size - 1) * stepX, h)
                 close()
@@ -286,7 +318,7 @@ private fun SignalSparkline(
             val linePath = Path().apply {
                 points.forEachIndexed { i, v ->
                     val x = i * stepX
-                    val y = h - (v / maxValue.toFloat()) * h
+                    val y = yFor(v)
                     if (i == 0) moveTo(x, y) else lineTo(x, y)
                 }
             }
@@ -294,19 +326,33 @@ private fun SignalSparkline(
 
             // Dots
             points.forEachIndexed { i, v ->
-                val x = i * stepX
-                val y = h - (v / maxValue.toFloat()) * h
-                drawCircle(color, radius = 3.dp.toPx(), center = Offset(x, y))
+                drawCircle(color, radius = 3.dp.toPx(), center = Offset(i * stepX, yFor(v)))
             }
         }
     }
 }
 
 @Composable
-private fun signalColor(signal: Int) = when {
+private fun iridiumSignalColor(signal: Int) = when {
     signal >= 4 -> SignalExcellent
     signal >= 3 -> SignalGood
     signal >= 2 -> SignalFair
+    else -> SignalPoor
+}
+
+@Composable
+private fun rssiColor(rssi: Int) = when {
+    rssi >= -60 -> SignalExcellent
+    rssi >= -70 -> SignalGood
+    rssi >= -80 -> SignalFair
+    else -> SignalPoor
+}
+
+@Composable
+private fun cellularSignalColor(dbm: Int) = when {
+    dbm >= -80 -> SignalExcellent
+    dbm >= -90 -> SignalGood
+    dbm >= -100 -> SignalFair
     else -> SignalPoor
 }
 

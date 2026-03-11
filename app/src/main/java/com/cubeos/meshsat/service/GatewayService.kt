@@ -7,7 +7,9 @@ import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.location.Location
 import android.location.LocationManager
+import android.os.Build
 import android.os.IBinder
+import android.telephony.TelephonyManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
@@ -126,25 +128,60 @@ class GatewayService : Service() {
         }
     }
 
-    /** Poll Iridium signal every 60s when connected and record to signal_history. */
+    /** Poll all transport signals every 60s and record to signal_history. */
     private fun startSignalPolling() {
         scope.launch {
             while (true) {
                 delay(60_000)
-                val spp = iridiumSpp ?: continue
-                if (spp.state.value == IridiumSpp.State.Connected) {
+
+                // Iridium signal (0-5)
+                val spp = iridiumSpp
+                if (spp != null && spp.state.value == IridiumSpp.State.Connected) {
                     val sig = spp.pollSignal()
                     if (sig != null) {
-                        db.signalDao().insert(
-                            SignalRecord(source = "iridium", value = sig)
-                        )
+                        db.signalDao().insert(SignalRecord(source = "iridium", value = sig))
                     }
+                }
+
+                // Meshtastic BLE RSSI (negative dBm)
+                val ble = meshtasticBle
+                if (ble != null && ble.state.value == MeshtasticBle.State.Connected) {
+                    ble.readRssi()
+                    delay(500) // Allow callback to fire
+                    val rssi = ble.rssi.value
+                    if (rssi != 0) {
+                        db.signalDao().insert(SignalRecord(source = "mesh", value = rssi))
+                    }
+                }
+
+                // Phone cellular signal (dBm)
+                val cellSignal = getCellularSignalDbm()
+                if (cellSignal != null) {
+                    db.signalDao().insert(SignalRecord(source = "cellular", value = cellSignal))
                 }
 
                 // Cleanup old signal records (keep 24h)
                 val cutoff = System.currentTimeMillis() - 24 * 60 * 60 * 1000
                 db.signalDao().deleteBefore(cutoff)
             }
+        }
+    }
+
+    /** Get the phone's cellular signal strength in dBm. */
+    private fun getCellularSignalDbm(): Int? {
+        return try {
+            val tm = getSystemService(TELEPHONY_SERVICE) as? TelephonyManager ?: return null
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                tm.signalStrength?.let { ss ->
+                    val best = ss.cellSignalStrengths.minByOrNull { it.dbm }
+                    best?.dbm?.takeIf { it != Int.MAX_VALUE && it != Int.MIN_VALUE }
+                }
+            } else {
+                null
+            }
+        } catch (e: Exception) {
+            Log.d("MeshSat", "Cellular signal read failed: ${e.message}")
+            null
         }
     }
 

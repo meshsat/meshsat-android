@@ -69,6 +69,9 @@ class MeshtasticBle(private val context: Context) {
     private val _error = MutableSharedFlow<String>(extraBufferCapacity = 8)
     val error: SharedFlow<String> = _error
 
+    private val _rssi = MutableStateFlow(0)
+    val rssi: StateFlow<Int> = _rssi
+
     private var writeQueue = ArrayDeque<ByteArray>()
     private var writing = false
 
@@ -179,6 +182,11 @@ class MeshtasticBle(private val context: Context) {
         }
     }
 
+    /** Read remote RSSI. Result arrives via onReadRemoteRssi callback → _rssi StateFlow. */
+    fun readRssi() {
+        gatt?.readRemoteRssi()
+    }
+
     // --- GATT Callback ---
 
     private val gattCallback = object : BluetoothGattCallback() {
@@ -284,6 +292,12 @@ class MeshtasticBle(private val context: Context) {
                 return
             }
             drainWriteQueue()
+        }
+
+        override fun onReadRemoteRssi(g: BluetoothGatt, rssi: Int, status: Int) {
+            if (status == BluetoothGatt.GATT_SUCCESS) {
+                _rssi.value = rssi
+            }
         }
     }
 }

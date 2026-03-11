@@ -16,15 +16,25 @@ import com.cubeos.meshsat.ui.theme.MeshSatTheme
 
 class MainActivity : ComponentActivity() {
 
-    private val requiredPermissions = arrayOf(
-        Manifest.permission.RECEIVE_SMS,
-        Manifest.permission.SEND_SMS,
-        Manifest.permission.READ_SMS,
-        Manifest.permission.BLUETOOTH_CONNECT,
-        Manifest.permission.BLUETOOTH_SCAN,
-        Manifest.permission.ACCESS_FINE_LOCATION,
-        Manifest.permission.POST_NOTIFICATIONS,
-    )
+    private val requiredPermissions: Array<String>
+        get() {
+            val perms = mutableListOf(
+                Manifest.permission.RECEIVE_SMS,
+                Manifest.permission.SEND_SMS,
+                Manifest.permission.READ_SMS,
+                Manifest.permission.ACCESS_FINE_LOCATION,
+            )
+            // BLE scan/connect permissions only exist on Android 12+ (API 31)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                perms.add(Manifest.permission.BLUETOOTH_SCAN)
+                perms.add(Manifest.permission.BLUETOOTH_CONNECT)
+            }
+            // POST_NOTIFICATIONS only exists on Android 13+ (API 33)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                perms.add(Manifest.permission.POST_NOTIFICATIONS)
+            }
+            return perms.toTypedArray()
+        }
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
