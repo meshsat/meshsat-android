@@ -12,6 +12,7 @@ import com.cubeos.meshsat.ble.MeshtasticProtocol
 import com.cubeos.meshsat.bt.IridiumSpp
 import com.cubeos.meshsat.crypto.AesGcmCrypto
 import com.cubeos.meshsat.data.AppDatabase
+import com.cubeos.meshsat.data.ForwardingRuleEntity
 import com.cubeos.meshsat.data.Message
 import com.cubeos.meshsat.data.SettingsRepository
 import com.cubeos.meshsat.rules.ForwardingRule
@@ -21,6 +22,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
@@ -61,7 +63,9 @@ class GatewayService : Service() {
         iridiumSpp = IridiumSpp(this)
 
         startForegroundNotification()
+        loadRulesFromDb()
         observeTransports()
+        startSignalPolling()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -91,6 +95,26 @@ class GatewayService : Service() {
         iridiumSpp = null
         scope.cancel()
         super.onDestroy()
+    }
+
+    private fun loadRulesFromDb() {
+        scope.launch {
+            val entities = db.forwardingRuleDao().getAllSync()
+            rulesEngine.setRules(entities.map { it.toRule() })
+        }
+    }
+
+    /** Poll Iridium signal every 60s when connected. */
+    private fun startSignalPolling() {
+        scope.launch {
+            while (true) {
+                delay(60_000)
+                val spp = iridiumSpp ?: continue
+                if (spp.state.value == IridiumSpp.State.Connected) {
+                    spp.pollSignal()
+                }
+            }
+        }
     }
 
     private fun observeTransports() {

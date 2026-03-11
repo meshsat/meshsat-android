@@ -14,6 +14,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -57,7 +59,13 @@ import java.util.Locale
 fun MessagesScreen() {
     val context = LocalContext.current
     val db = AppDatabase.getInstance(context)
-    val messages by db.messageDao().getRecent(100).collectAsState(initial = emptyList())
+
+    var searchQuery by remember { mutableStateOf("") }
+    val messages by (if (searchQuery.isBlank()) {
+        db.messageDao().getRecent(100)
+    } else {
+        db.messageDao().search(searchQuery, 100)
+    }).collectAsState(initial = emptyList())
 
     var composeText by remember { mutableStateOf("") }
     var sendTransport by remember { mutableStateOf("mesh") }
@@ -74,7 +82,31 @@ fun MessagesScreen() {
         Text(
             text = "Messages",
             style = MaterialTheme.typography.headlineMedium,
-            modifier = Modifier.padding(bottom = 12.dp),
+            modifier = Modifier.padding(bottom = 8.dp),
+        )
+
+        // Search bar
+        OutlinedTextField(
+            value = searchQuery,
+            onValueChange = { searchQuery = it },
+            placeholder = { Text("Search messages...", style = MaterialTheme.typography.bodySmall) },
+            singleLine = true,
+            leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search", tint = MeshSatTextMuted) },
+            trailingIcon = {
+                if (searchQuery.isNotBlank()) {
+                    IconButton(onClick = { searchQuery = "" }) {
+                        Icon(Icons.Default.Clear, contentDescription = "Clear", tint = MeshSatTextMuted)
+                    }
+                }
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 8.dp),
+            textStyle = MaterialTheme.typography.bodyMedium,
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = MeshSatTeal,
+                unfocusedBorderColor = MeshSatBorder,
+            ),
         )
 
         // Compose bar

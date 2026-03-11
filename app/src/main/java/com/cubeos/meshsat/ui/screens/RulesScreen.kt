@@ -32,18 +32,21 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableLongStateOf
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import com.cubeos.meshsat.data.AppDatabase
+import com.cubeos.meshsat.data.ForwardingRuleEntity
 import com.cubeos.meshsat.rules.ForwardingRule
 import com.cubeos.meshsat.service.GatewayService
+import kotlinx.coroutines.launch
 import com.cubeos.meshsat.ui.theme.ColorCellular
 import com.cubeos.meshsat.ui.theme.ColorIridium
 import com.cubeos.meshsat.ui.theme.ColorMesh
@@ -59,9 +62,14 @@ import com.cubeos.meshsat.ui.theme.MeshSatTextMuted
 @Composable
 fun RulesScreen() {
     val context = LocalContext.current
-    val rules = remember { mutableStateListOf<ForwardingRule>().apply { addAll(GatewayService.rulesEngine.getRules()) } }
+    val scope = rememberCoroutineScope()
+    val db = AppDatabase.getInstance(context)
+    val ruleEntities by db.forwardingRuleDao().getAll().collectAsState(initial = emptyList())
+    val rules = ruleEntities.map { it.toRule() }
     var showDialog by remember { mutableStateOf(false) }
-    var nextId by remember { mutableLongStateOf((rules.maxOfOrNull { it.id } ?: 0) + 1) }
+
+    // Keep RulesEngine in sync with DB
+    GatewayService.rulesEngine.setRules(rules)
 
     Box(modifier = Modifier.fillMaxSize()) {
         Column(
@@ -100,16 +108,16 @@ fun RulesScreen() {
                         RuleCard(
                             rule = rule,
                             onToggle = { enabled ->
-                                val idx = rules.indexOfFirst { it.id == rule.id }
-                                if (idx >= 0) {
-                                    val updated = rule.copy(enabled = enabled)
-                                    rules[idx] = updated
-                                    syncRules(rules)
+                                scope.launch {
+                                    db.forwardingRuleDao().update(
+                                        ForwardingRuleEntity.fromRule(rule.copy(enabled = enabled))
+                                    )
                                 }
                             },
                             onDelete = {
-                                rules.removeAll { it.id == rule.id }
-                                syncRules(rules)
+                                scope.launch {
+                                    db.forwardingRuleDao().deleteById(rule.id)
+                                }
                                 Toast.makeText(context, "Rule deleted", Toast.LENGTH_SHORT).show()
                             },
                         )
@@ -134,19 +142,14 @@ fun RulesScreen() {
         AddRuleDialog(
             onDismiss = { showDialog = false },
             onAdd = { rule ->
-                val newRule = rule.copy(id = nextId)
-                nextId++
-                rules.add(newRule)
-                syncRules(rules)
+                scope.launch {
+                    db.forwardingRuleDao().insert(ForwardingRuleEntity.fromRule(rule))
+                }
                 showDialog = false
                 Toast.makeText(context, "Rule added", Toast.LENGTH_SHORT).show()
             },
         )
     }
-}
-
-private fun syncRules(rules: List<ForwardingRule>) {
-    GatewayService.rulesEngine.setRules(rules)
 }
 
 @Composable

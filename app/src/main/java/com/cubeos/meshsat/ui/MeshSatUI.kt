@@ -21,6 +21,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.cubeos.meshsat.ui.screens.AboutScreen
 import com.cubeos.meshsat.ui.screens.DashboardScreen
 import com.cubeos.meshsat.ui.screens.DecryptScreen
 import com.cubeos.meshsat.ui.screens.MessagesScreen
@@ -83,7 +84,8 @@ fun MeshSatUI() {
             composable("messages") { MessagesScreen() }
             composable("rules") { RulesScreen() }
             composable("decrypt") { DecryptScreen() }
-            composable("settings") { SettingsScreen() }
+            composable("settings") { SettingsScreen(navController) }
+            composable("about") { AboutScreen() }
         }
     }
 }

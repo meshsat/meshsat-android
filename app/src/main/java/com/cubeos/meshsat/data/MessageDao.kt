@@ -31,4 +31,7 @@ interface MessageDao {
 
     @Query("DELETE FROM messages WHERE timestamp < :before")
     suspend fun deleteBefore(before: Long)
+
+    @Query("SELECT * FROM messages WHERE text LIKE '%' || :query || '%' OR sender LIKE '%' || :query || '%' ORDER BY timestamp DESC LIMIT :limit")
+    fun search(query: String, limit: Int = 100): Flow<List<Message>>
 }

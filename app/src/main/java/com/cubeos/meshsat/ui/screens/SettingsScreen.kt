@@ -1,6 +1,9 @@
 package com.cubeos.meshsat.ui.screens
 
 import android.bluetooth.BluetoothDevice
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.widget.Toast
 import androidx.compose.foundation.background
@@ -54,10 +57,11 @@ import com.cubeos.meshsat.ui.theme.MeshSatRed
 import com.cubeos.meshsat.ui.theme.MeshSatSurface
 import com.cubeos.meshsat.ui.theme.MeshSatTeal
 import com.cubeos.meshsat.ui.theme.MeshSatTextMuted
+import androidx.navigation.NavController
 import kotlinx.coroutines.launch
 
 @Composable
-fun SettingsScreen() {
+fun SettingsScreen(navController: NavController? = null) {
     val context = LocalContext.current
     val settings = remember { SettingsRepository(context) }
     val scope = rememberCoroutineScope()
@@ -337,6 +341,61 @@ fun SettingsScreen() {
                 }
             }
 
+            // Share / Import from clipboard
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Button(
+                    onClick = {
+                        if (keyInput.isNotBlank()) {
+                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                            clipboard.setPrimaryClip(ClipData.newPlainText("MeshSat Key", keyInput))
+                            Toast.makeText(context, "Key copied to clipboard", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MeshSatSurface),
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text("Copy", style = MaterialTheme.typography.bodySmall)
+                }
+
+                Button(
+                    onClick = {
+                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                        val clip = clipboard.primaryClip?.getItemAt(0)?.text?.toString() ?: ""
+                        if (clip.length == 64 && clip.all { it in "0123456789abcdefABCDEF" }) {
+                            keyInput = clip
+                            scope.launch { settings.setEncryptionKey(clip) }
+                            Toast.makeText(context, "Key imported from clipboard", Toast.LENGTH_SHORT).show()
+                        } else {
+                            Toast.makeText(context, "Clipboard doesn't contain a valid 64-char hex key", Toast.LENGTH_LONG).show()
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MeshSatSurface),
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text("Paste", style = MaterialTheme.typography.bodySmall)
+                }
+
+                Button(
+                    onClick = {
+                        if (keyInput.isNotBlank()) {
+                            val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                type = "text/plain"
+                                putExtra(Intent.EXTRA_TEXT, keyInput)
+                                putExtra(Intent.EXTRA_SUBJECT, "MeshSat Encryption Key")
+                            }
+                            context.startActivity(Intent.createChooser(shareIntent, "Share encryption key"))
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MeshSatSurface),
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text("Share", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+
             Text(
                 text = "Paste the key from MeshSat Pi (Interfaces > cellular_0 > Show encryption key) or generate a new one and enter it on the Pi.",
                 style = MaterialTheme.typography.bodySmall,
@@ -374,6 +433,15 @@ fun SettingsScreen() {
                 style = MaterialTheme.typography.bodySmall,
                 color = MeshSatTextMuted,
             )
+        }
+
+        // --- About ---
+        Button(
+            onClick = { navController?.navigate("about") },
+            colors = ButtonDefaults.buttonColors(containerColor = MeshSatSurface),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text("About MeshSat Android", style = MaterialTheme.typography.bodyMedium)
         }
     }
 }
