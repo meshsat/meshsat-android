@@ -59,6 +59,16 @@ Set HC-05 baud rate before use: `AT+UART=19200,0,0`
 - **Crypto:** javax.crypto (AES-256-GCM)
 - **Satellite prediction:** SGP4/TLE
 
+## MeshSat-to-MeshSat Encrypted SMS
+
+MeshSat-Android and [MeshSat](https://github.com/cubeos-app/meshsat) (Pi/Linux) share the same AES-256-GCM + base64 codec, enabling encrypted peer-to-peer communication over SMS. Two mesh networks can be bridged over cellular:
+
+```
+[Mesh A] --LoRa--> [MeshSat Pi] --encrypted SMS--> [MeshSat-Android] --BLE--> [Mesh B]
+```
+
+Both nodes are peers — configure the same encryption key on both sides and set up access rules to forward between mesh and SMS. The cellular link becomes a transparent, encrypted bridge between two otherwise isolated LoRa mesh networks.
+
 ## Related Projects
 
 - [MeshSat](https://github.com/cubeos-app/meshsat) -- Pi/Linux gateway (same concept, USB devices instead of Bluetooth)
