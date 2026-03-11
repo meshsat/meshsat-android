@@ -21,7 +21,11 @@ import kotlinx.coroutines.launch
 class SmsReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action != Telephony.Sms.Intents.SMS_RECEIVED_ACTION) return
+        val validActions = setOf(
+            Telephony.Sms.Intents.SMS_RECEIVED_ACTION,
+            Telephony.Sms.Intents.SMS_DELIVER_ACTION,
+        )
+        if (intent.action !in validActions) return
 
         val messages = Telephony.Sms.Intents.getMessagesFromIntent(intent)
         if (messages.isNullOrEmpty()) return

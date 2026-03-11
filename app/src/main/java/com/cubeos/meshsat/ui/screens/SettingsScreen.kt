@@ -1,12 +1,18 @@
 package com.cubeos.meshsat.ui.screens
 
+import android.Manifest
 import android.bluetooth.BluetoothDevice
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -85,6 +91,30 @@ fun SettingsScreen(navController: NavController? = null) {
     val scanResults = remember { mutableStateListOf<BluetoothDevice>() }
     var scanning by remember { mutableStateOf(false) }
 
+    // BLE permission launcher for Android 12+
+    val blePermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { results ->
+        val allGranted = results.values.all { it }
+        if (allGranted) {
+            // Permissions granted — start scan
+            scanning = true
+            scanResults.clear()
+            GatewayService.meshtasticBle?.let { ble ->
+                scope.launch {
+                    ble.scanResults.collect { device ->
+                        if (scanResults.none { it.address == device.address }) {
+                            scanResults.add(device)
+                        }
+                    }
+                }
+                ble.startScan()
+            }
+        } else {
+            Toast.makeText(context, "Bluetooth permissions required for BLE scan", Toast.LENGTH_LONG).show()
+        }
+    }
+
     // HC-05 paired devices
     val pairedHc05 = remember {
         GatewayService.iridiumSpp?.getPairedDevices() ?: emptyList()
@@ -133,17 +163,34 @@ fun SettingsScreen(navController: NavController? = null) {
             } else if (state == MeshtasticBle.State.Disconnected) {
                 Button(
                     onClick = {
-                        scanning = true
-                        scanResults.clear()
-                        GatewayService.meshtasticBle?.let { ble ->
-                            scope.launch {
-                                ble.scanResults.collect { device ->
-                                    if (scanResults.none { it.address == device.address }) {
-                                        scanResults.add(device)
+                        // Check BLE permissions before scanning (required on Android 12+)
+                        val blePerms = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                            arrayOf(
+                                Manifest.permission.BLUETOOTH_SCAN,
+                                Manifest.permission.BLUETOOTH_CONNECT,
+                                Manifest.permission.ACCESS_FINE_LOCATION,
+                            )
+                        } else {
+                            arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
+                        }
+                        val missing = blePerms.filter {
+                            ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED
+                        }
+                        if (missing.isNotEmpty()) {
+                            blePermissionLauncher.launch(missing.toTypedArray())
+                        } else {
+                            scanning = true
+                            scanResults.clear()
+                            GatewayService.meshtasticBle?.let { ble ->
+                                scope.launch {
+                                    ble.scanResults.collect { device ->
+                                        if (scanResults.none { it.address == device.address }) {
+                                            scanResults.add(device)
+                                        }
                                     }
                                 }
+                                ble.startScan()
                             }
-                            ble.startScan()
                         }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = MeshSatTeal),
@@ -433,6 +480,36 @@ fun SettingsScreen(navController: NavController? = null) {
                 style = MaterialTheme.typography.bodySmall,
                 color = MeshSatTextMuted,
             )
+        }
+
+        // --- Quick Navigation ---
+        SectionCard("Tools") {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Button(
+                    onClick = { navController?.navigate("messages") },
+                    colors = ButtonDefaults.buttonColors(containerColor = MeshSatSurface),
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text("Messages", style = MaterialTheme.typography.bodySmall)
+                }
+                Button(
+                    onClick = { navController?.navigate("rules") },
+                    colors = ButtonDefaults.buttonColors(containerColor = MeshSatSurface),
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text("Rules", style = MaterialTheme.typography.bodySmall)
+                }
+                Button(
+                    onClick = { navController?.navigate("decrypt") },
+                    colors = ButtonDefaults.buttonColors(containerColor = MeshSatSurface),
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text("Crypto", style = MaterialTheme.typography.bodySmall)
+                }
+            }
         }
 
         // --- About ---

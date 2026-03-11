@@ -6,7 +6,8 @@ import java.nio.ByteOrder
 /**
  * Lightweight Meshtastic protobuf decoder/encoder.
  *
- * Handles the subset of Meshtastic protobufs needed for text messaging:
+ * Handles the subset of Meshtastic protobufs needed for text messaging
+ * and position tracking:
  * - FromRadio (field 2 = MeshPacket)
  * - MeshPacket (from, to, channel, decoded.portnum, decoded.payload)
  * - ToRadio (field 1 = MeshPacket for sending)
@@ -31,6 +32,15 @@ object MeshtasticProtocol {
         val id: Long = 0,
     )
 
+    /** A decoded mesh position update. */
+    data class MeshPosition(
+        val from: Long,
+        val latitude: Double,   // degrees
+        val longitude: Double,  // degrees
+        val altitude: Int,      // meters
+        val time: Long,         // epoch ms
+    )
+
     /** Parse a fromRadio protobuf response, extracting text messages. Returns null if not a text message. */
     fun parseFromRadio(data: ByteArray): MeshTextMessage? {
         // FromRadio: field 2 (LEN) = MeshPacket
@@ -38,7 +48,13 @@ object MeshtasticProtocol {
         return parseMeshPacket(meshPacketBytes)
     }
 
-    /** Parse a MeshPacket protobuf. */
+    /** Parse a fromRadio protobuf response, extracting position. Returns null if not a position packet. */
+    fun parsePositionFromRadio(data: ByteArray): MeshPosition? {
+        val meshPacketBytes = extractField(data, fieldNumber = 2, wireType = 2) ?: return null
+        return parsePositionPacket(meshPacketBytes)
+    }
+
+    /** Parse a MeshPacket protobuf for text messages. */
     private fun parseMeshPacket(data: ByteArray): MeshTextMessage? {
         val from = extractVarint(data, fieldNumber = 1) ?: 0L
         val to = extractVarint(data, fieldNumber = 2) ?: 0L
@@ -64,6 +80,36 @@ object MeshtasticProtocol {
         )
     }
 
+    /** Parse a MeshPacket protobuf for position data. */
+    private fun parsePositionPacket(data: ByteArray): MeshPosition? {
+        val from = extractVarint(data, fieldNumber = 1) ?: 0L
+
+        val decodedBytes = extractField(data, fieldNumber = 4, wireType = 2) ?: return null
+        val portnum = extractVarint(decodedBytes, fieldNumber = 1)?.toInt() ?: return null
+        val payload = extractField(decodedBytes, fieldNumber = 2, wireType = 2) ?: return null
+
+        if (portnum != PORTNUM_POSITION) return null
+
+        // Position protobuf:
+        // field 1: sfixed32 latitude_i (wire type 5 = 32-bit, ×1e-7 degrees)
+        // field 2: sfixed32 longitude_i (wire type 5 = 32-bit, ×1e-7 degrees)
+        // field 3: int32 altitude (wire type 0 = varint)
+        val latI = extractFixed32(payload, fieldNumber = 1) ?: return null
+        val lonI = extractFixed32(payload, fieldNumber = 2) ?: return null
+        val alt = extractVarint(payload, fieldNumber = 3)?.toInt() ?: 0
+
+        // Skip zero positions (node has no GPS fix)
+        if (latI == 0 && lonI == 0) return null
+
+        return MeshPosition(
+            from = from,
+            latitude = latI.toDouble() / 1e7,
+            longitude = lonI.toDouble() / 1e7,
+            altitude = alt,
+            time = System.currentTimeMillis(),
+        )
+    }
+
     /** Encode a text message as a ToRadio protobuf. */
     fun encodeTextMessage(text: String, to: Long = 0xFFFFFFFFL, channel: Int = 0): ByteArray {
         // Data: portnum=1, payload=text
@@ -86,7 +132,6 @@ object MeshtasticProtocol {
     // --- Protobuf primitives ---
 
     private fun extractVarint(data: ByteArray, fieldNumber: Int): Long? {
-        val tag = (fieldNumber shl 3) or 0 // wire type 0 = varint
         var i = 0
         while (i < data.size) {
             val (currentTag, tagLen) = readVarint(data, i)
@@ -124,6 +169,25 @@ object MeshtasticProtocol {
             }
 
             i = skipField(data, i, wt) ?: return null
+        }
+        return null
+    }
+
+    /** Extract a fixed32/sfixed32 field (wire type 5). Returns signed int. */
+    private fun extractFixed32(data: ByteArray, fieldNumber: Int): Int? {
+        var i = 0
+        while (i < data.size) {
+            val (currentTag, tagLen) = readVarint(data, i)
+            i += tagLen
+            val wireType = (currentTag and 0x07).toInt()
+            val field = (currentTag shr 3).toInt()
+
+            if (field == fieldNumber && wireType == 5) {
+                if (i + 4 > data.size) return null
+                return ByteBuffer.wrap(data, i, 4).order(ByteOrder.LITTLE_ENDIAN).int
+            }
+
+            i = skipField(data, i, wireType) ?: return null
         }
         return null
     }

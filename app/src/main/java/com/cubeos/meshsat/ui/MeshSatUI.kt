@@ -2,11 +2,11 @@ package com.cubeos.meshsat.ui
 
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ChatBubble
 import androidx.compose.material.icons.filled.Dashboard
-import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.Message
+import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -22,22 +22,26 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.cubeos.meshsat.ui.screens.AboutScreen
+import com.cubeos.meshsat.ui.screens.ConversationsScreen
 import com.cubeos.meshsat.ui.screens.DashboardScreen
 import com.cubeos.meshsat.ui.screens.DecryptScreen
+import com.cubeos.meshsat.ui.screens.MapScreen
 import com.cubeos.meshsat.ui.screens.MessagesScreen
 import com.cubeos.meshsat.ui.screens.RulesScreen
+import com.cubeos.meshsat.ui.screens.SOSScreen
 import com.cubeos.meshsat.ui.screens.SettingsScreen
 import com.cubeos.meshsat.ui.theme.MeshSatBg
+import com.cubeos.meshsat.ui.theme.MeshSatRed
 import com.cubeos.meshsat.ui.theme.MeshSatSurface
 import com.cubeos.meshsat.ui.theme.MeshSatTeal
 import com.cubeos.meshsat.ui.theme.MeshSatTextMuted
 import com.cubeos.meshsat.ui.theme.MeshSatTextPrimary
 
 private enum class Tab(val route: String, val label: String, val icon: ImageVector) {
-    Dashboard("dashboard", "Dashboard", Icons.Default.Dashboard),
-    Messages("messages", "Messages", Icons.Default.Message),
-    Rules("rules", "Rules", Icons.Default.SwapHoriz),
-    Decrypt("decrypt", "Crypto", Icons.Default.Lock),
+    Dashboard("dashboard", "Home", Icons.Default.Dashboard),
+    Conversations("conversations", "Chat", Icons.Default.ChatBubble),
+    Map("map", "Map", Icons.Default.Map),
+    SOS("sos", "SOS", Icons.Default.Warning),
     Settings("settings", "Settings", Icons.Default.Settings),
 }
 
@@ -61,14 +65,29 @@ fun MeshSatUI() {
                                 restoreState = true
                             }
                         },
-                        icon = { Icon(tab.icon, contentDescription = tab.label) },
-                        label = { Text(tab.label) },
+                        icon = {
+                            Icon(
+                                tab.icon,
+                                contentDescription = tab.label,
+                                tint = if (tab == Tab.SOS) MeshSatRed.copy(
+                                    alpha = if (currentRoute == tab.route) 1f else 0.6f
+                                ) else androidx.compose.ui.graphics.Color.Unspecified,
+                            )
+                        },
+                        label = {
+                            Text(
+                                tab.label,
+                                color = if (tab == Tab.SOS) MeshSatRed
+                                        else androidx.compose.ui.graphics.Color.Unspecified,
+                            )
+                        },
                         colors = NavigationBarItemDefaults.colors(
                             selectedIconColor = MeshSatTeal,
                             selectedTextColor = MeshSatTeal,
                             unselectedIconColor = MeshSatTextMuted,
                             unselectedTextColor = MeshSatTextMuted,
-                            indicatorColor = MeshSatTeal.copy(alpha = 0.15f),
+                            indicatorColor = if (tab == Tab.SOS) MeshSatRed.copy(alpha = 0.15f)
+                                             else MeshSatTeal.copy(alpha = 0.15f),
                         ),
                     )
                 }
@@ -81,10 +100,14 @@ fun MeshSatUI() {
             modifier = Modifier.padding(padding),
         ) {
             composable("dashboard") { DashboardScreen() }
+            composable("conversations") { ConversationsScreen() }
+            composable("map") { MapScreen() }
+            composable("sos") { SOSScreen() }
+            composable("settings") { SettingsScreen(navController) }
+            // Sub-routes accessible from settings/dashboard
             composable("messages") { MessagesScreen() }
             composable("rules") { RulesScreen() }
             composable("decrypt") { DecryptScreen() }
-            composable("settings") { SettingsScreen(navController) }
             composable("about") { AboutScreen() }
         }
     }

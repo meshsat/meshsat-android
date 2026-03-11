@@ -6,6 +6,7 @@ import android.content.Context
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,6 +20,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Search
@@ -27,6 +29,8 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -46,6 +50,7 @@ import androidx.compose.ui.unit.dp
 import com.cubeos.meshsat.ble.MeshtasticBle
 import com.cubeos.meshsat.bt.IridiumSpp
 import com.cubeos.meshsat.data.AppDatabase
+import com.cubeos.meshsat.data.ConversationSummary
 import com.cubeos.meshsat.data.Message
 import com.cubeos.meshsat.service.GatewayService
 import com.cubeos.meshsat.ui.theme.ColorCellular
@@ -66,12 +71,27 @@ fun MessagesScreen() {
     val context = LocalContext.current
     val db = AppDatabase.getInstance(context)
 
+    var viewMode by remember { mutableStateOf("all") } // "all" or "conversations"
+    var selectedSender by remember { mutableStateOf<String?>(null) }
     var searchQuery by remember { mutableStateOf("") }
+
+    // When a conversation is selected, show filtered messages
+    if (selectedSender != null) {
+        ConversationDetailView(
+            sender = selectedSender!!,
+            db = db,
+            onBack = { selectedSender = null },
+        )
+        return
+    }
+
     val messages by (if (searchQuery.isBlank()) {
         db.messageDao().getRecent(100)
     } else {
         db.messageDao().search(searchQuery, 100)
     }).collectAsState(initial = emptyList())
+
+    val conversations by db.messageDao().getConversations().collectAsState(initial = emptyList())
 
     var composeText by remember { mutableStateOf("") }
     var sendTransport by remember { mutableStateOf("mesh") }
@@ -88,86 +108,52 @@ fun MessagesScreen() {
         Text(
             text = "Messages",
             style = MaterialTheme.typography.headlineMedium,
-            modifier = Modifier.padding(bottom = 8.dp),
+            modifier = Modifier.padding(bottom = 4.dp),
         )
 
-        // Search bar
-        OutlinedTextField(
-            value = searchQuery,
-            onValueChange = { searchQuery = it },
-            placeholder = { Text("Search messages...", style = MaterialTheme.typography.bodySmall) },
-            singleLine = true,
-            leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search", tint = MeshSatTextMuted) },
-            trailingIcon = {
-                if (searchQuery.isNotBlank()) {
-                    IconButton(onClick = { searchQuery = "" }) {
-                        Icon(Icons.Default.Clear, contentDescription = "Clear", tint = MeshSatTextMuted)
-                    }
-                }
-            },
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 8.dp),
-            textStyle = MaterialTheme.typography.bodyMedium,
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = MeshSatTeal,
-                unfocusedBorderColor = MeshSatBorder,
-            ),
-        )
-
-        // Compose bar
+        // View mode toggle
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(MeshSatSurface, RoundedCornerShape(8.dp))
-                .border(1.dp, MeshSatBorder, RoundedCornerShape(8.dp))
-                .padding(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(bottom = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            // Transport selector
-            ExposedDropdownMenuBox(
-                expanded = transportExpanded,
-                onExpandedChange = { transportExpanded = !transportExpanded },
-                modifier = Modifier.weight(0.35f),
-            ) {
-                OutlinedTextField(
-                    value = sendTransport.uppercase(),
-                    onValueChange = {},
-                    readOnly = true,
-                    singleLine = true,
-                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(transportExpanded) },
-                    modifier = Modifier.menuAnchor(),
-                    textStyle = MaterialTheme.typography.bodySmall,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = MeshSatTeal,
-                        unfocusedBorderColor = MeshSatBorder,
-                    ),
-                )
-                ExposedDropdownMenu(
-                    expanded = transportExpanded,
-                    onDismissRequest = { transportExpanded = false },
-                ) {
-                    DropdownMenuItem(
-                        text = { Text("MESH") },
-                        onClick = { sendTransport = "mesh"; transportExpanded = false },
-                        enabled = meshConnected,
-                    )
-                    DropdownMenuItem(
-                        text = { Text("IRIDIUM") },
-                        onClick = { sendTransport = "iridium"; transportExpanded = false },
-                        enabled = iridiumConnected,
-                    )
-                }
-            }
+            FilterChip(
+                selected = viewMode == "all",
+                onClick = { viewMode = "all" },
+                label = { Text("All", style = MaterialTheme.typography.bodySmall) },
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = MeshSatTeal.copy(alpha = 0.2f),
+                    selectedLabelColor = MeshSatTeal,
+                ),
+            )
+            FilterChip(
+                selected = viewMode == "conversations",
+                onClick = { viewMode = "conversations" },
+                label = { Text("Conversations", style = MaterialTheme.typography.bodySmall) },
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = MeshSatTeal.copy(alpha = 0.2f),
+                    selectedLabelColor = MeshSatTeal,
+                ),
+            )
+        }
 
-            // Message input
+        if (viewMode == "all") {
+            // Search bar
             OutlinedTextField(
-                value = composeText,
-                onValueChange = { composeText = it },
-                placeholder = { Text("Message...", style = MaterialTheme.typography.bodySmall) },
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                placeholder = { Text("Search messages...", style = MaterialTheme.typography.bodySmall) },
                 singleLine = true,
-                modifier = Modifier.weight(0.55f),
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search", tint = MeshSatTextMuted) },
+                trailingIcon = {
+                    if (searchQuery.isNotBlank()) {
+                        IconButton(onClick = { searchQuery = "" }) {
+                            Icon(Icons.Default.Clear, contentDescription = "Clear", tint = MeshSatTextMuted)
+                        }
+                    }
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 8.dp),
                 textStyle = MaterialTheme.typography.bodyMedium,
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = MeshSatTeal,
@@ -175,65 +161,284 @@ fun MessagesScreen() {
                 ),
             )
 
-            // Send button
-            IconButton(
-                onClick = {
-                    if (composeText.isBlank()) return@IconButton
-                    when (sendTransport) {
-                        "mesh" -> {
-                            if (!meshConnected) {
-                                Toast.makeText(context, "Mesh not connected", Toast.LENGTH_SHORT).show()
-                                return@IconButton
-                            }
-                            GatewayService.meshtasticBle?.let { ble ->
-                                val proto = com.cubeos.meshsat.ble.MeshtasticProtocol.encodeTextMessage(composeText)
-                                ble.sendToRadio(proto)
-                            }
-                        }
-                        "iridium" -> {
-                            if (!iridiumConnected) {
-                                Toast.makeText(context, "Iridium not connected", Toast.LENGTH_SHORT).show()
-                                return@IconButton
-                            }
-                            // Use service to send (handles SBDWB + SBDIX)
-                            // Note: this is a stub — full implementation would use the service
-                        }
-                    }
-                    Toast.makeText(context, "Sent via ${sendTransport.uppercase()}", Toast.LENGTH_SHORT).show()
+            // Compose bar
+            ComposeBar(
+                composeText = composeText,
+                onComposeTextChange = { composeText = it },
+                sendTransport = sendTransport,
+                onSendTransportChange = { sendTransport = it },
+                transportExpanded = transportExpanded,
+                onTransportExpandedChange = { transportExpanded = it },
+                meshConnected = meshConnected,
+                iridiumConnected = iridiumConnected,
+                onSend = {
                     composeText = ""
                 },
-                modifier = Modifier.weight(0.1f),
+            )
+
+            // Message list
+            if (messages.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(top = 16.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = "No messages yet",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MeshSatTextMuted,
+                    )
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.padding(top = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    items(messages, key = { it.id }) { msg ->
+                        MessageCard(msg)
+                    }
+                }
+            }
+        } else {
+            // Conversations view
+            if (conversations.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(top = 16.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = "No conversations yet",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MeshSatTextMuted,
+                    )
+                }
+            } else {
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    items(conversations, key = { it.sender }) { conv ->
+                        ConversationCard(
+                            conv = conv,
+                            onClick = { selectedSender = conv.sender },
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ComposeBar(
+    composeText: String,
+    onComposeTextChange: (String) -> Unit,
+    sendTransport: String,
+    onSendTransportChange: (String) -> Unit,
+    transportExpanded: Boolean,
+    onTransportExpandedChange: (Boolean) -> Unit,
+    meshConnected: Boolean,
+    iridiumConnected: Boolean,
+    onSend: () -> Unit,
+) {
+    val context = LocalContext.current
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MeshSatSurface, RoundedCornerShape(8.dp))
+            .border(1.dp, MeshSatBorder, RoundedCornerShape(8.dp))
+            .padding(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        ExposedDropdownMenuBox(
+            expanded = transportExpanded,
+            onExpandedChange = { onTransportExpandedChange(!transportExpanded) },
+            modifier = Modifier.weight(0.35f),
+        ) {
+            OutlinedTextField(
+                value = sendTransport.uppercase(),
+                onValueChange = {},
+                readOnly = true,
+                singleLine = true,
+                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(transportExpanded) },
+                modifier = Modifier.menuAnchor(),
+                textStyle = MaterialTheme.typography.bodySmall,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = MeshSatTeal,
+                    unfocusedBorderColor = MeshSatBorder,
+                ),
+            )
+            ExposedDropdownMenu(
+                expanded = transportExpanded,
+                onDismissRequest = { onTransportExpandedChange(false) },
             ) {
-                Icon(
-                    Icons.Default.Send,
-                    contentDescription = "Send",
-                    tint = MeshSatTeal,
+                DropdownMenuItem(
+                    text = { Text("MESH") },
+                    onClick = { onSendTransportChange("mesh"); onTransportExpandedChange(false) },
+                    enabled = meshConnected,
+                )
+                DropdownMenuItem(
+                    text = { Text("IRIDIUM") },
+                    onClick = { onSendTransportChange("iridium"); onTransportExpandedChange(false) },
+                    enabled = iridiumConnected,
                 )
             }
         }
 
-        // Message list
-        if (messages.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(top = 16.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = "No messages yet",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MeshSatTextMuted,
-                )
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier.padding(top = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                items(messages, key = { it.id }) { msg ->
-                    MessageCard(msg)
+        OutlinedTextField(
+            value = composeText,
+            onValueChange = onComposeTextChange,
+            placeholder = { Text("Message...", style = MaterialTheme.typography.bodySmall) },
+            singleLine = true,
+            modifier = Modifier.weight(0.55f),
+            textStyle = MaterialTheme.typography.bodyMedium,
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = MeshSatTeal,
+                unfocusedBorderColor = MeshSatBorder,
+            ),
+        )
+
+        IconButton(
+            onClick = {
+                if (composeText.isBlank()) return@IconButton
+                when (sendTransport) {
+                    "mesh" -> {
+                        if (!meshConnected) {
+                            Toast.makeText(context, "Mesh not connected", Toast.LENGTH_SHORT).show()
+                            return@IconButton
+                        }
+                        GatewayService.meshtasticBle?.let { ble ->
+                            val proto = com.cubeos.meshsat.ble.MeshtasticProtocol.encodeTextMessage(composeText)
+                            ble.sendToRadio(proto)
+                        }
+                    }
+                    "iridium" -> {
+                        if (!iridiumConnected) {
+                            Toast.makeText(context, "Iridium not connected", Toast.LENGTH_SHORT).show()
+                            return@IconButton
+                        }
+                    }
                 }
+                Toast.makeText(context, "Sent via ${sendTransport.uppercase()}", Toast.LENGTH_SHORT).show()
+                onSend()
+            },
+            modifier = Modifier.weight(0.1f),
+        ) {
+            Icon(Icons.Default.Send, contentDescription = "Send", tint = MeshSatTeal)
+        }
+    }
+}
+
+@Composable
+private fun ConversationCard(conv: ConversationSummary, onClick: () -> Unit) {
+    val transportColor = when (conv.transport) {
+        "mesh" -> ColorMesh
+        "iridium" -> ColorIridium
+        "sms" -> ColorCellular
+        else -> MeshSatTextMuted
+    }
+    val timeStr = SimpleDateFormat("MM/dd HH:mm", Locale.getDefault()).format(Date(conv.lastTimestamp))
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MeshSatSurface, RoundedCornerShape(8.dp))
+            .border(1.dp, MeshSatBorder, RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick)
+            .padding(12.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = conv.sender,
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                Text(
+                    text = conv.transport.uppercase(),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = transportColor,
+                    modifier = Modifier
+                        .background(transportColor.copy(alpha = 0.15f), RoundedCornerShape(4.dp))
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                )
+                if (conv.hasEncrypted) {
+                    Text(
+                        text = "ENC",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MeshSatAmber,
+                        modifier = Modifier
+                            .background(MeshSatAmber.copy(alpha = 0.15f), RoundedCornerShape(4.dp))
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                    )
+                }
+            }
+            Text(
+                text = "${conv.messageCount}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MeshSatTeal,
+                modifier = Modifier
+                    .background(MeshSatTeal.copy(alpha = 0.15f), RoundedCornerShape(4.dp))
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+            )
+        }
+
+        Text(
+            text = conv.lastMessage,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MeshSatTextMuted,
+            maxLines = 1,
+            modifier = Modifier.padding(top = 4.dp),
+        )
+
+        Text(
+            text = timeStr,
+            style = MaterialTheme.typography.bodySmall,
+            color = MeshSatTextMuted,
+            modifier = Modifier.padding(top = 2.dp),
+        )
+    }
+}
+
+@Composable
+private fun ConversationDetailView(
+    sender: String,
+    db: AppDatabase,
+    onBack: () -> Unit,
+) {
+    val messages by db.messageDao().getBySender(sender).collectAsState(initial = emptyList())
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(bottom = 8.dp),
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = MeshSatTeal)
+            }
+            Text(
+                text = sender,
+                style = MaterialTheme.typography.headlineMedium,
+            )
+        }
+
+        LazyColumn(
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            items(messages, key = { it.id }) { msg ->
+                MessageCard(msg)
             }
         }
     }

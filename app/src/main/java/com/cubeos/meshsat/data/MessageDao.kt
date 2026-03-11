@@ -17,6 +17,17 @@ interface MessageDao {
     @Query("SELECT * FROM messages WHERE transport = :transport ORDER BY timestamp DESC LIMIT :limit")
     fun getByTransport(transport: String, limit: Int = 100): Flow<List<Message>>
 
+    @Query("SELECT * FROM messages WHERE sender = :sender ORDER BY timestamp DESC LIMIT :limit")
+    fun getBySender(sender: String, limit: Int = 500): Flow<List<Message>>
+
+    @Query("""
+        SELECT sender, text AS lastMessage, MAX(timestamp) AS lastTimestamp,
+               COUNT(*) AS messageCount, transport,
+               MAX(CASE WHEN encrypted = 1 THEN 1 ELSE 0 END) AS hasEncrypted
+        FROM messages GROUP BY sender ORDER BY lastTimestamp DESC
+    """)
+    fun getConversations(): Flow<List<ConversationSummary>>
+
     @Query("SELECT COUNT(*) FROM messages")
     suspend fun count(): Int
 
