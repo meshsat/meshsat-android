@@ -6,6 +6,7 @@ import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Message
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -23,6 +24,7 @@ import androidx.navigation.compose.rememberNavController
 import com.cubeos.meshsat.ui.screens.DashboardScreen
 import com.cubeos.meshsat.ui.screens.DecryptScreen
 import com.cubeos.meshsat.ui.screens.MessagesScreen
+import com.cubeos.meshsat.ui.screens.RulesScreen
 import com.cubeos.meshsat.ui.screens.SettingsScreen
 import com.cubeos.meshsat.ui.theme.MeshSatBg
 import com.cubeos.meshsat.ui.theme.MeshSatSurface
@@ -33,6 +35,7 @@ import com.cubeos.meshsat.ui.theme.MeshSatTextPrimary
 private enum class Tab(val route: String, val label: String, val icon: ImageVector) {
     Dashboard("dashboard", "Dashboard", Icons.Default.Dashboard),
     Messages("messages", "Messages", Icons.Default.Message),
+    Rules("rules", "Rules", Icons.Default.SwapHoriz),
     Decrypt("decrypt", "Crypto", Icons.Default.Lock),
     Settings("settings", "Settings", Icons.Default.Settings),
 }
@@ -78,6 +81,7 @@ fun MeshSatUI() {
         ) {
             composable("dashboard") { DashboardScreen() }
             composable("messages") { MessagesScreen() }
+            composable("rules") { RulesScreen() }
             composable("decrypt") { DecryptScreen() }
             composable("settings") { SettingsScreen() }
         }

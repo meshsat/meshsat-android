@@ -101,11 +101,10 @@ class GatewayService : Service() {
                     val msg = MeshtasticProtocol.parseFromRadio(data) ?: return@collect
                     val nodeId = MeshtasticProtocol.formatNodeId(msg.from)
 
-                    // Store message
                     db.messageDao().insert(
                         Message(
                             transport = "mesh",
-                            direction = "in",
+                            direction = "rx",
                             sender = nodeId,
                             text = msg.text,
                             encrypted = false,
@@ -113,18 +112,18 @@ class GatewayService : Service() {
                         )
                     )
 
-                    // Evaluate forwarding rules
-                    val decisions = rulesEngine.evaluate(
-                        source = ForwardingRule.Transport.MESH,
-                        text = msg.text,
-                        sender = nodeId,
-                    )
-                    for (decision in decisions) {
-                        if (!decision.shouldForward) continue
-                        when (decision.rule?.destTransport) {
-                            ForwardingRule.Transport.SMS -> forwardToSms(msg.text, decision.encrypt)
-                            else -> {} // other transports not yet wired
-                        }
+                    evaluateAndForward(ForwardingRule.Transport.MESH, msg.text, nodeId)
+                }
+            }
+        }
+
+        // Listen for Iridium MT (mobile-terminated) messages
+        iridiumSpp?.let { spp ->
+            scope.launch {
+                // Poll for MT messages when connected
+                spp.state.collect { state ->
+                    if (state == IridiumSpp.State.Connected) {
+                        pollIridiumMt()
                     }
                 }
             }
@@ -132,13 +131,61 @@ class GatewayService : Service() {
 
         // Update notification on state changes
         meshtasticBle?.let { ble ->
-            scope.launch {
-                ble.state.collect { updateNotification() }
-            }
+            scope.launch { ble.state.collect { updateNotification() } }
         }
         iridiumSpp?.let { spp ->
-            scope.launch {
-                spp.state.collect { updateNotification() }
+            scope.launch { spp.state.collect { updateNotification() } }
+        }
+
+        // Log errors to notification
+        meshtasticBle?.let { ble ->
+            scope.launch { ble.error.collect { err -> android.util.Log.w("MeshSat", "BLE: $err") } }
+        }
+        iridiumSpp?.let { spp ->
+            scope.launch { spp.error.collect { err -> android.util.Log.w("MeshSat", "SPP: $err") } }
+        }
+    }
+
+    /**
+     * Check Iridium mailbox via SBDSX, then SBDIX if messages waiting.
+     * Reads MT buffer and stores/forwards the message.
+     */
+    private suspend fun pollIridiumMt() {
+        val spp = iridiumSpp ?: return
+        val status = spp.sbdStatus() ?: return
+
+        if (status.mtFlag || status.msgWaiting > 0) {
+            // Initiate SBD session to retrieve MT message
+            val result = spp.sbdix() ?: return
+            if (result.mtAvailable) {
+                val mtText = spp.readMtBuffer() ?: return
+                val imei = spp.modemInfo.value.imei.ifBlank { "iridium" }
+
+                db.messageDao().insert(
+                    Message(
+                        transport = "iridium",
+                        direction = "rx",
+                        sender = imei,
+                        text = mtText,
+                        encrypted = false,
+                        timestamp = System.currentTimeMillis(),
+                    )
+                )
+
+                evaluateAndForward(ForwardingRule.Transport.IRIDIUM, mtText, imei)
+            }
+        }
+    }
+
+    private suspend fun evaluateAndForward(source: ForwardingRule.Transport, text: String, sender: String) {
+        val decisions = rulesEngine.evaluate(source = source, text = text, sender = sender)
+        for (decision in decisions) {
+            if (!decision.shouldForward) continue
+            when (decision.rule?.destTransport) {
+                ForwardingRule.Transport.SMS -> forwardToSms(text, decision.encrypt)
+                ForwardingRule.Transport.MESH -> forwardToMesh(text)
+                ForwardingRule.Transport.IRIDIUM -> forwardToIridium(text)
+                null -> {}
             }
         }
     }
@@ -149,12 +196,104 @@ class GatewayService : Service() {
 
         val payload = if (encrypt) {
             val key = settings.encryptionKey.first()
-            if (key.isBlank()) text else AesGcmCrypto.encrypt(text, key) ?: text
+            if (key.isBlank()) text else AesGcmCrypto.encryptToBase64(text, key)
         } else {
             text
         }
 
-        SmsSender.send(this, phone, payload, encrypt)
+        SmsSender.send(this, phone, payload) // already encrypted above if needed
+
+        db.messageDao().insert(
+            Message(
+                transport = "sms",
+                direction = "tx",
+                sender = "self",
+                recipient = phone,
+                text = text,
+                encrypted = encrypt,
+                forwarded = true,
+                forwardedTo = "sms:$phone",
+                timestamp = System.currentTimeMillis(),
+            )
+        )
+    }
+
+    private fun forwardToMesh(text: String) {
+        val ble = meshtasticBle ?: return
+        if (ble.state.value != MeshtasticBle.State.Connected) return
+        val proto = MeshtasticProtocol.encodeTextMessage(text)
+        ble.sendToRadio(proto)
+
+        scope.launch {
+            db.messageDao().insert(
+                Message(
+                    transport = "mesh",
+                    direction = "tx",
+                    sender = "self",
+                    text = text,
+                    forwarded = true,
+                    forwardedTo = "mesh:broadcast",
+                    timestamp = System.currentTimeMillis(),
+                )
+            )
+        }
+    }
+
+    private suspend fun forwardToIridium(text: String) {
+        val spp = iridiumSpp ?: return
+        if (spp.state.value != IridiumSpp.State.Connected) return
+
+        val data = text.toByteArray(Charsets.UTF_8)
+        if (data.size > 340) {
+            android.util.Log.w("MeshSat", "Iridium MO payload too large: ${data.size}")
+            return
+        }
+
+        val written = spp.writeMoBuffer(data)
+        if (written) {
+            val result = spp.sbdix()
+            db.messageDao().insert(
+                Message(
+                    transport = "iridium",
+                    direction = "tx",
+                    sender = "self",
+                    text = text,
+                    forwarded = true,
+                    forwardedTo = "iridium:sbd",
+                    timestamp = System.currentTimeMillis(),
+                )
+            )
+            if (result?.moSuccess != true) {
+                android.util.Log.w("MeshSat", "SBDIX failed: mo_status=${result?.moStatus}")
+            }
+        }
+    }
+
+    /** Send a text message to mesh (called from UI). */
+    fun sendMeshMessage(text: String, to: Long = 0xFFFFFFFFL, channel: Int = 0) {
+        val ble = meshtasticBle ?: return
+        if (ble.state.value != MeshtasticBle.State.Connected) return
+        val proto = MeshtasticProtocol.encodeTextMessage(text, to, channel)
+        ble.sendToRadio(proto)
+
+        scope.launch {
+            db.messageDao().insert(
+                Message(
+                    transport = "mesh",
+                    direction = "tx",
+                    sender = "self",
+                    text = text,
+                    timestamp = System.currentTimeMillis(),
+                )
+            )
+        }
+    }
+
+    /** Send SBD message via Iridium (called from UI). */
+    fun sendIridiumMessage(text: String) {
+        scope.launch {
+            forwardToIridium(text)
+        }
     }
 
     private fun startForegroundNotification() {

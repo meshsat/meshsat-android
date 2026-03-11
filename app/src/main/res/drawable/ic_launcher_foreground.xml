@@ -4,13 +4,42 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
+    <!-- Outer signal ring -->
     <path
         android:fillColor="#0D9488"
         android:pathData="M54,27c-14.91,0 -27,12.09 -27,27s12.09,27 27,27 27,-12.09 27,-27 -12.09,-27 -27,-27zM54,75c-11.6,0 -21,-9.4 -21,-21s9.4,-21 21,-21 21,9.4 21,21 -9.4,21 -21,21z"/>
+    <!-- Inner signal ring -->
     <path
         android:fillColor="#0D9488"
         android:pathData="M54,39c-8.28,0 -15,6.72 -15,15s6.72,15 15,15 15,-6.72 15,-15 -6.72,-15 -15,-15zM54,63c-4.97,0 -9,-4.03 -9,-9s4.03,-9 9,-9 9,4.03 9,9 -4.03,9 -9,9z"/>
+    <!-- Center node -->
     <path
         android:fillColor="#14B8A6"
         android:pathData="M54,48c-3.31,0 -6,2.69 -6,6s2.69,6 6,6 6,-2.69 6,-6 -2.69,-6 -6,-6z"/>
+    <!-- Mesh lines (three spokes from center to ring) -->
+    <path
+        android:strokeColor="#14B8A6"
+        android:strokeWidth="2"
+        android:fillColor="#00000000"
+        android:pathData="M54,42L54,30"/>
+    <path
+        android:strokeColor="#14B8A6"
+        android:strokeWidth="2"
+        android:fillColor="#00000000"
+        android:pathData="M48,57L36,69"/>
+    <path
+        android:strokeColor="#14B8A6"
+        android:strokeWidth="2"
+        android:fillColor="#00000000"
+        android:pathData="M60,57L72,69"/>
+    <!-- Mesh endpoint nodes -->
+    <path
+        android:fillColor="#14B8A6"
+        android:pathData="M54,27c-1.66,0 -3,1.34 -3,3s1.34,3 3,3 3,-1.34 3,-3 -1.34,-3 -3,-3z"/>
+    <path
+        android:fillColor="#14B8A6"
+        android:pathData="M33,66c-1.66,0 -3,1.34 -3,3s1.34,3 3,3 3,-1.34 3,-3 -1.34,-3 -3,-3z"/>
+    <path
+        android:fillColor="#14B8A6"
+        android:pathData="M75,66c-1.66,0 -3,1.34 -3,3s1.34,3 3,3 3,-1.34 3,-3 -1.34,-3 -3,-3z"/>
 </vector>
