@@ -482,34 +482,13 @@ fun SettingsScreen(navController: NavController? = null) {
             )
         }
 
-        // --- Quick Navigation ---
-        SectionCard("Tools") {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Button(
-                    onClick = { navController?.navigate("messages") },
-                    colors = ButtonDefaults.buttonColors(containerColor = MeshSatSurface),
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Text("Messages", style = MaterialTheme.typography.bodySmall)
-                }
-                Button(
-                    onClick = { navController?.navigate("rules") },
-                    colors = ButtonDefaults.buttonColors(containerColor = MeshSatSurface),
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Text("Rules", style = MaterialTheme.typography.bodySmall)
-                }
-                Button(
-                    onClick = { navController?.navigate("decrypt") },
-                    colors = ButtonDefaults.buttonColors(containerColor = MeshSatSurface),
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Text("Crypto", style = MaterialTheme.typography.bodySmall)
-                }
-            }
+        // --- Crypto Tool ---
+        Button(
+            onClick = { navController?.navigate("decrypt") },
+            colors = ButtonDefaults.buttonColors(containerColor = MeshSatSurface),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text("Encrypt / Decrypt Tool", style = MaterialTheme.typography.bodyMedium)
         }
 
         // --- About ---
