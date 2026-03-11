@@ -1,0 +1,216 @@
+# =============================================================================
+# MeshSat Android CI/CD Pipeline
+# =============================================================================
+# - Push to main: build APK (verify)
+# - Tag push (v*): build APK → upload to GitLab Package Registry →
+#                  create GitLab Release → create GitHub Release with APK
+# =============================================================================
+
+stages:
+  - build
+  - release
+
+variables:
+  GITHUB_REPO: "cubeos-app/meshsat-android"
+
+# =============================================================================
+# Build APK (every push to main + every tag)
+# =============================================================================
+build:
+  stage: build
+  image: cimg/android:2024.10.1
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_COMMIT_TAG =~ /^v/'
+  script:
+    - chmod +x ./gradlew
+    - ./gradlew assembleDebug
+    - |
+      APK_PATH=$(find app/build/outputs/apk/debug -name "*.apk" | head -1)
+      VERSION="${CI_COMMIT_TAG:-dev-${CI_COMMIT_SHORT_SHA}}"
+      VERSION="${VERSION#v}"
+      APK_NAME="meshsat-android-${VERSION}-debug.apk"
+      cp "$APK_PATH" "$APK_NAME"
+      echo "APK_NAME=${APK_NAME}" >> build.env
+      echo "VERSION=${VERSION}" >> build.env
+      echo "Built: ${APK_NAME} ($(du -h ${APK_NAME} | cut -f1))"
+  artifacts:
+    paths:
+      - "meshsat-android-*.apk"
+    reports:
+      dotenv: build.env
+    expire_in: 7 days
+
+# =============================================================================
+# Upload APK to GitLab Package Registry (tag push only)
+# =============================================================================
+upload-package:
+  stage: release
+  image: alpine:latest
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v/'
+  needs:
+    - job: build
+      artifacts: true
+  script:
+    - apk add --no-cache curl
+    - |
+      set -e
+      echo "Uploading ${APK_NAME} to GitLab Package Registry..."
+      curl --fail \
+        --header "JOB-TOKEN: ${CI_JOB_TOKEN}" \
+        --upload-file "${APK_NAME}" \
+        "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/meshsat-android/${VERSION}/${APK_NAME}"
+      echo "  Uploaded to Package Registry."
+
+# =============================================================================
+# Create GitLab Release (tag push only)
+# =============================================================================
+create-gitlab-release:
+  stage: release
+  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v/'
+  needs:
+    - job: build
+      artifacts: true
+    - job: upload-package
+  script:
+    - echo "Creating GitLab release for ${CI_COMMIT_TAG}"
+  release:
+    tag_name: $CI_COMMIT_TAG
+    name: "MeshSat Android ${CI_COMMIT_TAG}"
+    description: |
+      MeshSat Android ${CI_COMMIT_TAG}
+
+      ## Download
+
+      - [${APK_NAME}](${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/meshsat-android/${VERSION}/${APK_NAME})
+    assets:
+      links:
+        - name: "${APK_NAME}"
+          url: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/meshsat-android/${VERSION}/${APK_NAME}"
+          link_type: "package"
+
+# =============================================================================
+# Create GitHub Release with APK asset (tag push only)
+# =============================================================================
+# Mirrors the pattern from releases/.gitlab-ci.yml create-github-release job.
+# The GitLab push mirror syncs tags to GitHub automatically, but release
+# assets (APK) require explicit GitHub API calls.
+# =============================================================================
+create-github-release:
+  stage: release
+  image: alpine:latest
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v/'
+  needs:
+    - job: build
+      artifacts: true
+  script:
+    - apk add --no-cache curl jq
+    - |
+      set -e
+
+      if [ -z "${GHCR_TOKEN:-}" ]; then
+        echo "WARN: GHCR_TOKEN not set — skipping GitHub release."
+        exit 0
+      fi
+
+      echo "============================================================"
+      echo "  Create GitHub Release for ${CI_COMMIT_TAG}"
+      echo "============================================================"
+
+      RELEASE_BODY="## MeshSat Android ${CI_COMMIT_TAG}
+
+      Android companion app for MeshSat — Meshtastic + Satellite gateway.
+
+      ### Download
+
+      Download the APK below and install on your Android device.
+
+      ### Features
+      - Meshtastic BLE radio connection
+      - Iridium 9603N via HC-05 Bluetooth SPP
+      - SMS gateway with AES-256-GCM encryption
+      - Per-conversation encryption keys
+      - Forwarding rules engine (mesh/iridium/SMS)
+      - Node map with phone GPS + mesh positions
+      - 6-hour signal history graphs
+      - SOS emergency broadcast
+      - Push notifications on incoming messages"
+
+      # Check if release already exists (tag may arrive via mirror before this job)
+      EXISTING=$(curl -s \
+        -H "Authorization: token ${GHCR_TOKEN}" \
+        -H "Accept: application/vnd.github+json" \
+        "https://api.github.com/repos/${GITHUB_REPO}/releases/tags/${CI_COMMIT_TAG}")
+
+      EXISTING_ID=$(echo "$EXISTING" | jq -r '.id // empty')
+
+      if [ -n "$EXISTING_ID" ] && [ "$EXISTING_ID" != "null" ]; then
+        echo "Updating existing release (ID: ${EXISTING_ID})..."
+        curl -s -X PATCH \
+          -H "Authorization: token ${GHCR_TOKEN}" \
+          -H "Accept: application/vnd.github+json" \
+          "https://api.github.com/repos/${GITHUB_REPO}/releases/${EXISTING_ID}" \
+          -d "$(jq -n \
+            --arg name "MeshSat Android ${CI_COMMIT_TAG}" \
+            --arg body "${RELEASE_BODY}" \
+            '{name: $name, body: $body, prerelease: false}'
+          )" > /dev/null
+        RELEASE_ID="$EXISTING_ID"
+        UPLOAD_URL="https://uploads.github.com/repos/${GITHUB_REPO}/releases/${RELEASE_ID}/assets"
+
+        # Delete existing APK asset if present (re-upload fresh)
+        ASSETS=$(curl -s \
+          -H "Authorization: token ${GHCR_TOKEN}" \
+          -H "Accept: application/vnd.github+json" \
+          "https://api.github.com/repos/${GITHUB_REPO}/releases/${RELEASE_ID}/assets")
+        OLD_ID=$(echo "$ASSETS" | jq -r ".[] | select(.name == \"${APK_NAME}\") | .id // empty")
+        if [ -n "$OLD_ID" ]; then
+          echo "  Deleting old APK asset..."
+          curl -s -X DELETE \
+            -H "Authorization: token ${GHCR_TOKEN}" \
+            "https://api.github.com/repos/${GITHUB_REPO}/releases/assets/${OLD_ID}" > /dev/null
+        fi
+        echo "  Release updated."
+      else
+        echo "Creating new release..."
+        RESP=$(curl -s -X POST \
+          -H "Authorization: token ${GHCR_TOKEN}" \
+          -H "Accept: application/vnd.github+json" \
+          "https://api.github.com/repos/${GITHUB_REPO}/releases" \
+          -d "$(jq -n \
+            --arg tag "${CI_COMMIT_TAG}" \
+            --arg name "MeshSat Android ${CI_COMMIT_TAG}" \
+            --arg body "${RELEASE_BODY}" \
+            '{tag_name: $tag, name: $name, body: $body, draft: false, prerelease: false}'
+          )")
+        RELEASE_ID=$(echo "$RESP" | jq -r '.id')
+        UPLOAD_URL="https://uploads.github.com/repos/${GITHUB_REPO}/releases/${RELEASE_ID}/assets"
+        echo "  Release created (ID: ${RELEASE_ID})."
+      fi
+
+      # Upload APK as release asset
+      echo "Uploading ${APK_NAME} ($(du -h ${APK_NAME} | cut -f1))..."
+      UPLOAD_RESP=$(curl -s -w "\n%{http_code}" \
+        --max-time 300 \
+        -X POST \
+        -H "Authorization: token ${GHCR_TOKEN}" \
+        -H "Content-Type: application/vnd.android.package-archive" \
+        "${UPLOAD_URL}?name=${APK_NAME}" \
+        --data-binary "@${APK_NAME}")
+
+      HTTP_CODE=$(echo "$UPLOAD_RESP" | tail -1)
+      if [ "$HTTP_CODE" = "201" ]; then
+        echo "  APK uploaded successfully."
+      else
+        echo "  WARN: Upload returned HTTP ${HTTP_CODE}"
+        echo "$UPLOAD_RESP" | sed '$d' | jq . 2>/dev/null || true
+      fi
+
+      echo "============================================================"
+      echo "  GitHub Release: https://github.com/${GITHUB_REPO}/releases/tag/${CI_COMMIT_TAG}"
+      echo "============================================================"
+  allow_failure: true
