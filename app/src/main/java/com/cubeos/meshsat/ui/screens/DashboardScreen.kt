@@ -17,12 +17,19 @@ import androidx.compose.runtime.produceState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import com.cubeos.meshsat.ble.MeshtasticBle
+import com.cubeos.meshsat.bt.IridiumSpp
 import com.cubeos.meshsat.data.AppDatabase
+import com.cubeos.meshsat.service.GatewayService
 import com.cubeos.meshsat.ui.components.StatusCard
 import com.cubeos.meshsat.ui.theme.ColorCellular
 import com.cubeos.meshsat.ui.theme.ColorIridium
 import com.cubeos.meshsat.ui.theme.ColorMesh
 import com.cubeos.meshsat.ui.theme.MeshSatTextMuted
+import com.cubeos.meshsat.ui.theme.SignalExcellent
+import com.cubeos.meshsat.ui.theme.SignalFair
+import com.cubeos.meshsat.ui.theme.SignalGood
+import com.cubeos.meshsat.ui.theme.SignalPoor
 
 @Composable
 fun DashboardScreen() {
@@ -31,7 +38,14 @@ fun DashboardScreen() {
 
     val totalMessages by produceState(0) { value = db.messageDao().count() }
     val smsCount by produceState(0) { value = db.messageDao().countByTransport("sms") }
+    val meshCount by produceState(0) { value = db.messageDao().countByTransport("mesh") }
     val encryptedCount by produceState(0) { value = db.messageDao().countEncrypted() }
+
+    // Observe real transport state
+    val meshState = GatewayService.meshtasticBle?.state?.collectAsState()
+    val iridiumState = GatewayService.iridiumSpp?.state?.collectAsState()
+    val iridiumSignal = GatewayService.iridiumSpp?.signal?.collectAsState()
+    val modemInfo = GatewayService.iridiumSpp?.modemInfo?.collectAsState()
 
     Column(
         modifier = Modifier
@@ -50,20 +64,37 @@ fun DashboardScreen() {
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            val meshConnected = meshState?.value == MeshtasticBle.State.Connected
+            val meshConnecting = meshState?.value == MeshtasticBle.State.Connecting
+                    || meshState?.value == MeshtasticBle.State.Scanning
             StatusCard(
                 title = "Meshtastic",
-                status = "Not connected",
-                isOnline = false,
+                status = when {
+                    meshConnected -> "Connected"
+                    meshConnecting -> "Connecting..."
+                    else -> "Disconnected"
+                },
+                isOnline = meshConnected,
                 color = ColorMesh,
                 detail = "BLE",
                 modifier = Modifier.weight(1f),
             )
+
+            val iridiumConnected = iridiumState?.value == IridiumSpp.State.Connected
+            val iridiumConnecting = iridiumState?.value == IridiumSpp.State.Connecting
+            val sig = iridiumSignal?.value ?: 0
             StatusCard(
                 title = "Iridium",
-                status = "Not connected",
-                isOnline = false,
-                color = ColorIridium,
-                detail = "HC-05 SPP",
+                status = when {
+                    iridiumConnected -> "Signal: $sig/5"
+                    iridiumConnecting -> "Connecting..."
+                    else -> "Disconnected"
+                },
+                isOnline = iridiumConnected,
+                color = if (iridiumConnected) signalColor(sig) else ColorIridium,
+                detail = modemInfo?.value?.let {
+                    if (it.imei.isNotBlank()) "IMEI: ${it.imei}" else "HC-05 SPP"
+                } ?: "HC-05 SPP",
                 modifier = Modifier.weight(1f),
             )
         }
@@ -87,10 +118,19 @@ fun DashboardScreen() {
                 style = MaterialTheme.typography.titleMedium,
             )
             StatRow("Total messages", totalMessages.toString())
+            StatRow("Mesh messages", meshCount.toString())
             StatRow("SMS messages", smsCount.toString())
             StatRow("Encrypted", encryptedCount.toString())
         }
     }
+}
+
+@Composable
+private fun signalColor(signal: Int) = when {
+    signal >= 4 -> SignalExcellent
+    signal >= 3 -> SignalGood
+    signal >= 2 -> SignalFair
+    else -> SignalPoor
 }
 
 @Composable

@@ -1,8 +1,11 @@
 package com.cubeos.meshsat.ui.screens
 
+import android.bluetooth.BluetoothDevice
+import android.content.Intent
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -16,6 +19,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Switch
@@ -24,6 +28,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -35,10 +40,17 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import com.cubeos.meshsat.ble.MeshtasticBle
+import com.cubeos.meshsat.bt.IridiumSpp
 import com.cubeos.meshsat.crypto.AesGcmCrypto
 import com.cubeos.meshsat.data.SettingsRepository
+import com.cubeos.meshsat.service.GatewayService
+import com.cubeos.meshsat.ui.theme.ColorIridium
+import com.cubeos.meshsat.ui.theme.ColorMesh
 import com.cubeos.meshsat.ui.theme.MeshSatAmber
 import com.cubeos.meshsat.ui.theme.MeshSatBorder
+import com.cubeos.meshsat.ui.theme.MeshSatGreen
+import com.cubeos.meshsat.ui.theme.MeshSatRed
 import com.cubeos.meshsat.ui.theme.MeshSatSurface
 import com.cubeos.meshsat.ui.theme.MeshSatTeal
 import com.cubeos.meshsat.ui.theme.MeshSatTextMuted
@@ -59,6 +71,21 @@ fun SettingsScreen() {
     var phoneInput by remember(piPhone) { mutableStateOf(piPhone) }
     var showKey by remember { mutableStateOf(false) }
 
+    // BLE state
+    val meshState = GatewayService.meshtasticBle?.state?.collectAsState()
+    val iridiumState = GatewayService.iridiumSpp?.state?.collectAsState()
+    val iridiumSignal = GatewayService.iridiumSpp?.signal?.collectAsState()
+    val modemInfo = GatewayService.iridiumSpp?.modemInfo?.collectAsState()
+
+    // BLE scan results
+    val scanResults = remember { mutableStateListOf<BluetoothDevice>() }
+    var scanning by remember { mutableStateOf(false) }
+
+    // HC-05 paired devices
+    val pairedHc05 = remember {
+        GatewayService.iridiumSpp?.getPairedDevices() ?: emptyList()
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -71,9 +98,178 @@ fun SettingsScreen() {
             style = MaterialTheme.typography.headlineMedium,
         )
 
+        // --- Meshtastic BLE Section ---
+        SectionCard("Meshtastic BLE") {
+            val state = meshState?.value ?: MeshtasticBle.State.Disconnected
+            ConnectionStatusRow(
+                label = "Status",
+                connected = state == MeshtasticBle.State.Connected,
+                statusText = when (state) {
+                    MeshtasticBle.State.Connected -> "Connected"
+                    MeshtasticBle.State.Connecting -> "Connecting..."
+                    MeshtasticBle.State.Scanning -> "Scanning..."
+                    MeshtasticBle.State.Disconnected -> "Disconnected"
+                },
+                color = ColorMesh,
+            )
+
+            if (state == MeshtasticBle.State.Connected) {
+                Button(
+                    onClick = {
+                        context.startService(
+                            Intent(context, GatewayService::class.java)
+                                .setAction(GatewayService.ACTION_DISCONNECT_MESH)
+                        )
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MeshSatRed),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Disconnect", style = MaterialTheme.typography.bodySmall)
+                }
+            } else if (state == MeshtasticBle.State.Disconnected) {
+                Button(
+                    onClick = {
+                        scanning = true
+                        scanResults.clear()
+                        GatewayService.meshtasticBle?.let { ble ->
+                            scope.launch {
+                                ble.scanResults.collect { device ->
+                                    if (scanResults.none { it.address == device.address }) {
+                                        scanResults.add(device)
+                                    }
+                                }
+                            }
+                            ble.startScan()
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MeshSatTeal),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Scan for Meshtastic devices", style = MaterialTheme.typography.bodySmall)
+                }
+
+                if (scanResults.isNotEmpty()) {
+                    Text(
+                        text = "Found devices:",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MeshSatTextMuted,
+                    )
+                    scanResults.forEach { device ->
+                        @Suppress("MissingPermission")
+                        DeviceRow(
+                            name = device.name ?: "Unknown",
+                            address = device.address,
+                            onClick = {
+                                scanning = false
+                                GatewayService.meshtasticBle?.stopScan()
+                                context.startService(
+                                    Intent(context, GatewayService::class.java)
+                                        .setAction(GatewayService.ACTION_CONNECT_MESH)
+                                        .putExtra(GatewayService.EXTRA_ADDRESS, device.address)
+                                )
+                            },
+                        )
+                    }
+                }
+            }
+        }
+
+        // --- Iridium HC-05 Section ---
+        SectionCard("Iridium HC-05 SPP") {
+            val state = iridiumState?.value ?: IridiumSpp.State.Disconnected
+            ConnectionStatusRow(
+                label = "Status",
+                connected = state == IridiumSpp.State.Connected,
+                statusText = when (state) {
+                    IridiumSpp.State.Connected -> {
+                        val sig = iridiumSignal?.value ?: 0
+                        "Connected (Signal: $sig/5)"
+                    }
+                    IridiumSpp.State.Connecting -> "Connecting..."
+                    IridiumSpp.State.Disconnected -> "Disconnected"
+                },
+                color = ColorIridium,
+            )
+
+            // Show modem info when connected
+            if (state == IridiumSpp.State.Connected) {
+                modemInfo?.value?.let { info ->
+                    if (info.manufacturer.isNotBlank()) {
+                        InfoRow("Manufacturer", info.manufacturer)
+                    }
+                    if (info.model.isNotBlank()) {
+                        InfoRow("Model", info.model)
+                    }
+                    if (info.imei.isNotBlank()) {
+                        InfoRow("IMEI", info.imei)
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                val sig = GatewayService.iridiumSpp?.pollSignal()
+                                Toast.makeText(context, "Signal: $sig/5", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = MeshSatTeal),
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text("Poll Signal", style = MaterialTheme.typography.bodySmall)
+                    }
+                    Button(
+                        onClick = {
+                            context.startService(
+                                Intent(context, GatewayService::class.java)
+                                    .setAction(GatewayService.ACTION_DISCONNECT_IRIDIUM)
+                            )
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = MeshSatRed),
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text("Disconnect", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+
+            // Show paired HC-05/06 devices when disconnected
+            if (state == IridiumSpp.State.Disconnected) {
+                if (pairedHc05.isNotEmpty()) {
+                    Text(
+                        text = "Paired HC-05/06 devices:",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MeshSatTextMuted,
+                    )
+                    pairedHc05.forEach { device ->
+                        @Suppress("MissingPermission")
+                        DeviceRow(
+                            name = device.name ?: "HC-05",
+                            address = device.address,
+                            onClick = {
+                                context.startService(
+                                    Intent(context, GatewayService::class.java)
+                                        .setAction(GatewayService.ACTION_CONNECT_IRIDIUM)
+                                        .putExtra(GatewayService.EXTRA_ADDRESS, device.address)
+                                )
+                            },
+                        )
+                    }
+                } else {
+                    Text(
+                        text = "No paired HC-05/06 modules found. Pair the HC-05 in Android Bluetooth settings first.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MeshSatTextMuted,
+                    )
+                }
+            }
+        }
+
         // --- Encryption Section ---
         SectionCard("Encryption") {
-            // Enable encryption
             SettingRow("Encryption enabled") {
                 Switch(
                     checked = encryptionEnabled,
@@ -82,7 +278,6 @@ fun SettingsScreen() {
                 )
             }
 
-            // Auto-decrypt SMS
             SettingRow("Auto-decrypt incoming SMS") {
                 Switch(
                     checked = autoDecrypt,
@@ -91,7 +286,6 @@ fun SettingsScreen() {
                 )
             }
 
-            // Encryption key
             OutlinedTextField(
                 value = keyInput,
                 onValueChange = { keyInput = it },
@@ -181,25 +375,57 @@ fun SettingsScreen() {
                 color = MeshSatTextMuted,
             )
         }
+    }
+}
 
-        // --- Bluetooth Section ---
-        SectionCard("Bluetooth") {
-            Text(
-                text = "Meshtastic BLE: Not connected",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MeshSatTextMuted,
-            )
-            Text(
-                text = "Iridium HC-05: Not connected",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MeshSatTextMuted,
-            )
-            Text(
-                text = "Bluetooth connection management coming soon.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MeshSatTextMuted,
-            )
+@Composable
+private fun DeviceRow(name: String, address: String, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MeshSatSurface, RoundedCornerShape(4.dp))
+            .clickable(onClick = onClick)
+            .padding(8.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column {
+            Text(text = name, style = MaterialTheme.typography.bodyMedium)
+            Text(text = address, style = MaterialTheme.typography.bodySmall, color = MeshSatTextMuted)
         }
+        Text(text = "Connect", style = MaterialTheme.typography.bodySmall, color = MeshSatTeal)
+    }
+}
+
+@Composable
+private fun ConnectionStatusRow(
+    label: String,
+    connected: Boolean,
+    statusText: String,
+    color: androidx.compose.ui.graphics.Color,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(text = label, style = MaterialTheme.typography.bodyMedium)
+        Text(
+            text = statusText,
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (connected) MeshSatGreen else MeshSatTextMuted,
+        )
+    }
+}
+
+@Composable
+private fun InfoRow(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(text = label, style = MaterialTheme.typography.bodySmall, color = MeshSatTextMuted)
+        Text(text = value, style = MaterialTheme.typography.bodySmall)
     }
 }
 
