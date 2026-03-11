@@ -148,6 +148,50 @@ fun SettingsScreen(navController: NavController? = null) {
             )
 
             if (state == MeshtasticBle.State.Connected) {
+                // Show device info when connected
+                val myInfo = GatewayService.meshtasticBle?.myInfo?.collectAsState()
+                val meshNodes = GatewayService.meshtasticBle?.nodes?.collectAsState()
+
+                myInfo?.value?.let { info ->
+                    if (info.firmwareVersion.isNotBlank()) {
+                        InfoRow("Firmware", info.firmwareVersion)
+                    }
+                    InfoRow("Node ID", "!%08x".format(info.myNodeNum))
+                    if (info.rebootCount > 0) {
+                        InfoRow("Reboots", info.rebootCount.toString())
+                    }
+                }
+
+                meshNodes?.value?.let { nodes ->
+                    if (nodes.isNotEmpty()) {
+                        Text(
+                            text = "Mesh Nodes (${nodes.size})",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MeshSatTextMuted,
+                            modifier = Modifier.padding(top = 4.dp),
+                        )
+                        nodes.forEach { node ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(MeshSatSurface, RoundedCornerShape(4.dp))
+                                    .padding(6.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                            ) {
+                                Text(
+                                    text = node.longName.ifBlank { "!%08x".format(node.nodeNum) },
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                                Text(
+                                    text = node.shortName.ifBlank { "" },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = ColorMesh,
+                                )
+                            }
+                        }
+                    }
+                }
+
                 Button(
                     onClick = {
                         context.startService(
@@ -444,7 +488,7 @@ fun SettingsScreen(navController: NavController? = null) {
             }
 
             Text(
-                text = "Paste the key from MeshSat Pi (Interfaces > cellular_0 > Show encryption key) or generate a new one and enter it on the Pi.",
+                text = "Fallback key — used when no per-conversation key is set. Per-conversation keys are managed in Messages > tap a conversation > lock icon.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MeshSatTextMuted,
             )

@@ -72,6 +72,20 @@ class MeshtasticBle(private val context: Context) {
     private val _rssi = MutableStateFlow(0)
     val rssi: StateFlow<Int> = _rssi
 
+    private val _myInfo = MutableStateFlow<MeshtasticProtocol.MyNodeInfo?>(null)
+    val myInfo: StateFlow<MeshtasticProtocol.MyNodeInfo?> = _myInfo
+
+    private val _nodes = MutableStateFlow<List<MeshtasticProtocol.MeshNodeInfo>>(emptyList())
+    val nodes: StateFlow<List<MeshtasticProtocol.MeshNodeInfo>> = _nodes
+
+    fun setMyInfo(info: MeshtasticProtocol.MyNodeInfo) { _myInfo.value = info }
+    fun addNodeInfo(info: MeshtasticProtocol.MeshNodeInfo) {
+        val current = _nodes.value.toMutableList()
+        current.removeAll { it.nodeNum == info.nodeNum }
+        current.add(info)
+        _nodes.value = current
+    }
+
     private var writeQueue = ArrayDeque<ByteArray>()
     private var writing = false
 

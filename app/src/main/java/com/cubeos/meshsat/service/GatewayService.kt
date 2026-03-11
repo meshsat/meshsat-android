@@ -1,18 +1,22 @@
 package com.cubeos.meshsat.service
 
 import android.Manifest
+import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.location.Location
+import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Build
 import android.os.IBinder
 import android.telephony.TelephonyManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import com.cubeos.meshsat.MainActivity
 import com.cubeos.meshsat.MeshSatApp
 import com.cubeos.meshsat.R
 import com.cubeos.meshsat.ble.MeshtasticBle
@@ -43,7 +47,7 @@ import kotlinx.coroutines.launch
  * for Meshtastic BLE and Iridium SPP (HC-05).
  *
  * Manages transport lifecycle, message routing via RulesEngine,
- * signal history tracking, node position storage, and SOS.
+ * signal history tracking, node position storage, notifications, and SOS.
  */
 class GatewayService : Service() {
 
@@ -54,7 +58,12 @@ class GatewayService : Service() {
         const val ACTION_DISCONNECT_IRIDIUM = "com.cubeos.meshsat.DISCONNECT_IRIDIUM"
         const val ACTION_SOS_ACTIVATE = "com.cubeos.meshsat.SOS_ACTIVATE"
         const val ACTION_SOS_CANCEL = "com.cubeos.meshsat.SOS_CANCEL"
+        const val ACTION_SEND_MESH = "com.cubeos.meshsat.SEND_MESH"
+        const val ACTION_SEND_IRIDIUM = "com.cubeos.meshsat.SEND_IRIDIUM"
+        const val ACTION_SEND_SMS = "com.cubeos.meshsat.SEND_SMS"
         const val EXTRA_ADDRESS = "address"
+        const val EXTRA_TEXT = "text"
+        const val EXTRA_RECIPIENT = "recipient"
 
         // Singleton references for UI state observation
         var meshtasticBle: MeshtasticBle? = null
@@ -68,6 +77,12 @@ class GatewayService : Service() {
         val sosActive: StateFlow<Boolean> = _sosActive
         private val _sosSends = MutableStateFlow(0)
         val sosSends: StateFlow<Int> = _sosSends
+
+        // Phone GPS location (updated continuously)
+        private val _phoneLocation = MutableStateFlow<Location?>(null)
+        val phoneLocation: StateFlow<Location?> = _phoneLocation
+
+        private var notificationId = 100
     }
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -87,6 +102,7 @@ class GatewayService : Service() {
         loadRulesFromDb()
         observeTransports()
         startSignalPolling()
+        startLocationUpdates()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -105,6 +121,19 @@ class GatewayService : Service() {
             ACTION_DISCONNECT_IRIDIUM -> iridiumSpp?.disconnect()
             ACTION_SOS_ACTIVATE -> activateSos()
             ACTION_SOS_CANCEL -> cancelSos()
+            ACTION_SEND_MESH -> {
+                val text = intent.getStringExtra(EXTRA_TEXT) ?: return START_STICKY
+                sendMeshMessage(text)
+            }
+            ACTION_SEND_IRIDIUM -> {
+                val text = intent.getStringExtra(EXTRA_TEXT) ?: return START_STICKY
+                sendIridiumMessage(text)
+            }
+            ACTION_SEND_SMS -> {
+                val text = intent.getStringExtra(EXTRA_TEXT) ?: return START_STICKY
+                val recipient = intent.getStringExtra(EXTRA_RECIPIENT) ?: return START_STICKY
+                scope.launch { sendSmsMessage(text, recipient) }
+            }
         }
         return START_STICKY
     }
@@ -125,6 +154,53 @@ class GatewayService : Service() {
         scope.launch {
             val entities = db.forwardingRuleDao().getAllSync()
             rulesEngine.setRules(entities.map { it.toRule() })
+        }
+    }
+
+    // --- Phone GPS Location ---
+
+    private val locationListener = LocationListener { location ->
+        _phoneLocation.value = location
+        // Store phone position in node_positions with special nodeId=0
+        scope.launch {
+            db.nodePositionDao().insert(
+                NodePosition(
+                    nodeId = 0,
+                    nodeName = "Phone",
+                    latitude = location.latitude,
+                    longitude = location.longitude,
+                    altitude = location.altitude.toInt(),
+                )
+            )
+        }
+    }
+
+    @Suppress("MissingPermission")
+    private fun startLocationUpdates() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
+            != PackageManager.PERMISSION_GRANTED
+        ) return
+
+        val lm = getSystemService(LOCATION_SERVICE) as? LocationManager ?: return
+
+        // Request updates every 60s or 50m
+        try {
+            lm.requestLocationUpdates(
+                LocationManager.GPS_PROVIDER, 60_000L, 50f, locationListener
+            )
+        } catch (_: Exception) {}
+
+        try {
+            lm.requestLocationUpdates(
+                LocationManager.NETWORK_PROVIDER, 60_000L, 100f, locationListener
+            )
+        } catch (_: Exception) {}
+
+        // Seed with last known
+        val last = lm.getLastKnownLocation(LocationManager.GPS_PROVIDER)
+            ?: lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
+        if (last != null) {
+            _phoneLocation.value = last
         }
     }
 
@@ -186,7 +262,7 @@ class GatewayService : Service() {
     }
 
     private fun observeTransports() {
-        // Listen for incoming Meshtastic messages (text + position)
+        // Listen for incoming Meshtastic messages (text + position + nodeinfo)
         meshtasticBle?.let { ble ->
             scope.launch {
                 ble.receivedData.collect { data ->
@@ -204,6 +280,7 @@ class GatewayService : Service() {
                                 timestamp = System.currentTimeMillis(),
                             )
                         )
+                        postMessageNotification("Mesh: $nodeId", msg.text)
                         evaluateAndForward(ForwardingRule.Transport.MESH, msg.text, nodeId)
                         return@collect
                     }
@@ -222,6 +299,22 @@ class GatewayService : Service() {
                             )
                         )
                         Log.d("MeshSat", "Position from $nodeId: ${pos.latitude},${pos.longitude}")
+                        return@collect
+                    }
+
+                    // Try my_info (device info on connect)
+                    val myInfo = MeshtasticProtocol.parseMyInfo(data)
+                    if (myInfo != null) {
+                        ble.setMyInfo(myInfo)
+                        Log.d("MeshSat", "MyInfo: node=${myInfo.myNodeNum}, fw=${myInfo.firmwareVersion}")
+                        return@collect
+                    }
+
+                    // Try node_info
+                    val nodeInfo = MeshtasticProtocol.parseNodeInfoFromRadio(data)
+                    if (nodeInfo != null) {
+                        ble.addNodeInfo(nodeInfo)
+                        Log.d("MeshSat", "NodeInfo: ${nodeInfo.longName} (${nodeInfo.shortName})")
                     }
                 }
             }
@@ -280,6 +373,7 @@ class GatewayService : Service() {
                     )
                 )
 
+                postMessageNotification("Iridium: $imei", mtText)
                 evaluateAndForward(ForwardingRule.Transport.IRIDIUM, mtText, imei)
             }
         }
@@ -377,7 +471,7 @@ class GatewayService : Service() {
         }
     }
 
-    /** Send a text message to mesh (called from UI). */
+    /** Send a text message to mesh (called from UI compose bar). */
     fun sendMeshMessage(text: String, to: Long = 0xFFFFFFFFL, channel: Int = 0) {
         val ble = meshtasticBle ?: return
         if (ble.state.value != MeshtasticBle.State.Connected) return
@@ -402,6 +496,68 @@ class GatewayService : Service() {
         scope.launch {
             forwardToIridium(text)
         }
+    }
+
+    /** Send SMS message to a specific recipient (called from conversation compose). */
+    private suspend fun sendSmsMessage(text: String, recipient: String) {
+        // Check if we should encrypt for this recipient
+        val convKey = db.conversationKeyDao().getBySender(recipient)?.hexKey
+        val globalKey = settings.encryptionKey.first()
+        val encEnabled = settings.encryptionEnabled.first()
+
+        val keyToUse = convKey?.ifEmpty { null } ?: if (encEnabled) globalKey.ifEmpty { null } else null
+        val payload = if (keyToUse != null) {
+            try {
+                AesGcmCrypto.encryptToBase64(text, keyToUse)
+            } catch (e: Exception) {
+                Log.w("MeshSat", "Encrypt for SMS failed: ${e.message}")
+                text
+            }
+        } else {
+            text
+        }
+
+        SmsSender.send(this, recipient, payload)
+
+        db.messageDao().insert(
+            Message(
+                transport = "sms",
+                direction = "tx",
+                sender = "self",
+                recipient = recipient,
+                text = text,
+                rawText = if (keyToUse != null) payload else "",
+                encrypted = keyToUse != null,
+                timestamp = System.currentTimeMillis(),
+            )
+        )
+    }
+
+    // --- Notifications ---
+
+    private fun postMessageNotification(title: String, text: String) {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+            != PackageManager.PERMISSION_GRANTED
+        ) return
+
+        val tapIntent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            this, 0, tapIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
+        val notification = NotificationCompat.Builder(this, MeshSatApp.CHANNEL_MESSAGES)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setAutoCancel(true)
+            .setContentIntent(pendingIntent)
+            .build()
+
+        try {
+            NotificationManagerCompat.from(this).notify(notificationId++, notification)
+        } catch (_: SecurityException) {}
     }
 
     // --- SOS ---

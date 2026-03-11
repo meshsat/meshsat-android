@@ -45,4 +45,20 @@ interface MessageDao {
 
     @Query("SELECT * FROM messages WHERE text LIKE '%' || :query || '%' OR sender LIKE '%' || :query || '%' ORDER BY timestamp DESC LIMIT :limit")
     fun search(query: String, limit: Int = 100): Flow<List<Message>>
+
+    @Query("SELECT COUNT(*) FROM messages WHERE direction = 'tx' AND forwarded = 1")
+    fun countForwarded(): Flow<Int>
+
+    @Query("SELECT COUNT(*) FROM messages WHERE direction = 'rx'")
+    fun countIncoming(): Flow<Int>
+
+    @Query("SELECT COUNT(*) FROM messages WHERE direction = 'tx'")
+    fun countOutgoing(): Flow<Int>
+
+    @Query("SELECT COUNT(*) FROM messages WHERE timestamp > :since")
+    fun countSince(since: Long): Flow<Int>
+
+    /** Messages for a conversation (both directions). */
+    @Query("SELECT * FROM messages WHERE sender = :peer OR (recipient = :peer AND direction = 'tx') ORDER BY timestamp DESC LIMIT :limit")
+    fun getConversation(peer: String, limit: Int = 500): Flow<List<Message>>
 }

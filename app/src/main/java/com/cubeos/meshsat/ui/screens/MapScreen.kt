@@ -28,9 +28,11 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.cubeos.meshsat.ble.MeshtasticProtocol
 import com.cubeos.meshsat.data.AppDatabase
 import com.cubeos.meshsat.data.NodePosition
+import com.cubeos.meshsat.service.GatewayService
 import com.cubeos.meshsat.ui.theme.ColorMesh
 import com.cubeos.meshsat.ui.theme.MeshSatBorder
 import com.cubeos.meshsat.ui.theme.MeshSatSurface
+import com.cubeos.meshsat.ui.theme.MeshSatTeal
 import com.cubeos.meshsat.ui.theme.MeshSatTextMuted
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -41,6 +43,13 @@ fun MapScreen() {
     val context = LocalContext.current
     val db = AppDatabase.getInstance(context)
     val nodes by db.nodePositionDao().getLatestPerNode().collectAsState(initial = emptyList())
+    val phoneLocation by GatewayService.phoneLocation.collectAsState()
+
+    // Filter out nodeId=0 (phone GPS stored by GatewayService)
+    val meshNodes = nodes.filter { it.nodeId != 0L }
+
+    // Determine if we have any positions at all (phone or mesh nodes)
+    val hasAnyPosition = meshNodes.isNotEmpty() || phoneLocation != null
 
     Column(
         modifier = Modifier
@@ -53,7 +62,7 @@ fun MapScreen() {
             modifier = Modifier.padding(bottom = 8.dp),
         )
 
-        if (nodes.isEmpty()) {
+        if (!hasAnyPosition) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -61,7 +70,7 @@ fun MapScreen() {
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    text = "No node positions received yet.\nConnect to a Meshtastic radio to see nodes.",
+                    text = "No positions available yet.\nConnect to a Meshtastic radio or enable GPS.",
                     style = MaterialTheme.typography.bodyLarge,
                     color = MeshSatTextMuted,
                 )
@@ -74,7 +83,7 @@ fun MapScreen() {
                     .weight(1f)
                     .border(1.dp, MeshSatBorder, RoundedCornerShape(8.dp)),
             ) {
-                LeafletMap(nodes = nodes)
+                LeafletMap(nodes = meshNodes, phoneLocation = phoneLocation)
             }
 
             // Node list below map
@@ -82,12 +91,46 @@ fun MapScreen() {
                 modifier = Modifier.padding(top = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                Text(
-                    text = "Nodes (${nodes.size})",
-                    style = MaterialTheme.typography.titleMedium,
-                )
-                nodes.forEach { node ->
-                    NodeRow(node)
+                // Phone GPS
+                phoneLocation?.let { loc ->
+                    Text(
+                        text = "Phone GPS",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MeshSatTeal,
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(MeshSatSurface, RoundedCornerShape(6.dp))
+                            .border(1.dp, MeshSatBorder, RoundedCornerShape(6.dp))
+                            .padding(10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column {
+                            Text(text = "This Phone", style = MaterialTheme.typography.bodyMedium, color = MeshSatTeal)
+                            Text(
+                                text = "%.5f, %.5f  alt %dm".format(loc.latitude, loc.longitude, loc.altitude.toInt()),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MeshSatTextMuted,
+                            )
+                        }
+                        Text(
+                            text = "acc ${loc.accuracy.toInt()}m",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MeshSatTextMuted,
+                        )
+                    }
+                }
+
+                if (meshNodes.isNotEmpty()) {
+                    Text(
+                        text = "Mesh Nodes (${meshNodes.size})",
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    meshNodes.forEach { node ->
+                        NodeRow(node)
+                    }
                 }
             }
         }
@@ -96,8 +139,8 @@ fun MapScreen() {
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-private fun LeafletMap(nodes: List<NodePosition>) {
-    val html = remember(nodes) { buildLeafletHtml(nodes) }
+private fun LeafletMap(nodes: List<NodePosition>, phoneLocation: android.location.Location?) {
+    val html = remember(nodes, phoneLocation) { buildLeafletHtml(nodes, phoneLocation) }
 
     AndroidView(
         factory = { ctx ->
@@ -118,11 +161,18 @@ private fun LeafletMap(nodes: List<NodePosition>) {
     )
 }
 
-private fun buildLeafletHtml(nodes: List<NodePosition>): String {
-    val centerLat = nodes.map { it.latitude }.average()
-    val centerLon = nodes.map { it.longitude }.average()
+private fun buildLeafletHtml(nodes: List<NodePosition>, phoneLocation: android.location.Location?): String {
+    // Calculate center from all available positions
+    val allLats = mutableListOf<Double>()
+    val allLons = mutableListOf<Double>()
+    nodes.forEach { allLats.add(it.latitude); allLons.add(it.longitude) }
+    phoneLocation?.let { allLats.add(it.latitude); allLons.add(it.longitude) }
 
-    val markers = nodes.joinToString("\n") { node ->
+    val centerLat = if (allLats.isNotEmpty()) allLats.average() else 0.0
+    val centerLon = if (allLons.isNotEmpty()) allLons.average() else 0.0
+
+    // Mesh node markers (teal)
+    val nodeMarkers = nodes.joinToString("\n") { node ->
         val name = node.nodeName.ifBlank { MeshtasticProtocol.formatNodeId(node.nodeId) }
         val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(node.timestamp))
         """
@@ -131,6 +181,18 @@ private fun buildLeafletHtml(nodes: List<NodePosition>): String {
         }).addTo(map).bindPopup('<b>${name.replace("'", "\\'")}</b><br>Alt: ${node.altitude}m<br>${time}');
         """.trimIndent()
     }
+
+    // Phone GPS marker (blue, pulsing)
+    val phoneMarker = if (phoneLocation != null) {
+        """
+        L.circleMarker([${"%.7f".format(phoneLocation.latitude)}, ${"%.7f".format(phoneLocation.longitude)}], {
+            radius: 10, fillColor: '#3B82F6', color: '#1D4ED8', weight: 3, fillOpacity: 0.9
+        }).addTo(map).bindPopup('<b>This Phone</b><br>Alt: ${phoneLocation.altitude.toInt()}m<br>Acc: ${phoneLocation.accuracy.toInt()}m');
+        L.circle([${"%.7f".format(phoneLocation.latitude)}, ${"%.7f".format(phoneLocation.longitude)}], {
+            radius: ${phoneLocation.accuracy.toInt()}, fillColor: '#3B82F6', color: '#3B82F6', weight: 1, fillOpacity: 0.1, opacity: 0.3
+        }).addTo(map);
+        """.trimIndent()
+    } else ""
 
     return """
     <!DOCTYPE html>
@@ -153,7 +215,8 @@ private fun buildLeafletHtml(nodes: List<NodePosition>): String {
             L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
                 maxZoom: 19,
             }).addTo(map);
-            $markers
+            $phoneMarker
+            $nodeMarkers
         </script>
     </body>
     </html>

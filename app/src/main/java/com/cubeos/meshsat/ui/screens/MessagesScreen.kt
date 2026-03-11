@@ -3,6 +3,7 @@ package com.cubeos.meshsat.ui.screens
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -17,16 +18,19 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenuItem
@@ -51,9 +55,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.cubeos.meshsat.ble.MeshtasticBle
 import com.cubeos.meshsat.bt.IridiumSpp
@@ -62,11 +68,13 @@ import com.cubeos.meshsat.data.AppDatabase
 import com.cubeos.meshsat.data.ConversationKey
 import com.cubeos.meshsat.data.ConversationSummary
 import com.cubeos.meshsat.data.Message
+import com.cubeos.meshsat.data.SettingsRepository
 import com.cubeos.meshsat.service.GatewayService
 import com.cubeos.meshsat.ui.theme.ColorCellular
 import com.cubeos.meshsat.ui.theme.ColorIridium
 import com.cubeos.meshsat.ui.theme.ColorMesh
 import com.cubeos.meshsat.ui.theme.MeshSatAmber
+import com.cubeos.meshsat.ui.theme.MeshSatRed
 import com.cubeos.meshsat.ui.theme.MeshSatBorder
 import com.cubeos.meshsat.ui.theme.MeshSatSurface
 import com.cubeos.meshsat.ui.theme.MeshSatTeal
@@ -82,14 +90,14 @@ fun MessagesScreen() {
     val context = LocalContext.current
     val db = AppDatabase.getInstance(context)
 
-    var viewMode by remember { mutableStateOf("all") } // "all" or "conversations"
+    var viewMode by remember { mutableStateOf("conversations") } // default to conversations
     var selectedSender by remember { mutableStateOf<String?>(null) }
     var searchQuery by remember { mutableStateOf("") }
 
-    // When a conversation is selected, show filtered messages
+    // When a conversation is selected, show chat view
     if (selectedSender != null) {
-        ConversationDetailView(
-            sender = selectedSender!!,
+        ConversationChatView(
+            peer = selectedSender!!,
             db = db,
             onBack = { selectedSender = null },
         )
@@ -103,13 +111,6 @@ fun MessagesScreen() {
     }).collectAsState(initial = emptyList())
 
     val conversations by db.messageDao().getConversations().collectAsState(initial = emptyList())
-
-    var composeText by remember { mutableStateOf("") }
-    var sendTransport by remember { mutableStateOf("mesh") }
-    var transportExpanded by remember { mutableStateOf(false) }
-
-    val meshConnected = GatewayService.meshtasticBle?.state?.collectAsState()?.value == MeshtasticBle.State.Connected
-    val iridiumConnected = GatewayService.iridiumSpp?.state?.collectAsState()?.value == IridiumSpp.State.Connected
 
     Column(
         modifier = Modifier
@@ -128,18 +129,18 @@ fun MessagesScreen() {
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             FilterChip(
-                selected = viewMode == "all",
-                onClick = { viewMode = "all" },
-                label = { Text("All", style = MaterialTheme.typography.bodySmall) },
+                selected = viewMode == "conversations",
+                onClick = { viewMode = "conversations" },
+                label = { Text("Chats", style = MaterialTheme.typography.bodySmall) },
                 colors = FilterChipDefaults.filterChipColors(
                     selectedContainerColor = MeshSatTeal.copy(alpha = 0.2f),
                     selectedLabelColor = MeshSatTeal,
                 ),
             )
             FilterChip(
-                selected = viewMode == "conversations",
-                onClick = { viewMode = "conversations" },
-                label = { Text("Conversations", style = MaterialTheme.typography.bodySmall) },
+                selected = viewMode == "all",
+                onClick = { viewMode = "all" },
+                label = { Text("All Messages", style = MaterialTheme.typography.bodySmall) },
                 colors = FilterChipDefaults.filterChipColors(
                     selectedContainerColor = MeshSatTeal.copy(alpha = 0.2f),
                     selectedLabelColor = MeshSatTeal,
@@ -172,21 +173,6 @@ fun MessagesScreen() {
                 ),
             )
 
-            // Compose bar
-            ComposeBar(
-                composeText = composeText,
-                onComposeTextChange = { composeText = it },
-                sendTransport = sendTransport,
-                onSendTransportChange = { sendTransport = it },
-                transportExpanded = transportExpanded,
-                onTransportExpandedChange = { transportExpanded = it },
-                meshConnected = meshConnected,
-                iridiumConnected = iridiumConnected,
-                onSend = {
-                    composeText = ""
-                },
-            )
-
             // Message list
             if (messages.isEmpty()) {
                 Box(
@@ -195,15 +181,10 @@ fun MessagesScreen() {
                         .padding(top = 16.dp),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text(
-                        text = "No messages yet",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MeshSatTextMuted,
-                    )
+                    Text("No messages yet", style = MaterialTheme.typography.bodyLarge, color = MeshSatTextMuted)
                 }
             } else {
                 LazyColumn(
-                    modifier = Modifier.padding(top = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     items(messages, key = { it.id }) { msg ->
@@ -220,11 +201,7 @@ fun MessagesScreen() {
                         .padding(top = 16.dp),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text(
-                        text = "No conversations yet",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MeshSatTextMuted,
-                    )
+                    Text("No conversations yet", style = MaterialTheme.typography.bodyLarge, color = MeshSatTextMuted)
                 }
             } else {
                 LazyColumn(
@@ -238,109 +215,6 @@ fun MessagesScreen() {
                     }
                 }
             }
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun ComposeBar(
-    composeText: String,
-    onComposeTextChange: (String) -> Unit,
-    sendTransport: String,
-    onSendTransportChange: (String) -> Unit,
-    transportExpanded: Boolean,
-    onTransportExpandedChange: (Boolean) -> Unit,
-    meshConnected: Boolean,
-    iridiumConnected: Boolean,
-    onSend: () -> Unit,
-) {
-    val context = LocalContext.current
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(MeshSatSurface, RoundedCornerShape(8.dp))
-            .border(1.dp, MeshSatBorder, RoundedCornerShape(8.dp))
-            .padding(8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        ExposedDropdownMenuBox(
-            expanded = transportExpanded,
-            onExpandedChange = { onTransportExpandedChange(!transportExpanded) },
-            modifier = Modifier.weight(0.35f),
-        ) {
-            OutlinedTextField(
-                value = sendTransport.uppercase(),
-                onValueChange = {},
-                readOnly = true,
-                singleLine = true,
-                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(transportExpanded) },
-                modifier = Modifier.menuAnchor(),
-                textStyle = MaterialTheme.typography.bodySmall,
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = MeshSatTeal,
-                    unfocusedBorderColor = MeshSatBorder,
-                ),
-            )
-            ExposedDropdownMenu(
-                expanded = transportExpanded,
-                onDismissRequest = { onTransportExpandedChange(false) },
-            ) {
-                DropdownMenuItem(
-                    text = { Text("MESH") },
-                    onClick = { onSendTransportChange("mesh"); onTransportExpandedChange(false) },
-                    enabled = meshConnected,
-                )
-                DropdownMenuItem(
-                    text = { Text("IRIDIUM") },
-                    onClick = { onSendTransportChange("iridium"); onTransportExpandedChange(false) },
-                    enabled = iridiumConnected,
-                )
-            }
-        }
-
-        OutlinedTextField(
-            value = composeText,
-            onValueChange = onComposeTextChange,
-            placeholder = { Text("Message...", style = MaterialTheme.typography.bodySmall) },
-            singleLine = true,
-            modifier = Modifier.weight(0.55f),
-            textStyle = MaterialTheme.typography.bodyMedium,
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = MeshSatTeal,
-                unfocusedBorderColor = MeshSatBorder,
-            ),
-        )
-
-        IconButton(
-            onClick = {
-                if (composeText.isBlank()) return@IconButton
-                when (sendTransport) {
-                    "mesh" -> {
-                        if (!meshConnected) {
-                            Toast.makeText(context, "Mesh not connected", Toast.LENGTH_SHORT).show()
-                            return@IconButton
-                        }
-                        GatewayService.meshtasticBle?.let { ble ->
-                            val proto = com.cubeos.meshsat.ble.MeshtasticProtocol.encodeTextMessage(composeText)
-                            ble.sendToRadio(proto)
-                        }
-                    }
-                    "iridium" -> {
-                        if (!iridiumConnected) {
-                            Toast.makeText(context, "Iridium not connected", Toast.LENGTH_SHORT).show()
-                            return@IconButton
-                        }
-                    }
-                }
-                Toast.makeText(context, "Sent via ${sendTransport.uppercase()}", Toast.LENGTH_SHORT).show()
-                onSend()
-            },
-            modifier = Modifier.weight(0.1f),
-        ) {
-            Icon(Icons.Default.Send, contentDescription = "Send", tint = MeshSatTeal)
         }
     }
 }
@@ -368,11 +242,8 @@ private fun ConversationCard(conv: ConversationSummary, onClick: () -> Unit) {
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    text = conv.sender,
-                    style = MaterialTheme.typography.titleMedium,
-                )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.weight(1f)) {
+                Text(text = conv.sender, style = MaterialTheme.typography.titleMedium)
                 Text(
                     text = conv.transport.uppercase(),
                     style = MaterialTheme.typography.bodySmall,
@@ -382,24 +253,25 @@ private fun ConversationCard(conv: ConversationSummary, onClick: () -> Unit) {
                         .padding(horizontal = 6.dp, vertical = 2.dp),
                 )
                 if (conv.hasEncrypted) {
-                    Text(
-                        text = "ENC",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MeshSatAmber,
-                        modifier = Modifier
-                            .background(MeshSatAmber.copy(alpha = 0.15f), RoundedCornerShape(4.dp))
-                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                    Icon(
+                        Icons.Default.Lock,
+                        contentDescription = "Encrypted",
+                        tint = MeshSatAmber,
+                        modifier = Modifier.size(16.dp),
                     )
                 }
             }
-            Text(
-                text = "${conv.messageCount}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MeshSatTeal,
-                modifier = Modifier
-                    .background(MeshSatTeal.copy(alpha = 0.15f), RoundedCornerShape(4.dp))
-                    .padding(horizontal = 6.dp, vertical = 2.dp),
-            )
+            Column(horizontalAlignment = Alignment.End) {
+                Text(text = timeStr, style = MaterialTheme.typography.bodySmall, color = MeshSatTextMuted)
+                Text(
+                    text = "${conv.messageCount}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MeshSatTeal,
+                    modifier = Modifier
+                        .background(MeshSatTeal.copy(alpha = 0.15f), RoundedCornerShape(4.dp))
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                )
+            }
         }
 
         Text(
@@ -407,41 +279,57 @@ private fun ConversationCard(conv: ConversationSummary, onClick: () -> Unit) {
             style = MaterialTheme.typography.bodyMedium,
             color = MeshSatTextMuted,
             maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(top = 4.dp),
-        )
-
-        Text(
-            text = timeStr,
-            style = MaterialTheme.typography.bodySmall,
-            color = MeshSatTextMuted,
-            modifier = Modifier.padding(top = 2.dp),
         )
     }
 }
 
+/**
+ * Chat-style conversation view with message bubbles and compose bar.
+ * Decrypts messages on-the-fly — if key is deleted, shows ciphertext.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ConversationDetailView(
-    sender: String,
+private fun ConversationChatView(
+    peer: String,
     db: AppDatabase,
     onBack: () -> Unit,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val messages by db.messageDao().getBySender(sender).collectAsState(initial = emptyList())
+    val settings = remember { SettingsRepository(context) }
+
+    val messages by db.messageDao().getConversation(peer).collectAsState(initial = emptyList())
+    val globalKey by settings.encryptionKey.collectAsState(initial = "")
 
     // Per-conversation encryption key
     val allConvKeys by db.conversationKeyDao().getAll().collectAsState(initial = emptyList())
-    val convKey = allConvKeys.find { it.sender == sender }
+    val convKey = allConvKeys.find { it.sender == peer }
+    val activeKey = convKey?.hexKey?.ifEmpty { null } ?: globalKey.ifEmpty { null }
+
     var keyInput by remember(convKey) { mutableStateOf(convKey?.hexKey ?: "") }
     var showKeySection by remember { mutableStateOf(false) }
     var showKey by remember { mutableStateOf(false) }
+
+    // Compose bar state
+    var composeText by remember { mutableStateOf("") }
+    var sendTransport by remember { mutableStateOf("sms") } // default to sms for conversations
+    var transportExpanded by remember { mutableStateOf(false) }
+
+    val meshConnected = GatewayService.meshtasticBle?.state?.collectAsState()?.value == MeshtasticBle.State.Connected
+    val iridiumConnected = GatewayService.iridiumSpp?.state?.collectAsState()?.value == IridiumSpp.State.Connected
+
+    // Detect transport from conversation history
+    val primaryTransport = messages.firstOrNull { it.direction == "rx" }?.transport ?: "sms"
+    val listState = rememberLazyListState()
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(16.dp),
     ) {
-        // Header with back button and key toggle
+        // Header with back button, peer name, key toggle
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.padding(bottom = 8.dp),
@@ -449,169 +337,452 @@ private fun ConversationDetailView(
             IconButton(onClick = onBack) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = MeshSatTeal)
             }
-            Text(
-                text = sender,
-                style = MaterialTheme.typography.headlineMedium,
-                modifier = Modifier.weight(1f),
-            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(text = peer, style = MaterialTheme.typography.titleLarge)
+                Text(
+                    text = primaryTransport.uppercase(),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = when (primaryTransport) {
+                        "mesh" -> ColorMesh; "iridium" -> ColorIridium; else -> ColorCellular
+                    },
+                )
+            }
             IconButton(onClick = { showKeySection = !showKeySection }) {
                 Icon(
-                    Icons.Default.Lock,
+                    if (activeKey != null) Icons.Default.Lock else Icons.Default.LockOpen,
                     contentDescription = "Encryption key",
-                    tint = if (convKey != null) MeshSatAmber else MeshSatTextMuted,
+                    tint = if (activeKey != null) MeshSatAmber else MeshSatTextMuted,
                 )
             }
         }
 
         // Per-conversation key management (collapsible)
         if (showKeySection) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(MeshSatSurface, RoundedCornerShape(8.dp))
-                    .border(1.dp, MeshSatBorder, RoundedCornerShape(8.dp))
-                    .padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Text(
-                    text = "Conversation Encryption Key",
-                    style = MaterialTheme.typography.titleSmall,
-                )
-                Text(
-                    text = "Set a per-conversation AES-256-GCM key. Overrides the global key for this sender.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MeshSatTextMuted,
-                )
+            KeyManagementSection(
+                convKey = convKey,
+                keyInput = keyInput,
+                onKeyInputChange = { keyInput = it },
+                showKey = showKey,
+                onShowKeyToggle = { showKey = !showKey },
+                onSave = { key ->
+                    scope.launch {
+                        db.conversationKeyDao().upsert(ConversationKey(sender = peer, hexKey = key))
+                    }
+                },
+                onRemove = {
+                    scope.launch { db.conversationKeyDao().deleteBySender(peer) }
+                    keyInput = ""
+                },
+            )
+        }
 
+        // Messages (reversed — newest at bottom like a chat)
+        LazyColumn(
+            modifier = Modifier
+                .weight(1f)
+                .padding(vertical = 4.dp),
+            state = listState,
+            reverseLayout = true,
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            items(messages, key = { it.id }) { msg ->
+                ChatBubble(msg = msg, activeKey = activeKey)
+            }
+        }
+
+        // Compose bar
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(MeshSatSurface, RoundedCornerShape(8.dp))
+                .border(1.dp, MeshSatBorder, RoundedCornerShape(8.dp))
+                .padding(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            // Transport picker
+            ExposedDropdownMenuBox(
+                expanded = transportExpanded,
+                onExpandedChange = { transportExpanded = !transportExpanded },
+                modifier = Modifier.weight(0.3f),
+            ) {
                 OutlinedTextField(
-                    value = keyInput,
-                    onValueChange = { keyInput = it },
-                    label = { Text("Hex key (64 chars)", style = MaterialTheme.typography.bodySmall) },
-                    visualTransformation = if (showKey) VisualTransformation.None else PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
+                    value = sendTransport.uppercase(),
+                    onValueChange = {},
+                    readOnly = true,
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    textStyle = MaterialTheme.typography.labelMedium,
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(transportExpanded) },
+                    modifier = Modifier.menuAnchor(),
+                    textStyle = MaterialTheme.typography.bodySmall,
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = MeshSatTeal,
                         unfocusedBorderColor = MeshSatBorder,
                     ),
                 )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ExposedDropdownMenu(
+                    expanded = transportExpanded,
+                    onDismissRequest = { transportExpanded = false },
                 ) {
-                    Button(
-                        onClick = { showKey = !showKey },
-                        colors = ButtonDefaults.buttonColors(containerColor = MeshSatSurface),
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Text(if (showKey) "Hide" else "Show", style = MaterialTheme.typography.bodySmall)
-                    }
+                    DropdownMenuItem(
+                        text = { Text("SMS") },
+                        onClick = { sendTransport = "sms"; transportExpanded = false },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("MESH") },
+                        onClick = { sendTransport = "mesh"; transportExpanded = false },
+                        enabled = meshConnected,
+                    )
+                    DropdownMenuItem(
+                        text = { Text("IRIDIUM") },
+                        onClick = { sendTransport = "iridium"; transportExpanded = false },
+                        enabled = iridiumConnected,
+                    )
+                }
+            }
 
-                    Button(
-                        onClick = {
-                            keyInput = AesGcmCrypto.generateKey()
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = MeshSatAmber),
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Text("Generate", style = MaterialTheme.typography.bodySmall)
+            OutlinedTextField(
+                value = composeText,
+                onValueChange = { composeText = it },
+                placeholder = { Text("Message...", style = MaterialTheme.typography.bodySmall) },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                keyboardActions = KeyboardActions(onSend = {
+                    if (composeText.isNotBlank()) {
+                        sendMessage(context, composeText, sendTransport, peer, meshConnected, iridiumConnected)
+                        composeText = ""
                     }
+                }),
+                modifier = Modifier.weight(0.6f),
+                textStyle = MaterialTheme.typography.bodyMedium,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = MeshSatTeal,
+                    unfocusedBorderColor = MeshSatBorder,
+                ),
+            )
 
-                    Button(
-                        onClick = {
-                            if (keyInput.length == 64 && keyInput.all { it in "0123456789abcdefABCDEF" }) {
-                                scope.launch {
-                                    db.conversationKeyDao().upsert(
-                                        ConversationKey(sender = sender, hexKey = keyInput)
-                                    )
-                                }
-                                Toast.makeText(context, "Key saved for $sender", Toast.LENGTH_SHORT).show()
-                            } else {
-                                Toast.makeText(context, "Invalid key — must be 64 hex chars", Toast.LENGTH_LONG).show()
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = MeshSatTeal),
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Text("Save", style = MaterialTheme.typography.bodySmall)
+            IconButton(
+                onClick = {
+                    if (composeText.isBlank()) return@IconButton
+                    sendMessage(context, composeText, sendTransport, peer, meshConnected, iridiumConnected)
+                    composeText = ""
+                },
+                modifier = Modifier.weight(0.1f),
+            ) {
+                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send", tint = MeshSatTeal)
+            }
+        }
+    }
+}
+
+private fun sendMessage(
+    context: Context,
+    text: String,
+    transport: String,
+    peer: String,
+    meshConnected: Boolean,
+    iridiumConnected: Boolean,
+) {
+    when (transport) {
+        "sms" -> {
+            // Send SMS to the peer (encryption handled in GatewayService)
+            context.startService(
+                Intent(context, GatewayService::class.java)
+                    .setAction(GatewayService.ACTION_SEND_SMS)
+                    .putExtra(GatewayService.EXTRA_TEXT, text)
+                    .putExtra(GatewayService.EXTRA_RECIPIENT, peer)
+            )
+            Toast.makeText(context, "Sending SMS to $peer", Toast.LENGTH_SHORT).show()
+        }
+        "mesh" -> {
+            if (!meshConnected) {
+                Toast.makeText(context, "Mesh not connected", Toast.LENGTH_SHORT).show()
+                return
+            }
+            context.startService(
+                Intent(context, GatewayService::class.java)
+                    .setAction(GatewayService.ACTION_SEND_MESH)
+                    .putExtra(GatewayService.EXTRA_TEXT, text)
+            )
+            Toast.makeText(context, "Sent via MESH", Toast.LENGTH_SHORT).show()
+        }
+        "iridium" -> {
+            if (!iridiumConnected) {
+                Toast.makeText(context, "Iridium not connected", Toast.LENGTH_SHORT).show()
+                return
+            }
+            context.startService(
+                Intent(context, GatewayService::class.java)
+                    .setAction(GatewayService.ACTION_SEND_IRIDIUM)
+                    .putExtra(GatewayService.EXTRA_TEXT, text)
+            )
+            Toast.makeText(context, "Sent via IRIDIUM", Toast.LENGTH_SHORT).show()
+        }
+    }
+}
+
+/**
+ * Chat bubble — decrypts on-the-fly using the active key.
+ * If key is deleted/missing, shows ciphertext for encrypted messages.
+ */
+@Composable
+private fun ChatBubble(msg: Message, activeKey: String?) {
+    val context = LocalContext.current
+    val isSelf = msg.direction == "tx"
+    val transportColor = when (msg.transport) {
+        "mesh" -> ColorMesh; "iridium" -> ColorIridium; "sms" -> ColorCellular; else -> MeshSatTextMuted
+    }
+
+    // Decrypt on-the-fly for encrypted messages
+    val displayText = if (msg.encrypted && msg.rawText.isNotEmpty()) {
+        if (activeKey != null) {
+            try {
+                AesGcmCrypto.decryptFromBase64(msg.rawText.trim(), activeKey)
+            } catch (_: Exception) {
+                msg.rawText // key wrong — show ciphertext
+            }
+        } else {
+            msg.rawText // no key — show ciphertext
+        }
+    } else {
+        msg.text
+    }
+
+    val isShowingCiphertext = msg.encrypted && displayText == msg.rawText
+
+    val timeStr = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(msg.timestamp))
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = if (isSelf) Arrangement.End else Arrangement.Start,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth(0.8f)
+                .background(
+                    if (isSelf) MeshSatTeal.copy(alpha = 0.15f) else MeshSatSurface,
+                    RoundedCornerShape(
+                        topStart = 12.dp,
+                        topEnd = 12.dp,
+                        bottomStart = if (isSelf) 12.dp else 4.dp,
+                        bottomEnd = if (isSelf) 4.dp else 12.dp,
+                    ),
+                )
+                .border(
+                    0.5f.dp,
+                    if (isSelf) MeshSatTeal.copy(alpha = 0.3f) else MeshSatBorder,
+                    RoundedCornerShape(
+                        topStart = 12.dp,
+                        topEnd = 12.dp,
+                        bottomStart = if (isSelf) 12.dp else 4.dp,
+                        bottomEnd = if (isSelf) 4.dp else 12.dp,
+                    ),
+                )
+                .padding(10.dp),
+        ) {
+            // Header row: badges + time
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        text = msg.transport.uppercase(),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = transportColor,
+                    )
+                    if (msg.encrypted) {
+                        Icon(
+                            if (isShowingCiphertext) Icons.Default.LockOpen else Icons.Default.Lock,
+                            contentDescription = if (isShowingCiphertext) "Encrypted (locked)" else "Decrypted",
+                            tint = if (isShowingCiphertext) MeshSatRed else MeshSatAmber,
+                            modifier = Modifier.size(12.dp),
+                        )
+                    }
+                    if (msg.forwarded) {
+                        Text(
+                            text = "FWD",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MeshSatTextMuted,
+                        )
                     }
                 }
-
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Button(
+                    Text(text = timeStr, style = MaterialTheme.typography.labelSmall, color = MeshSatTextMuted)
+                    IconButton(
                         onClick = {
-                            if (keyInput.isNotBlank()) {
-                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                clipboard.setPrimaryClip(ClipData.newPlainText("MeshSat Key", keyInput))
-                                Toast.makeText(context, "Key copied", Toast.LENGTH_SHORT).show()
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = MeshSatSurface),
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Text("Copy", style = MaterialTheme.typography.bodySmall)
-                    }
-
-                    Button(
-                        onClick = {
+                            val copyText = if (msg.encrypted && msg.rawText.isNotEmpty()) msg.rawText else msg.text
                             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                            val clip = clipboard.primaryClip?.getItemAt(0)?.text?.toString() ?: ""
-                            if (clip.length == 64 && clip.all { it in "0123456789abcdefABCDEF" }) {
-                                keyInput = clip
-                                Toast.makeText(context, "Key pasted", Toast.LENGTH_SHORT).show()
-                            } else {
-                                Toast.makeText(context, "Clipboard doesn't contain a valid 64-char hex key", Toast.LENGTH_LONG).show()
-                            }
+                            clipboard.setPrimaryClip(ClipData.newPlainText("MeshSat Message", copyText))
+                            Toast.makeText(context, "Copied", Toast.LENGTH_SHORT).show()
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = MeshSatSurface),
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.size(20.dp),
                     ) {
-                        Text("Paste", style = MaterialTheme.typography.bodySmall)
-                    }
-
-                    if (convKey != null) {
-                        Button(
-                            onClick = {
-                                scope.launch { db.conversationKeyDao().deleteBySender(sender) }
-                                keyInput = ""
-                                Toast.makeText(context, "Key removed — will use global key", Toast.LENGTH_SHORT).show()
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = MeshSatSurface),
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            Text("Remove", style = MaterialTheme.typography.bodySmall)
-                        }
+                        Icon(Icons.Default.ContentCopy, contentDescription = "Copy", tint = MeshSatTextMuted, modifier = Modifier.size(12.dp))
                     }
                 }
             }
-        }
 
-        LazyColumn(
-            modifier = Modifier.padding(top = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            items(messages, key = { it.id }) { msg ->
-                MessageCard(msg)
+            // Message text
+            SelectionContainer {
+                Text(
+                    text = displayText,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(top = 4.dp),
+                    color = if (isShowingCiphertext) MeshSatTextMuted else MaterialTheme.colorScheme.onSurface,
+                )
             }
         }
     }
 }
 
 @Composable
+private fun KeyManagementSection(
+    convKey: ConversationKey?,
+    keyInput: String,
+    onKeyInputChange: (String) -> Unit,
+    showKey: Boolean,
+    onShowKeyToggle: () -> Unit,
+    onSave: (String) -> Unit,
+    onRemove: () -> Unit,
+) {
+    val context = LocalContext.current
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MeshSatSurface, RoundedCornerShape(8.dp))
+            .border(1.dp, MeshSatBorder, RoundedCornerShape(8.dp))
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text("Conversation Encryption Key", style = MaterialTheme.typography.titleSmall)
+        Text(
+            text = "AES-256-GCM key for this conversation. Messages are encrypted/decrypted with this key.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MeshSatTextMuted,
+        )
+
+        OutlinedTextField(
+            value = keyInput,
+            onValueChange = onKeyInputChange,
+            label = { Text("Hex key (64 chars)", style = MaterialTheme.typography.bodySmall) },
+            visualTransformation = if (showKey) VisualTransformation.None else PasswordVisualTransformation(),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+            textStyle = MaterialTheme.typography.labelMedium,
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = MeshSatTeal,
+                unfocusedBorderColor = MeshSatBorder,
+            ),
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Button(
+                onClick = onShowKeyToggle,
+                colors = ButtonDefaults.buttonColors(containerColor = MeshSatSurface),
+                modifier = Modifier.weight(1f),
+            ) { Text(if (showKey) "Hide" else "Show", style = MaterialTheme.typography.bodySmall) }
+
+            Button(
+                onClick = { onKeyInputChange(AesGcmCrypto.generateKey()) },
+                colors = ButtonDefaults.buttonColors(containerColor = MeshSatAmber),
+                modifier = Modifier.weight(1f),
+            ) { Text("Generate", style = MaterialTheme.typography.bodySmall) }
+
+            Button(
+                onClick = {
+                    if (keyInput.length == 64 && keyInput.all { it in "0123456789abcdefABCDEF" }) {
+                        onSave(keyInput)
+                        Toast.makeText(context, "Key saved", Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(context, "Invalid key — 64 hex chars required", Toast.LENGTH_LONG).show()
+                    }
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = MeshSatTeal),
+                modifier = Modifier.weight(1f),
+            ) { Text("Save", style = MaterialTheme.typography.bodySmall) }
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Button(
+                onClick = {
+                    if (keyInput.isNotBlank()) {
+                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                        clipboard.setPrimaryClip(ClipData.newPlainText("MeshSat Key", keyInput))
+                        Toast.makeText(context, "Key copied", Toast.LENGTH_SHORT).show()
+                    }
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = MeshSatSurface),
+                modifier = Modifier.weight(1f),
+            ) { Text("Copy", style = MaterialTheme.typography.bodySmall) }
+
+            Button(
+                onClick = {
+                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    val clip = clipboard.primaryClip?.getItemAt(0)?.text?.toString() ?: ""
+                    if (clip.length == 64 && clip.all { it in "0123456789abcdefABCDEF" }) {
+                        onKeyInputChange(clip)
+                        Toast.makeText(context, "Key pasted", Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(context, "Clipboard doesn't contain a valid 64-char hex key", Toast.LENGTH_LONG).show()
+                    }
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = MeshSatSurface),
+                modifier = Modifier.weight(1f),
+            ) { Text("Paste", style = MaterialTheme.typography.bodySmall) }
+
+            if (convKey != null) {
+                Button(
+                    onClick = {
+                        onRemove()
+                        Toast.makeText(context, "Key removed — messages will show encrypted", Toast.LENGTH_SHORT).show()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MeshSatSurface),
+                    modifier = Modifier.weight(1f),
+                ) { Text("Remove", style = MaterialTheme.typography.bodySmall) }
+            }
+        }
+    }
+}
+
+/** Simple message card for "All Messages" view. Also decrypts on-the-fly. */
+@Composable
 private fun MessageCard(msg: Message) {
     val context = LocalContext.current
+    val db = AppDatabase.getInstance(context)
+    val settings = remember { SettingsRepository(context) }
+
+    val allConvKeys by db.conversationKeyDao().getAll().collectAsState(initial = emptyList())
+    val globalKey by settings.encryptionKey.collectAsState(initial = "")
+    val convKey = allConvKeys.find { it.sender == msg.sender }
+    val activeKey = convKey?.hexKey?.ifEmpty { null } ?: globalKey.ifEmpty { null }
+
     val transportColor = when (msg.transport) {
-        "mesh" -> ColorMesh
-        "iridium" -> ColorIridium
-        "sms" -> ColorCellular
-        else -> MeshSatTextMuted
+        "mesh" -> ColorMesh; "iridium" -> ColorIridium; "sms" -> ColorCellular; else -> MeshSatTextMuted
     }
+
+    // Decrypt on-the-fly
+    val displayText = if (msg.encrypted && msg.rawText.isNotEmpty()) {
+        if (activeKey != null) {
+            try { AesGcmCrypto.decryptFromBase64(msg.rawText.trim(), activeKey) } catch (_: Exception) { msg.rawText }
+        } else {
+            msg.rawText
+        }
+    } else {
+        msg.text
+    }
+    val isShowingCiphertext = msg.encrypted && displayText == msg.rawText
 
     val timeStr = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(msg.timestamp))
 
@@ -628,20 +799,14 @@ private fun MessageCard(msg: Message) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                // Transport badge
                 Text(
                     text = msg.transport.uppercase(),
                     style = MaterialTheme.typography.bodySmall,
                     color = transportColor,
                     modifier = Modifier
-                        .background(
-                            transportColor.copy(alpha = 0.15f),
-                            RoundedCornerShape(4.dp)
-                        )
+                        .background(transportColor.copy(alpha = 0.15f), RoundedCornerShape(4.dp))
                         .padding(horizontal = 6.dp, vertical = 2.dp),
                 )
-
-                // Direction badge
                 Text(
                     text = if (msg.direction == "rx") "RX" else "TX",
                     style = MaterialTheme.typography.bodySmall,
@@ -653,96 +818,51 @@ private fun MessageCard(msg: Message) {
                         )
                         .padding(horizontal = 6.dp, vertical = 2.dp),
                 )
-
-                // Encrypted badge
                 if (msg.encrypted) {
-                    Text(
-                        text = "ENC",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MeshSatAmber,
-                        modifier = Modifier
-                            .background(
-                                MeshSatAmber.copy(alpha = 0.15f),
-                                RoundedCornerShape(4.dp)
-                            )
-                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                    Icon(
+                        if (isShowingCiphertext) Icons.Default.LockOpen else Icons.Default.Lock,
+                        contentDescription = "Encryption",
+                        tint = if (isShowingCiphertext) MeshSatRed else MeshSatAmber,
+                        modifier = Modifier.size(16.dp),
                     )
                 }
-
-                // Forwarded badge
                 if (msg.forwarded) {
                     Text(
                         text = "FWD",
                         style = MaterialTheme.typography.bodySmall,
                         color = MeshSatTextMuted,
                         modifier = Modifier
-                            .background(
-                                MeshSatTextMuted.copy(alpha = 0.15f),
-                                RoundedCornerShape(4.dp)
-                            )
+                            .background(MeshSatTextMuted.copy(alpha = 0.15f), RoundedCornerShape(4.dp))
                             .padding(horizontal = 6.dp, vertical = 2.dp),
                     )
                 }
             }
-
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = timeStr,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MeshSatTextMuted,
-                )
-
-                // Copy button — copies raw ciphertext if encrypted, otherwise plaintext
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(text = timeStr, style = MaterialTheme.typography.bodySmall, color = MeshSatTextMuted)
                 IconButton(
                     onClick = {
                         val copyText = if (msg.encrypted && msg.rawText.isNotEmpty()) msg.rawText else msg.text
                         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                         clipboard.setPrimaryClip(ClipData.newPlainText("MeshSat Message", copyText))
-                        Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "Copied", Toast.LENGTH_SHORT).show()
                     },
                     modifier = Modifier.size(24.dp),
                 ) {
-                    Icon(
-                        Icons.Default.ContentCopy,
-                        contentDescription = "Copy message",
-                        tint = MeshSatTextMuted,
-                        modifier = Modifier.size(16.dp),
-                    )
+                    Icon(Icons.Default.ContentCopy, contentDescription = "Copy", tint = MeshSatTextMuted, modifier = Modifier.size(16.dp))
                 }
             }
         }
 
-        // Sender
-        Text(
-            text = msg.sender,
-            style = MaterialTheme.typography.bodySmall,
-            color = MeshSatTextMuted,
-            modifier = Modifier.padding(top = 4.dp),
-        )
+        Text(text = msg.sender, style = MaterialTheme.typography.bodySmall, color = MeshSatTextMuted, modifier = Modifier.padding(top = 4.dp))
 
-        // Message text (selectable)
         SelectionContainer {
             Text(
-                text = msg.text,
+                text = displayText,
                 style = MaterialTheme.typography.bodyLarge,
                 modifier = Modifier.padding(top = 4.dp),
+                color = if (isShowingCiphertext) MeshSatTextMuted else MaterialTheme.colorScheme.onSurface,
             )
-        }
-
-        // Show raw ciphertext below if message was encrypted but text differs (decrypted)
-        if (msg.encrypted && msg.rawText.isNotEmpty() && msg.rawText != msg.text) {
-            SelectionContainer {
-                Text(
-                    text = msg.rawText,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MeshSatTextMuted,
-                    maxLines = 1,
-                    modifier = Modifier.padding(top = 2.dp),
-                )
-            }
         }
     }
 }
+

@@ -12,7 +12,10 @@ interface SignalDao {
     suspend fun insert(record: SignalRecord)
 
     @Query("SELECT * FROM signal_history WHERE source = :source ORDER BY timestamp DESC LIMIT :limit")
-    fun getRecent(source: String, limit: Int = 60): Flow<List<SignalRecord>>
+    fun getRecent(source: String, limit: Int = 360): Flow<List<SignalRecord>>
+
+    @Query("SELECT * FROM signal_history WHERE source = :source AND timestamp > :since ORDER BY timestamp ASC")
+    fun getSince(source: String, since: Long): Flow<List<SignalRecord>>
 
     @Query("DELETE FROM signal_history WHERE timestamp < :before")
     suspend fun deleteBefore(before: Long)

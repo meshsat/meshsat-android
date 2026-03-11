@@ -1,10 +1,19 @@
 package com.cubeos.meshsat.sms
 
+import android.Manifest
+import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.provider.Telephony
 import android.util.Log
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
+import com.cubeos.meshsat.MainActivity
+import com.cubeos.meshsat.MeshSatApp
+import com.cubeos.meshsat.R
 import com.cubeos.meshsat.crypto.AesGcmCrypto
 import com.cubeos.meshsat.data.AppDatabase
 import com.cubeos.meshsat.data.Message
@@ -17,9 +26,7 @@ import kotlinx.coroutines.launch
 /**
  * Receives incoming SMS and auto-decrypts MeshSat encrypted messages.
  * Stores all received SMS in the local database for the message feed.
- *
- * Uses goAsync() to keep the BroadcastReceiver alive while the coroutine
- * reads settings and writes to the database.
+ * Posts notifications for incoming messages.
  */
 class SmsReceiver : BroadcastReceiver() {
 
@@ -43,7 +50,6 @@ class SmsReceiver : BroadcastReceiver() {
         val db = AppDatabase.getInstance(context)
         val settings = SettingsRepository(context)
 
-        // goAsync() keeps the receiver alive while coroutine runs (up to ~30s)
         val pendingResult = goAsync()
 
         CoroutineScope(Dispatchers.IO).launch {
@@ -60,12 +66,10 @@ class SmsReceiver : BroadcastReceiver() {
                     val looksEnc = AesGcmCrypto.looksEncrypted(text)
 
                     if (looksEnc) {
-                        // Mark as encrypted regardless of whether decryption succeeds
                         wasEncrypted = true
                         rawCiphertext = text
 
                         if (autoDecrypt) {
-                            // Try per-conversation key first, then global key
                             val convKey = db.conversationKeyDao().getBySender(sender)?.hexKey
                             val keyToUse = convKey?.ifEmpty { null } ?: globalKey
 
@@ -75,7 +79,6 @@ class SmsReceiver : BroadcastReceiver() {
                                     Log.d("MeshSat", "SMS auto-decrypted from $sender (${if (convKey != null) "conv key" else "global key"})")
                                 } catch (e: Exception) {
                                     Log.w("MeshSat", "SMS decrypt failed from $sender: ${e.message}")
-                                    // Keep original text — user can manually decrypt in Crypto tab
                                 }
                             } else {
                                 Log.d("MeshSat", "SMS looks encrypted from $sender but no key configured")
@@ -97,6 +100,9 @@ class SmsReceiver : BroadcastReceiver() {
                             encrypted = wasEncrypted,
                         )
                     )
+
+                    // Post notification
+                    postNotification(context, sender, decryptedText)
                 }
             } catch (e: Exception) {
                 Log.e("MeshSat", "SmsReceiver processing failed", e)
@@ -104,5 +110,33 @@ class SmsReceiver : BroadcastReceiver() {
                 pendingResult.finish()
             }
         }
+    }
+
+    private fun postNotification(context: Context, sender: String, text: String) {
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS)
+            != PackageManager.PERMISSION_GRANTED
+        ) return
+
+        val tapIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            context, 0, tapIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
+        val notification = NotificationCompat.Builder(context, MeshSatApp.CHANNEL_MESSAGES)
+            .setContentTitle("SMS: $sender")
+            .setContentText(text)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setAutoCancel(true)
+            .setContentIntent(pendingIntent)
+            .build()
+
+        try {
+            NotificationManagerCompat.from(context).notify(
+                (System.currentTimeMillis() % Int.MAX_VALUE).toInt(),
+                notification,
+            )
+        } catch (_: SecurityException) {}
     }
 }

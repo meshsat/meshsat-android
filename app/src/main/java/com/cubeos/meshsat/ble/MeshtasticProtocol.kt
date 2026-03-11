@@ -41,6 +41,23 @@ object MeshtasticProtocol {
         val time: Long,         // epoch ms
     )
 
+    /** Node info from mesh. */
+    data class MeshNodeInfo(
+        val nodeNum: Long,
+        val longName: String = "",
+        val shortName: String = "",
+        val macaddr: String = "",
+        val hwModel: Int = 0,
+    )
+
+    /** My node info (this radio's device info). */
+    data class MyNodeInfo(
+        val myNodeNum: Long = 0,
+        val firmwareVersion: String = "",
+        val rebootCount: Int = 0,
+        val minAppVersion: Int = 0,
+    )
+
     /** Parse a fromRadio protobuf response, extracting text messages. Returns null if not a text message. */
     fun parseFromRadio(data: ByteArray): MeshTextMessage? {
         // FromRadio: field 2 (LEN) = MeshPacket
@@ -52,6 +69,36 @@ object MeshtasticProtocol {
     fun parsePositionFromRadio(data: ByteArray): MeshPosition? {
         val meshPacketBytes = extractField(data, fieldNumber = 2, wireType = 2) ?: return null
         return parsePositionPacket(meshPacketBytes)
+    }
+
+    /** Parse my_info from FromRadio (field 3). */
+    fun parseMyInfo(data: ByteArray): MyNodeInfo? {
+        val myInfoBytes = extractField(data, fieldNumber = 3, wireType = 2) ?: return null
+        val nodeNum = extractVarint(myInfoBytes, fieldNumber = 1) ?: 0L
+        val fwVersion = extractField(myInfoBytes, fieldNumber = 6, wireType = 2)
+            ?.let { String(it, Charsets.UTF_8) } ?: ""
+        val rebootCount = extractVarint(myInfoBytes, fieldNumber = 8)?.toInt() ?: 0
+        val minApp = extractVarint(myInfoBytes, fieldNumber = 11)?.toInt() ?: 0
+        return MyNodeInfo(nodeNum, fwVersion, rebootCount, minApp)
+    }
+
+    /** Parse node_info from FromRadio (field 4). */
+    fun parseNodeInfo(data: ByteArray): MeshNodeInfo? {
+        val nodeInfoBytes = extractField(data, fieldNumber = 4, wireType = 2) ?: return null
+        val nodeNum = extractVarint(nodeInfoBytes, fieldNumber = 1) ?: return null
+        // field 2 = User sub-message
+        val userBytes = extractField(nodeInfoBytes, fieldNumber = 2, wireType = 2)
+        val longName = userBytes?.let { extractField(it, fieldNumber = 2, wireType = 2) }
+            ?.let { String(it, Charsets.UTF_8) } ?: ""
+        val shortName = userBytes?.let { extractField(it, fieldNumber = 3, wireType = 2) }
+            ?.let { String(it, Charsets.UTF_8) } ?: ""
+        val hwModel = userBytes?.let { extractVarint(it, fieldNumber = 5)?.toInt() } ?: 0
+        return MeshNodeInfo(nodeNum, longName, shortName, hwModel = hwModel)
+    }
+
+    /** Parse NodeInfo with position from FromRadio. */
+    fun parseNodeInfoFromRadio(data: ByteArray): MeshNodeInfo? {
+        return parseNodeInfo(data)
     }
 
     /** Parse a MeshPacket protobuf for text messages. */
