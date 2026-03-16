@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.provider.Telephony
+import android.util.Base64
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -15,6 +16,8 @@ import com.cubeos.meshsat.MainActivity
 import com.cubeos.meshsat.MeshSatApp
 import com.cubeos.meshsat.R
 import com.cubeos.meshsat.crypto.AesGcmCrypto
+import com.cubeos.meshsat.crypto.MsvqscCodebook
+import com.cubeos.meshsat.crypto.MsvqscWire
 import com.cubeos.meshsat.data.AppDatabase
 import com.cubeos.meshsat.data.Message
 import com.cubeos.meshsat.data.SettingsRepository
@@ -24,9 +27,10 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /**
- * Receives incoming SMS and auto-decrypts MeshSat encrypted messages.
- * Stores all received SMS in the local database for the message feed.
- * Posts notifications for incoming messages.
+ * Receives incoming SMS with support for MSVQ-SC decompression and AES-GCM decryption.
+ *
+ * RX pipeline: SMS → base64 decode → AES-GCM decrypt → detect MSVQ-SC header → codebook decode → text
+ * Either layer can be independently present or absent.
  */
 class SmsReceiver : BroadcastReceiver() {
 
@@ -57,52 +61,32 @@ class SmsReceiver : BroadcastReceiver() {
                 val globalKey = settings.encryptionKey.first()
                 val autoDecrypt = settings.autoDecryptSms.first()
 
+                // Lazy-load codebook (cached in companion)
+                val codebook = getCodebook(context)
+
                 for ((sender, body) in grouped) {
                     val text = body.toString()
-                    var decryptedText = text
-                    var wasEncrypted = false
-                    var rawCiphertext = ""
-
-                    val looksEnc = AesGcmCrypto.looksEncrypted(text)
-
-                    if (looksEnc) {
-                        wasEncrypted = true
-                        rawCiphertext = text
-
-                        if (autoDecrypt) {
-                            val convKey = db.conversationKeyDao().getBySender(sender)?.hexKey
-                            val keyToUse = convKey?.ifEmpty { null } ?: globalKey
-
-                            if (keyToUse.isNotEmpty()) {
-                                try {
-                                    decryptedText = AesGcmCrypto.decryptFromBase64(text.trim(), keyToUse)
-                                    Log.d("MeshSat", "SMS auto-decrypted from $sender (${if (convKey != null) "conv key" else "global key"})")
-                                } catch (e: Exception) {
-                                    Log.w("MeshSat", "SMS decrypt failed from $sender: ${e.message}")
-                                }
-                            } else {
-                                Log.d("MeshSat", "SMS looks encrypted from $sender but no key configured")
-                            }
-                        } else {
-                            Log.d("MeshSat", "SMS looks encrypted from $sender but auto-decrypt disabled")
-                        }
-                    } else {
-                        Log.d("MeshSat", "SMS from $sender plain text (len=${text.length})")
-                    }
+                    val result = processIncoming(
+                        text = text,
+                        sender = sender,
+                        globalKey = globalKey,
+                        autoDecrypt = autoDecrypt,
+                        codebook = codebook,
+                        db = db,
+                    )
 
                     db.messageDao().insert(
                         Message(
                             transport = "sms",
                             direction = "rx",
                             sender = sender,
-                            text = decryptedText,
-                            rawText = rawCiphertext,
-                            encrypted = wasEncrypted,
+                            text = result.displayText,
+                            rawText = result.rawText,
+                            encrypted = result.wasEncrypted,
                         )
                     )
 
-                    // Post notification
-                    postNotification(context, sender, decryptedText)
+                    postNotification(context, sender, result.displayText)
                 }
             } catch (e: Exception) {
                 Log.e("MeshSat", "SmsReceiver processing failed", e)
@@ -110,6 +94,86 @@ class SmsReceiver : BroadcastReceiver() {
                 pendingResult.finish()
             }
         }
+    }
+
+    private data class ProcessResult(
+        val displayText: String,
+        val rawText: String,
+        val wasEncrypted: Boolean,
+        val wasCompressed: Boolean,
+    )
+
+    /**
+     * Process an incoming SMS through the decode pipeline:
+     * 1. Try base64 decode
+     * 2. Try AES-GCM decrypt (with conversation key or global key)
+     * 3. Detect MSVQ-SC wire header → codebook decode
+     * 4. Fall through to plain text
+     */
+    private suspend fun processIncoming(
+        text: String,
+        sender: String,
+        globalKey: String,
+        autoDecrypt: Boolean,
+        codebook: MsvqscCodebook?,
+        db: AppDatabase,
+    ): ProcessResult {
+        // Try to decode as base64 (all encrypted/compressed messages are base64)
+        val rawBytes = try {
+            Base64.decode(text.trim(), Base64.DEFAULT)
+        } catch (_: Exception) {
+            null
+        }
+
+        if (rawBytes == null || rawBytes.size < 2) {
+            // Plain text SMS — not encrypted, not compressed
+            Log.d(TAG, "SMS from $sender: plain text (len=${text.length})")
+            return ProcessResult(text, "", wasEncrypted = false, wasCompressed = false)
+        }
+
+        // Could be: encrypted+compressed, encrypted-only, compressed-only
+        var payload = rawBytes
+        var wasEncrypted = false
+
+        // Step 1: Try AES-GCM decrypt (if looks encrypted and auto-decrypt enabled)
+        if (autoDecrypt && AesGcmCrypto.looksEncrypted(text)) {
+            val convKey = db.conversationKeyDao().getBySender(sender)?.hexKey
+            val keyToUse = convKey?.ifEmpty { null } ?: globalKey
+
+            if (keyToUse.isNotEmpty()) {
+                try {
+                    payload = AesGcmCrypto.decrypt(rawBytes, keyToUse)
+                    wasEncrypted = true
+                    Log.d(TAG, "SMS decrypted from $sender (${if (convKey != null) "conv key" else "global key"})")
+                } catch (e: Exception) {
+                    Log.w(TAG, "SMS decrypt failed from $sender: ${e.message}")
+                    // Decrypt failed — might not actually be encrypted
+                    // Fall through with original rawBytes
+                }
+            }
+        }
+
+        // Step 2: Check if payload is MSVQ-SC wire format
+        if (codebook != null && MsvqscWire.looksLikeMsvqsc(payload)) {
+            try {
+                val decoded = codebook.decode(payload)
+                Log.d(TAG, "SMS MSVQ-SC decoded from $sender: ${payload.size}B → \"$decoded\"" +
+                        if (wasEncrypted) " [was encrypted]" else "")
+                return ProcessResult(decoded, text, wasEncrypted, wasCompressed = true)
+            } catch (e: Exception) {
+                Log.w(TAG, "MSVQ-SC decode failed: ${e.message}")
+            }
+        }
+
+        // Step 3: If decrypted but not compressed, return as text
+        if (wasEncrypted) {
+            val decryptedText = String(payload, Charsets.UTF_8)
+            return ProcessResult(decryptedText, text, wasEncrypted = true, wasCompressed = false)
+        }
+
+        // Step 4: Not recognized — show as-is
+        Log.d(TAG, "SMS from $sender: unrecognized binary (${rawBytes.size}B)")
+        return ProcessResult(text, "", wasEncrypted = false, wasCompressed = false)
     }
 
     private fun postNotification(context: Context, sender: String, text: String) {
@@ -138,5 +202,17 @@ class SmsReceiver : BroadcastReceiver() {
                 notification,
             )
         } catch (_: SecurityException) {}
+    }
+
+    companion object {
+        private const val TAG = "SmsReceiver"
+        private var cachedCodebook: MsvqscCodebook? = null
+
+        private fun getCodebook(context: Context): MsvqscCodebook? {
+            if (cachedCodebook == null) {
+                cachedCodebook = MsvqscCodebook.loadFromAssets(context)
+            }
+            return cachedCodebook
+        }
     }
 }

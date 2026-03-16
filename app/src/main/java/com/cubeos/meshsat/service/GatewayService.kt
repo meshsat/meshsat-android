@@ -23,6 +23,8 @@ import com.cubeos.meshsat.ble.MeshtasticBle
 import com.cubeos.meshsat.ble.MeshtasticProtocol
 import com.cubeos.meshsat.bt.IridiumSpp
 import com.cubeos.meshsat.crypto.AesGcmCrypto
+import com.cubeos.meshsat.crypto.MsvqscCodebook
+import com.cubeos.meshsat.crypto.MsvqscEncoder
 import com.cubeos.meshsat.data.AppDatabase
 import com.cubeos.meshsat.data.ForwardingRuleEntity
 import com.cubeos.meshsat.data.Message
@@ -89,6 +91,7 @@ class GatewayService : Service() {
     private lateinit var settings: SettingsRepository
     private lateinit var db: AppDatabase
     private var sosJob: kotlinx.coroutines.Job? = null
+    private var msvqscEncoder: MsvqscEncoder? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -103,6 +106,7 @@ class GatewayService : Service() {
         observeTransports()
         startSignalPolling()
         startLocationUpdates()
+        initMsvqsc()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -146,8 +150,28 @@ class GatewayService : Service() {
         iridiumSpp?.disconnect()
         meshtasticBle = null
         iridiumSpp = null
+        msvqscEncoder?.close()
+        msvqscEncoder = null
         scope.cancel()
         super.onDestroy()
+    }
+
+    /** Initialize MSVQ-SC encoder in background (loads ONNX model + codebook). */
+    private fun initMsvqsc() {
+        scope.launch {
+            try {
+                val codebook = MsvqscCodebook.loadFromAssets(this@GatewayService)
+                if (codebook != null) {
+                    val encoder = MsvqscEncoder.loadFromAssets(this@GatewayService, codebook)
+                    if (encoder != null) {
+                        msvqscEncoder = encoder
+                        Log.i("MeshSat", "MSVQ-SC encoder ready (${codebook.stages} stages, K=${codebook.k})")
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w("MeshSat", "MSVQ-SC init failed (compression disabled): ${e.message}")
+            }
+        }
     }
 
     private fun loadRulesFromDb() {
@@ -396,14 +420,24 @@ class GatewayService : Service() {
         val phone = settings.meshsatPiPhone.first()
         if (phone.isBlank()) return
 
-        val payload = if (encrypt) {
+        val encKey = if (encrypt) {
             val key = settings.encryptionKey.first()
-            if (key.isBlank()) text else AesGcmCrypto.encryptToBase64(text, key)
+            key.ifBlank { null }
         } else {
-            text
+            null
         }
 
-        SmsSender.send(this, phone, payload)
+        val msvqscOn = settings.msvqscEnabled.first()
+        val stages = settings.msvqscStages.first().toIntOrNull() ?: 3
+
+        SmsSender.send(
+            context = this,
+            to = phone,
+            text = text,
+            encryptionKey = encKey,
+            msvqscEncoder = if (msvqscOn) msvqscEncoder else null,
+            msvqscStages = stages,
+        )
 
         db.messageDao().insert(
             Message(
@@ -506,18 +540,18 @@ class GatewayService : Service() {
         val encEnabled = settings.encryptionEnabled.first()
 
         val keyToUse = convKey?.ifEmpty { null } ?: if (encEnabled) globalKey.ifEmpty { null } else null
-        val payload = if (keyToUse != null) {
-            try {
-                AesGcmCrypto.encryptToBase64(text, keyToUse)
-            } catch (e: Exception) {
-                Log.w("MeshSat", "Encrypt for SMS failed: ${e.message}")
-                text
-            }
-        } else {
-            text
-        }
 
-        SmsSender.send(this, recipient, payload)
+        val msvqscOn = settings.msvqscEnabled.first()
+        val stages = settings.msvqscStages.first().toIntOrNull() ?: 3
+
+        SmsSender.send(
+            context = this,
+            to = recipient,
+            text = text,
+            encryptionKey = keyToUse,
+            msvqscEncoder = if (msvqscOn) msvqscEncoder else null,
+            msvqscStages = stages,
+        )
 
         db.messageDao().insert(
             Message(
@@ -526,7 +560,7 @@ class GatewayService : Service() {
                 sender = "self",
                 recipient = recipient,
                 text = text,
-                rawText = if (keyToUse != null) payload else "",
+                rawText = "",
                 encrypted = keyToUse != null,
                 timestamp = System.currentTimeMillis(),
             )

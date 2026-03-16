@@ -21,6 +21,8 @@ class SettingsRepository(private val context: Context) {
         val KEY_MESHSAT_PI_PHONE = stringPreferencesKey("meshsat_pi_phone") // phone number of Pi's modem
         val KEY_MESHTASTIC_BLE_ADDR = stringPreferencesKey("meshtastic_ble_address")
         val KEY_IRIDIUM_BT_ADDR = stringPreferencesKey("iridium_bt_address")
+        val KEY_MSVQSC_ENABLED = booleanPreferencesKey("msvqsc_enabled")
+        val KEY_MSVQSC_STAGES = stringPreferencesKey("msvqsc_stages") // "auto" or "2"-"8"
     }
 
     val encryptionKey: Flow<String> = context.dataStore.data.map {
@@ -61,5 +63,21 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setIridiumBtAddress(address: String) {
         context.dataStore.edit { it[KEY_IRIDIUM_BT_ADDR] = address }
+    }
+
+    val msvqscEnabled: Flow<Boolean> = context.dataStore.data.map {
+        it[KEY_MSVQSC_ENABLED] ?: false
+    }
+
+    val msvqscStages: Flow<String> = context.dataStore.data.map {
+        it[KEY_MSVQSC_STAGES] ?: "3"
+    }
+
+    suspend fun setMsvqscEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[KEY_MSVQSC_ENABLED] = enabled }
+    }
+
+    suspend fun setMsvqscStages(stages: String) {
+        context.dataStore.edit { it[KEY_MSVQSC_STAGES] = stages }
     }
 }

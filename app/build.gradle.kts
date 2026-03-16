@@ -39,6 +39,11 @@ android {
         compose = true
         buildConfig = true
     }
+
+    // Don't compress MSVQ-SC model assets (ONNX Runtime needs raw file access)
+    androidResources {
+        noCompress += listOf("onnx", "bin")
+    }
 }
 
 dependencies {
@@ -73,6 +78,9 @@ dependencies {
 
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+
+    // ONNX Runtime (MSVQ-SC sentence encoder for lossy semantic compression)
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.21.1")
 
     // Debug
     debugImplementation("androidx.compose.ui:ui-tooling")
