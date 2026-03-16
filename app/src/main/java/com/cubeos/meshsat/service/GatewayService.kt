@@ -118,6 +118,10 @@ class GatewayService : Service() {
     private var sosJob: kotlinx.coroutines.Job? = null
     private var msvqscEncoder: MsvqscEncoder? = null
 
+    // Phase A: core infrastructure (dedup + transform)
+    private val deduplicator = com.cubeos.meshsat.dedup.Deduplicator()
+    private val transformPipeline = com.cubeos.meshsat.engine.TransformPipeline()
+
     // Phase B: structured dispatch (replaces basic if/else routing)
     private var dispatcher: Dispatcher? = null
     private var accessEvaluator: AccessEvaluator? = null
@@ -142,6 +146,7 @@ class GatewayService : Service() {
 
         startForegroundNotification()
         loadRulesFromDb()
+        deduplicator.startPruner(scope)
         initInterfaceManager()
         initDispatcher()
         initFieldIntelligence()
@@ -197,6 +202,7 @@ class GatewayService : Service() {
         geofenceMonitor = null
         burstQueue = null
         healthScorer = null
+        deduplicator.stopPruner()
         ackTracker?.stop()
         ackTracker = null
         dispatcher?.stop()
@@ -314,9 +320,11 @@ class GatewayService : Service() {
             try {
                 val codebook = MsvqscCodebook.loadFromAssets(this@GatewayService)
                 if (codebook != null) {
+                    transformPipeline.msvqscCodebook = codebook
                     val encoder = MsvqscEncoder.loadFromAssets(this@GatewayService, codebook)
                     if (encoder != null) {
                         msvqscEncoder = encoder
+                        transformPipeline.msvqscEncoder = encoder
                         Log.i("MeshSat", "MSVQ-SC encoder ready (${codebook.stages} stages, K=${codebook.k})")
                     }
                 }
@@ -688,6 +696,13 @@ class GatewayService : Service() {
                     val msg = MeshtasticProtocol.parseFromRadio(data)
                     if (msg != null) {
                         val nodeId = MeshtasticProtocol.formatNodeId(msg.from)
+                        ble.touchNode(msg.from)
+                        // Dedup: skip if we've already seen this message
+                        val dedupKey = "mesh:${msg.from}:${msg.id}"
+                        if (deduplicator.isDuplicateKey(dedupKey)) {
+                            Log.d("MeshSat", "Dedup: skipping duplicate mesh msg $dedupKey")
+                            return@collect
+                        }
                         db.messageDao().insert(
                             Message(
                                 transport = "mesh",
@@ -708,6 +723,7 @@ class GatewayService : Service() {
                     val pos = MeshtasticProtocol.parsePositionFromRadio(data)
                     if (pos != null) {
                         val nodeId = MeshtasticProtocol.formatNodeId(pos.from)
+                        ble.touchNode(pos.from)
                         db.nodePositionDao().insert(
                             NodePosition(
                                 nodeId = pos.from,
@@ -717,7 +733,19 @@ class GatewayService : Service() {
                                 altitude = pos.altitude,
                             )
                         )
+                        // Check geofence zones for this position update
+                        geofenceMonitor?.checkPosition(nodeId, pos.latitude, pos.longitude)
                         Log.d("MeshSat", "Position from $nodeId: ${pos.latitude},${pos.longitude}")
+                        return@collect
+                    }
+
+                    // Try telemetry (battery level extraction)
+                    val telemetry = MeshtasticProtocol.parseTelemetryFromRadio(data)
+                    if (telemetry != null) {
+                        ble.touchNode(telemetry.from)
+                        if (telemetry.batteryLevel in 0..100) {
+                            ble.updateNodeBattery(telemetry.from, telemetry.batteryLevel)
+                        }
                         return@collect
                     }
 
@@ -780,6 +808,13 @@ class GatewayService : Service() {
             if (result.mtAvailable) {
                 val mtText = spp.readMtBuffer() ?: return
                 val imei = spp.modemInfo.value.imei.ifBlank { "iridium" }
+
+                // Dedup: skip if we've already processed this exact message
+                val dedupKey = "iridium:$imei:${mtText.hashCode()}"
+                if (deduplicator.isDuplicateKey(dedupKey)) {
+                    Log.d("MeshSat", "Dedup: skipping duplicate iridium MT")
+                    return
+                }
 
                 db.messageDao().insert(
                     Message(

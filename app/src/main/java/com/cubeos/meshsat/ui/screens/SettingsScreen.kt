@@ -35,6 +35,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -643,7 +644,17 @@ fun SettingsScreen(navController: NavController? = null) {
                 val interfaceStates = GatewayService.meshtasticBle?.let { "mesh_0" } ?: ""
                 val channels = listOf("mesh_0", "iridium_0", "sms_0")
 
+                // Compute live health scores
+                var healthScores by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
+                LaunchedEffect(Unit) {
+                    try {
+                        val scores = healthScorer.scoreAll()
+                        healthScores = scores.associate { it.interfaceId to it.score }
+                    } catch (_: Exception) {}
+                }
+
                 channels.forEach { ch ->
+                    val score = healthScores[ch]
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -663,9 +674,14 @@ fun SettingsScreen(navController: NavController? = null) {
                             },
                         )
                         Text(
-                            text = "score: --",
+                            text = if (score != null) "score: $score/100" else "score: --",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MeshSatTextMuted,
+                            color = when {
+                                score == null -> MeshSatTextMuted
+                                score >= 70 -> MeshSatGreen
+                                score >= 40 -> MeshSatAmber
+                                else -> MeshSatRed
+                            },
                         )
                     }
                 }

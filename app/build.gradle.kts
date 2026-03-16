@@ -26,6 +26,10 @@ android {
         }
     }
 
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -84,6 +88,10 @@ dependencies {
 
     // NanoHTTPD (lightweight local REST API server)
     implementation("org.nanohttpd:nanohttpd:2.3.1")
+
+    // Test
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
 
     // Debug
     debugImplementation("androidx.compose.ui:ui-tooling")

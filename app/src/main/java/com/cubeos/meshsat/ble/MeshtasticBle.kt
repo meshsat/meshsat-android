@@ -85,9 +85,35 @@ class MeshtasticBle(private val context: Context) {
     fun setMyInfo(info: MeshtasticProtocol.MyNodeInfo) { _myInfo.value = info }
     fun addNodeInfo(info: MeshtasticProtocol.MeshNodeInfo) {
         val current = _nodes.value.toMutableList()
+        val existing = current.find { it.nodeNum == info.nodeNum }
         current.removeAll { it.nodeNum == info.nodeNum }
-        current.add(info)
+        // Merge: preserve battery/lastHeard from existing if new data doesn't have them
+        val merged = info.copy(
+            batteryLevel = if (info.batteryLevel >= 0) info.batteryLevel else (existing?.batteryLevel ?: -1),
+            lastHeard = if (info.lastHeard > 0) info.lastHeard else System.currentTimeMillis(),
+        )
+        current.add(merged)
         _nodes.value = current
+    }
+
+    /** Update lastHeard timestamp for a node (called on any RX packet). */
+    fun touchNode(nodeNum: Long) {
+        val current = _nodes.value.toMutableList()
+        val idx = current.indexOfFirst { it.nodeNum == nodeNum }
+        if (idx >= 0) {
+            current[idx] = current[idx].copy(lastHeard = System.currentTimeMillis())
+            _nodes.value = current
+        }
+    }
+
+    /** Update battery level for a node. */
+    fun updateNodeBattery(nodeNum: Long, batteryLevel: Int) {
+        val current = _nodes.value.toMutableList()
+        val idx = current.indexOfFirst { it.nodeNum == nodeNum }
+        if (idx >= 0) {
+            current[idx] = current[idx].copy(batteryLevel = batteryLevel, lastHeard = System.currentTimeMillis())
+            _nodes.value = current
+        }
     }
 
     private var writeQueue = ArrayDeque<ByteArray>()

@@ -18,8 +18,8 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
-import java.util.concurrent.locks.ReentrantLock
-import kotlin.concurrent.withLock
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * Ed25519 signing service with tamper-evident SHA-256 hash-chain audit logging.
@@ -32,7 +32,7 @@ class SigningService(
     private val auditDao: AuditLogDao,
     store: KeyValueStore,
 ) {
-    private val lock = ReentrantLock()
+    private val lock = Mutex()
     private val signingPrivate: PrivateKey
     private val signingPublic: PublicKey
 

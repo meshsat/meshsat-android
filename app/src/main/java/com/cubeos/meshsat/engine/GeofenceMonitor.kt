@@ -31,6 +31,14 @@ data class GeofenceEvent(
     val event: String,  // "enter" or "exit"
 )
 
+/** Persistent record of a geofence event with timestamp. */
+data class GeofenceEventRecord(
+    val zoneName: String,
+    val nodeId: String,
+    val event: String,
+    val timestamp: Long = System.currentTimeMillis(),
+)
+
 /**
  * Geofence monitor — tracks node positions against configured polygonal zones
  * and detects enter/exit transitions using the ray casting algorithm.
@@ -41,9 +49,15 @@ class GeofenceMonitor {
     private val lock = ReentrantReadWriteLock()
     private val zones = mutableListOf<GeofenceZone>()
     private val inside = HashMap<String, HashMap<String, Boolean>>()  // zone_id -> node_id -> was_inside
+    private val _events = mutableListOf<GeofenceEventRecord>()
 
     @Volatile
     var callback: ((zone: GeofenceZone, nodeId: String, event: String) -> Unit)? = null
+
+    /** Get a copy of the recent event log (newest first, max 50). */
+    fun getEvents(): List<GeofenceEventRecord> = lock.read {
+        _events.takeLast(50).reversed()
+    }
 
     /** Add a geofence zone. */
     fun addZone(zone: GeofenceZone) = lock.write {
@@ -81,6 +95,7 @@ class GeofenceMonitor {
                     // Enter transition
                     if (zone.alertOn == "enter" || zone.alertOn == "both") {
                         events.add(GeofenceEvent(zone, nodeId, "enter"))
+                        _events.add(GeofenceEventRecord(zone.name, nodeId, "enter"))
                         callback?.invoke(zone, nodeId, "enter")
                     }
                     inside.getOrPut(zone.id) { HashMap() }[nodeId] = true
@@ -88,6 +103,7 @@ class GeofenceMonitor {
                     // Exit transition
                     if (zone.alertOn == "exit" || zone.alertOn == "both") {
                         events.add(GeofenceEvent(zone, nodeId, "exit"))
+                        _events.add(GeofenceEventRecord(zone.name, nodeId, "exit"))
                         callback?.invoke(zone, nodeId, "exit")
                     }
                     inside[zone.id]?.set(nodeId, false)

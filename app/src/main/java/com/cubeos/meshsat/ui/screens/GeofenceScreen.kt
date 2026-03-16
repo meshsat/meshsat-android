@@ -42,9 +42,13 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.cubeos.meshsat.data.AppDatabase
+import com.cubeos.meshsat.engine.GeofenceEventRecord
 import com.cubeos.meshsat.engine.GeofenceMonitor
 import com.cubeos.meshsat.engine.GeofenceZone
 import com.cubeos.meshsat.engine.LatLon
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import com.cubeos.meshsat.service.GatewayService
 import com.cubeos.meshsat.ui.theme.MeshSatAmber
 import com.cubeos.meshsat.ui.theme.MeshSatBorder
@@ -69,6 +73,7 @@ fun GeofenceScreen() {
     val geofenceMonitor = remember { GatewayService.geofenceMonitor }
 
     var zones by remember { mutableStateOf(geofenceMonitor?.getZones() ?: emptyList()) }
+    var events by remember { mutableStateOf(geofenceMonitor?.getEvents() ?: emptyList()) }
     var showAddDialog by remember { mutableStateOf(false) }
     var selectedZone by remember { mutableStateOf<GeofenceZone?>(null) }
 
@@ -135,8 +140,56 @@ fun GeofenceScreen() {
                     )
                 }
             }
+
+            // Event log
+            if (events.isNotEmpty()) {
+                Text(
+                    text = "Event Log",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MeshSatTextSecondary,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+                val timeFmt = SimpleDateFormat("HH:mm:ss", Locale.US)
+                events.take(20).forEach { ev ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(MeshSatSurface, RoundedCornerShape(4.dp))
+                            .padding(6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .background(
+                                    if (ev.event == "enter") MeshSatRed else MeshSatAmber,
+                                    CircleShape,
+                                ),
+                        )
+                        Text(
+                            text = "${ev.event.uppercase()} ${ev.zoneName}",
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Text(
+                            text = ev.nodeId,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MeshSatTeal,
+                        )
+                        Text(
+                            text = timeFmt.format(Date(ev.timestamp)),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MeshSatTextMuted,
+                        )
+                    }
+                }
+            }
         }
     }
+
+    // Refresh events when returning from add/delete
+    events = geofenceMonitor?.getEvents() ?: emptyList()
 
     // Add zone dialog
     if (showAddDialog) {

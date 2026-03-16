@@ -158,7 +158,9 @@ fun TopologyScreen() {
                 horizontalArrangement = Arrangement.SpaceEvenly,
             ) {
                 LegendItem("This device", MeshSatTeal)
-                LegendItem("Mesh node", MeshSatGreen)
+                LegendItem("Online", MeshSatGreen)
+                LegendItem("Stale", Color(0xFFF59E0B))
+                LegendItem("Offline", Color(0xFF6B7280))
             }
         }
     }
@@ -244,26 +246,52 @@ private fun TopologyCanvas(
             }
 
             // Draw nodes
+            val now = System.currentTimeMillis()
             for (i in nodes.indices) {
                 val node = nodes[i]
                 val x = cx + positions[i][0] * scale
                 val y = cy + positions[i][1] * scale
                 val isMe = node.nodeNum == myNodeNum
-                val color = if (isMe) MeshSatTeal else MeshSatGreen
+                // Online status: green=recent (<15min), amber=stale (<1h), gray=unknown
+                val nodeColor = when {
+                    isMe -> MeshSatTeal
+                    node.lastHeard > 0 && (now - node.lastHeard) < 15 * 60 * 1000 -> MeshSatGreen
+                    node.lastHeard > 0 && (now - node.lastHeard) < 60 * 60 * 1000 -> Color(0xFFF59E0B) // amber
+                    else -> Color(0xFF6B7280) // gray = offline/unknown
+                }
                 val radius = if (isMe) 14f else 10f
 
                 // Glow
                 drawCircle(
-                    color = color.copy(alpha = 0.3f),
+                    color = nodeColor.copy(alpha = 0.3f),
                     radius = (radius + 4f) * density.density,
                     center = Offset(x, y),
                 )
                 // Node circle
                 drawCircle(
-                    color = color,
+                    color = nodeColor,
                     radius = radius * density.density,
                     center = Offset(x, y),
                 )
+
+                // Battery indicator (small text above node if available)
+                if (node.batteryLevel in 0..100) {
+                    drawContext.canvas.nativeCanvas.drawText(
+                        "${node.batteryLevel}%",
+                        x,
+                        y - (radius + 6f) * density.density,
+                        android.graphics.Paint().apply {
+                            this.color = when {
+                                node.batteryLevel > 50 -> android.graphics.Color.parseColor("#10B981")
+                                node.batteryLevel > 20 -> android.graphics.Color.parseColor("#F59E0B")
+                                else -> android.graphics.Color.parseColor("#EF4444")
+                            }
+                            textSize = 8f * density.density
+                            textAlign = android.graphics.Paint.Align.CENTER
+                            isAntiAlias = true
+                        },
+                    )
+                }
 
                 // Label
                 val label = node.shortName.ifBlank {
@@ -396,11 +424,41 @@ private fun NodeInfoRow(
         }
 
         Column(horizontalAlignment = Alignment.End) {
-            if (node.shortName.isNotBlank()) {
+            // Online status
+            val now = System.currentTimeMillis()
+            val statusText = when {
+                isMyNode -> "online"
+                node.lastHeard > 0 && (now - node.lastHeard) < 15 * 60 * 1000 -> "online"
+                node.lastHeard > 0 && (now - node.lastHeard) < 60 * 60 * 1000 -> {
+                    val minAgo = ((now - node.lastHeard) / 60_000).toInt()
+                    "${minAgo}m ago"
+                }
+                node.lastHeard > 0 -> "offline"
+                else -> ""
+            }
+            val statusColor = when {
+                isMyNode -> MeshSatTeal
+                node.lastHeard > 0 && (now - node.lastHeard) < 15 * 60 * 1000 -> MeshSatGreen
+                node.lastHeard > 0 && (now - node.lastHeard) < 60 * 60 * 1000 -> Color(0xFFF59E0B)
+                else -> MeshSatTextMuted
+            }
+            if (statusText.isNotBlank()) {
                 Text(
-                    text = node.shortName,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = ColorMesh,
+                    text = statusText,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = statusColor,
+                )
+            }
+            // Battery level
+            if (node.batteryLevel in 0..100) {
+                Text(
+                    text = "Bat: ${node.batteryLevel}%",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = when {
+                        node.batteryLevel > 50 -> MeshSatGreen
+                        node.batteryLevel > 20 -> Color(0xFFF59E0B)
+                        else -> Color(0xFFEF4444)
+                    },
                 )
             }
             if (node.hwModel != 0) {

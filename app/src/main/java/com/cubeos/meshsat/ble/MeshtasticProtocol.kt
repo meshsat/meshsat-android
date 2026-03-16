@@ -41,6 +41,13 @@ object MeshtasticProtocol {
         val time: Long,         // epoch ms
     )
 
+    /** Telemetry from mesh (battery level). */
+    data class MeshTelemetry(
+        val from: Long,
+        val batteryLevel: Int = -1,  // 0-100 or -1 = unknown
+        val voltage: Float = 0f,
+    )
+
     /** Node info from mesh. */
     data class MeshNodeInfo(
         val nodeNum: Long,
@@ -48,6 +55,8 @@ object MeshtasticProtocol {
         val shortName: String = "",
         val macaddr: String = "",
         val hwModel: Int = 0,
+        val batteryLevel: Int = -1,  // 0-100 or -1 = unknown
+        val lastHeard: Long = 0,     // epoch millis when last packet received
     )
 
     /** My node info (this radio's device info). */
@@ -155,6 +164,37 @@ object MeshtasticProtocol {
             altitude = alt,
             time = System.currentTimeMillis(),
         )
+    }
+
+    /**
+     * Parse a fromRadio protobuf response for telemetry (battery level).
+     * Telemetry: portnum=67, payload contains Telemetry message.
+     * Telemetry field 2 = DeviceMetrics, DeviceMetrics field 1 = battery_level (uint32).
+     */
+    fun parseTelemetryFromRadio(data: ByteArray): MeshTelemetry? {
+        val meshPacketBytes = extractField(data, fieldNumber = 2, wireType = 2) ?: return null
+        return parseTelemetryPacket(meshPacketBytes)
+    }
+
+    private fun parseTelemetryPacket(data: ByteArray): MeshTelemetry? {
+        val from = extractVarint(data, fieldNumber = 1) ?: 0L
+
+        val decodedBytes = extractField(data, fieldNumber = 4, wireType = 2) ?: return null
+        val portnum = extractVarint(decodedBytes, fieldNumber = 1)?.toInt() ?: return null
+        val payload = extractField(decodedBytes, fieldNumber = 2, wireType = 2) ?: return null
+
+        if (portnum != PORTNUM_TELEMETRY) return null
+
+        // Telemetry proto: field 2 (LEN) = device_metrics submessage
+        val deviceMetrics = extractField(payload, fieldNumber = 2, wireType = 2)
+            ?: return MeshTelemetry(from = from)
+
+        // DeviceMetrics: field 1 = battery_level (uint32), field 2 = voltage (float, fixed32)
+        val batteryLevel = extractVarint(deviceMetrics, fieldNumber = 1)?.toInt() ?: -1
+        val voltageBits = extractFixed32(deviceMetrics, fieldNumber = 2)
+        val voltage = if (voltageBits != null) Float.fromBits(voltageBits) else 0f
+
+        return MeshTelemetry(from = from, batteryLevel = batteryLevel, voltage = voltage)
     }
 
     /** Encode a text message as a ToRadio protobuf. */
