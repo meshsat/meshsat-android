@@ -32,4 +32,7 @@ interface AccessRuleDao {
 
     @Query("UPDATE access_rules SET match_count = match_count + 1, last_match_at = :timestamp WHERE id = :id")
     suspend fun recordMatch(id: Long, timestamp: String)
+
+    @Query("DELETE FROM access_rules")
+    suspend fun deleteAll()
 }

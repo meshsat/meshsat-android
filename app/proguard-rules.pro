@@ -22,6 +22,15 @@
 -keep class com.cubeos.meshsat.crypto.MsvqscEncoder { *; }
 -keep class com.cubeos.meshsat.crypto.MsvqscCodebook { *; }
 
+# NanoHTTPD (local REST API server)
+-keep class fi.iki.elonen.** { *; }
+
+# Phase F: signing + config + API
+-keepnames class com.cubeos.meshsat.engine.SigningService { *; }
+-keepnames class com.cubeos.meshsat.config.ConfigManager { *; }
+-keepnames class com.cubeos.meshsat.config.DiffResult { *; }
+-keepnames class com.cubeos.meshsat.config.DiffCounts { *; }
+
 # Data classes used in rules/transports
 -keepnames class com.cubeos.meshsat.rules.ForwardingRule { *; }
 -keepnames class com.cubeos.meshsat.bt.IridiumSpp$SbdixResult { *; }

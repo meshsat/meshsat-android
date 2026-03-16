@@ -87,6 +87,10 @@ interface MessageDeliveryDao {
     @Query("SELECT * FROM message_deliveries ORDER BY created_at DESC LIMIT :limit")
     fun getRecent(limit: Int = 100): Flow<List<MessageDeliveryEntity>>
 
+    /** Recent deliveries (suspend, for API server). */
+    @Query("SELECT * FROM message_deliveries ORDER BY created_at DESC LIMIT :limit")
+    suspend fun getRecentSync(limit: Int = 50): List<MessageDeliveryEntity>
+
     /** Delivery stats by channel and status. */
     @Query("SELECT channel, status, COUNT(*) as cnt FROM message_deliveries GROUP BY channel, status ORDER BY channel, status")
     suspend fun stats(): List<DeliveryStatRow>

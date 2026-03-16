@@ -41,6 +41,9 @@ import com.cubeos.meshsat.engine.InterfaceManager
 import com.cubeos.meshsat.engine.InterfaceState
 import com.cubeos.meshsat.engine.InterfaceStatusProvider
 import com.cubeos.meshsat.engine.SequenceTracker
+import com.cubeos.meshsat.api.LocalApiServer
+import com.cubeos.meshsat.config.ConfigManager
+import com.cubeos.meshsat.routing.KeyValueStore
 import com.cubeos.meshsat.rules.AccessEvaluator
 import com.cubeos.meshsat.rules.ForwardingRule
 import com.cubeos.meshsat.rules.RouteMessage
@@ -114,6 +117,11 @@ class GatewayService : Service() {
     private var ackTracker: AckTracker? = null
     private val sequenceTracker = SequenceTracker()
 
+    // Phase F: config, API, signing
+    private var signingService: com.cubeos.meshsat.engine.SigningService? = null
+    private var configManager: ConfigManager? = null
+    private var localApiServer: LocalApiServer? = null
+
     override fun onCreate() {
         super.onCreate()
         settings = SettingsRepository(this)
@@ -126,6 +134,7 @@ class GatewayService : Service() {
         loadRulesFromDb()
         initInterfaceManager()
         initDispatcher()
+        initSigningAndApi()
         observeTransports()
         startSignalPolling()
         startLocationUpdates()
@@ -168,6 +177,10 @@ class GatewayService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        localApiServer?.stop()
+        localApiServer = null
+        signingService = null
+        configManager = null
         ackTracker?.stop()
         ackTracker = null
         dispatcher?.stop()
@@ -184,6 +197,54 @@ class GatewayService : Service() {
         msvqscEncoder = null
         scope.cancel()
         super.onDestroy()
+    }
+
+    /**
+     * Initialize Phase F: signing service, config manager, and local REST API server.
+     * Uses SharedPreferences as KeyValueStore for Ed25519 keypair persistence.
+     */
+    private fun initSigningAndApi() {
+        scope.launch {
+            try {
+                // KeyValueStore backed by SharedPreferences
+                val prefs = getSharedPreferences("meshsat_signing", MODE_PRIVATE)
+                val kvStore = object : KeyValueStore {
+                    override fun get(key: String): String? = prefs.getString(key, null)
+                    override fun set(key: String, value: String) {
+                        prefs.edit().putString(key, value).apply()
+                    }
+                }
+
+                // Signing service
+                val signing = com.cubeos.meshsat.engine.SigningService(db.auditLogDao(), kvStore)
+                signing.loadLastHash()
+                signingService = signing
+                Log.i("MeshSat", "SigningService initialized: ${signing.signerId.take(16)}...")
+
+                // Config manager
+                val cfgMgr = ConfigManager(db.accessRuleDao(), db.objectGroupDao(), db.failoverGroupDao())
+                configManager = cfgMgr
+
+                // Local API server (localhost:6051)
+                val server = LocalApiServer(
+                    scope = scope,
+                    interfaceManager = interfaceManager,
+                    channelRegistry = null, // Not stored as field yet; could be wired later
+                    healthScorer = null,    // Will be wired in Phase G when HealthScorer is a service field
+                    deliveryDao = db.messageDeliveryDao(),
+                    auditLogDao = db.auditLogDao(),
+                    geofenceMonitor = null, // Will be wired when GeofenceMonitor is a service field
+                    deadManSwitch = null,   // Will be wired when DeadManSwitch is a service field
+                    signingService = signing,
+                    configManager = cfgMgr,
+                )
+                server.start()
+                localApiServer = server
+                Log.i("MeshSat", "Local API server started on 127.0.0.1:${LocalApiServer.DEFAULT_PORT}")
+            } catch (e: Exception) {
+                Log.w("MeshSat", "Phase F init failed (signing/API disabled): ${e.message}")
+            }
+        }
     }
 
     /** Initialize MSVQ-SC encoder in background (loads ONNX model + codebook). */

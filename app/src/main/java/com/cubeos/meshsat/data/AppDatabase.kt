@@ -19,8 +19,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         FailoverGroupEntity::class,
         FailoverMemberEntity::class,
         MessageDeliveryEntity::class,
+        AuditLogEntity::class,
     ],
-    version = 6,
+    version = 7,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -34,6 +35,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun objectGroupDao(): ObjectGroupDao
     abstract fun failoverGroupDao(): FailoverGroupDao
     abstract fun messageDeliveryDao(): MessageDeliveryDao
+    abstract fun auditLogDao(): AuditLogDao
 
     companion object {
         @Volatile
@@ -49,6 +51,29 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /** Migration 6→7: Phase F audit log table for signing service hash chain. */
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS audit_log (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        timestamp TEXT NOT NULL,
+                        interface_id TEXT,
+                        direction TEXT,
+                        event_type TEXT NOT NULL,
+                        delivery_id INTEGER,
+                        rule_id INTEGER,
+                        detail TEXT NOT NULL DEFAULT '',
+                        prev_hash TEXT NOT NULL DEFAULT '',
+                        hash TEXT NOT NULL DEFAULT ''
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS idx_audit_log_ts ON audit_log(timestamp)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS idx_audit_log_iface ON audit_log(interface_id)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS idx_audit_log_event ON audit_log(event_type)")
+            }
+        }
+
         fun getInstance(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
@@ -56,7 +81,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "meshsat.db"
                 )
-                    .addMigrations(MIGRATION_5_6)
+                    .addMigrations(MIGRATION_5_6, MIGRATION_6_7)
                     .fallbackToDestructiveMigration()
                     .build()
                     .also { INSTANCE = it }

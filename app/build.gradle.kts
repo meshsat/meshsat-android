@@ -82,6 +82,9 @@ dependencies {
     // ONNX Runtime (MSVQ-SC sentence encoder for lossy semantic compression)
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.21.1")
 
+    // NanoHTTPD (lightweight local REST API server)
+    implementation("org.nanohttpd:nanohttpd:2.3.1")
+
     // Debug
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")

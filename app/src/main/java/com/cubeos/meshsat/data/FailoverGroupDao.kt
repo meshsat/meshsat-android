@@ -33,4 +33,10 @@ interface FailoverGroupDao {
 
     @Query("DELETE FROM failover_members WHERE group_id = :groupId")
     suspend fun deleteAllMembers(groupId: String)
+
+    @Query("DELETE FROM failover_members")
+    suspend fun deleteAllMembersGlobal()
+
+    @Query("DELETE FROM failover_groups")
+    suspend fun deleteAllGroups()
 }

@@ -19,4 +19,7 @@ interface ObjectGroupDao {
 
     @Query("DELETE FROM object_groups WHERE id = :id")
     suspend fun deleteById(id: String)
+
+    @Query("DELETE FROM object_groups")
+    suspend fun deleteAll()
 }
