@@ -18,9 +18,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -46,6 +49,12 @@ fun MapScreen() {
     val db = AppDatabase.getInstance(context)
     val nodes by db.nodePositionDao().getLatestPerNode().collectAsState(initial = emptyList())
     val phoneLocation by GatewayService.phoneLocation.collectAsState()
+
+    // Track line positions (all historical positions per node)
+    var trackPositions by remember { mutableStateOf<List<NodePosition>>(emptyList()) }
+    LaunchedEffect(Unit) {
+        trackPositions = db.nodePositionDao().getAllRecentByNode(500)
+    }
 
     // Filter out nodeId=0 (phone GPS stored by GatewayService)
     val meshNodes = nodes.filter { it.nodeId != 0L }
@@ -87,7 +96,7 @@ fun MapScreen() {
             ) {
                 val darkModePref by ThemeState.darkMode.collectAsState()
                 val isDark = darkModePref ?: true
-                LeafletMap(nodes = meshNodes, phoneLocation = phoneLocation, darkMode = isDark)
+                LeafletMap(nodes = meshNodes, phoneLocation = phoneLocation, darkMode = isDark, trackPositions = trackPositions)
             }
 
             // Node list below map
@@ -143,8 +152,8 @@ fun MapScreen() {
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-private fun LeafletMap(nodes: List<NodePosition>, phoneLocation: android.location.Location?, darkMode: Boolean = true) {
-    val html = remember(nodes, phoneLocation, darkMode) { buildLeafletHtml(nodes, phoneLocation, darkMode) }
+private fun LeafletMap(nodes: List<NodePosition>, phoneLocation: android.location.Location?, darkMode: Boolean = true, trackPositions: List<NodePosition> = emptyList()) {
+    val html = remember(nodes, phoneLocation, darkMode, trackPositions) { buildLeafletHtml(nodes, phoneLocation, darkMode, trackPositions) }
 
     AndroidView(
         factory = { ctx ->
@@ -166,7 +175,7 @@ private fun LeafletMap(nodes: List<NodePosition>, phoneLocation: android.locatio
     )
 }
 
-private fun buildLeafletHtml(nodes: List<NodePosition>, phoneLocation: android.location.Location?, darkMode: Boolean = true): String {
+private fun buildLeafletHtml(nodes: List<NodePosition>, phoneLocation: android.location.Location?, darkMode: Boolean = true, trackPositions: List<NodePosition> = emptyList()): String {
     // Calculate center from all available positions
     val allLats = mutableListOf<Double>()
     val allLons = mutableListOf<Double>()
@@ -186,6 +195,20 @@ private fun buildLeafletHtml(nodes: List<NodePosition>, phoneLocation: android.l
         }).addTo(map).bindPopup('<b>${name.replace("'", "\\'")}</b><br>Alt: ${node.altitude}m<br>${time}');
         """.trimIndent()
     }
+
+    // Track lines per node (dashed polylines)
+    val nodeColors = listOf("#06B6D4", "#A855F7", "#F97316", "#22C55E", "#F59E0B", "#EF4444")
+    val tracksByNode = trackPositions.groupBy { it.nodeId }
+    val trackLines = tracksByNode.entries.mapIndexed { index, (_, positions) ->
+        if (positions.size < 2) return@mapIndexed ""
+        val color = nodeColors[index % nodeColors.size]
+        val coords = positions.joinToString(", ") { "[%.7f, %.7f]".format(it.latitude, it.longitude) }
+        """
+        L.polyline([$coords], {
+            color: '$color', weight: 2, opacity: 0.6, dashArray: '6, 4'
+        }).addTo(map);
+        """.trimIndent()
+    }.joinToString("\n")
 
     // Phone GPS marker (blue, pulsing)
     val phoneMarker = if (phoneLocation != null) {
@@ -222,6 +245,13 @@ private fun buildLeafletHtml(nodes: List<NodePosition>, phoneLocation: android.l
             }).addTo(map);
             $phoneMarker
             $nodeMarkers
+            $trackLines
+            var bounds = L.latLngBounds([]);
+            map.eachLayer(function(layer) {
+                if (layer.getLatLng) bounds.extend(layer.getLatLng());
+                else if (layer.getBounds) try { bounds.extend(layer.getBounds()); } catch(e) {}
+            });
+            if (bounds.isValid()) { map.fitBounds(bounds, {padding: [30, 30]}); }
         </script>
     </body>
     </html>

@@ -92,7 +92,7 @@ fun InterfacesScreen() {
             GatewayService.healthScorer?.let { hs ->
                 healthScores = hs.scoreAll()
             }
-            delay(5_000)
+            delay(30_000)
         }
     }
 

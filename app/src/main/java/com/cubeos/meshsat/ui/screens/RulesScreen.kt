@@ -92,7 +92,14 @@ private enum class BridgeTab(val label: String) {
 }
 
 // Android interface IDs used by the gateway
-private val KNOWN_INTERFACES = listOf("mesh_0", "iridium_0", "sms_0")
+private fun getAvailableInterfaces(): List<String> {
+    val mgr = GatewayService.ifaceManager
+    if (mgr != null) {
+        val ids = mgr.getAllStatus().map { it.id }
+        if (ids.isNotEmpty()) return ids
+    }
+    return listOf("mesh_0", "iridium_0", "sms_0") // fallback
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -1057,7 +1064,7 @@ private fun AddEditRuleDialog(
                 DropdownField(
                     label = "Source interface",
                     value = interfaceId,
-                    options = KNOWN_INTERFACES,
+                    options = getAvailableInterfaces(),
                     displayMapper = { interfaceLabel(it) },
                     onSelect = { interfaceId = it },
                 )
@@ -1075,7 +1082,7 @@ private fun AddEditRuleDialog(
                     DropdownField(
                         label = "Forward to",
                         value = forwardTo,
-                        options = KNOWN_INTERFACES.filter { it != interfaceId },
+                        options = getAvailableInterfaces().filter { it != interfaceId },
                         displayMapper = { interfaceLabel(it) },
                         onSelect = { forwardTo = it },
                     )

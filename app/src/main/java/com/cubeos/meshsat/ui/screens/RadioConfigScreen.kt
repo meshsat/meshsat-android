@@ -383,6 +383,7 @@ private fun DeviceAdminTabContent(
 
     var rebootDelay by remember { mutableStateOf("5") }
     var showFactoryResetConfirm by remember { mutableStateOf(false) }
+    var showRebootConfirm by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -450,10 +451,7 @@ private fun DeviceAdminTabContent(
                         Toast.makeText(context, "Radio not connected", Toast.LENGTH_SHORT).show()
                         return@Button
                     }
-                    val secs = rebootDelay.toIntOrNull() ?: 5
-                    val toRadio = MeshtasticProtocol.buildAdminReboot(myNodeNum, secs)
-                    onSend(toRadio)
-                    Toast.makeText(context, "Reboot command sent (${secs}s delay)", Toast.LENGTH_SHORT).show()
+                    showRebootConfirm = true
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = MeshSatAmber),
                 enabled = connected,
@@ -567,6 +565,40 @@ private fun DeviceAdminTabContent(
                     colors = ButtonDefaults.outlinedButtonColors(contentColor = MeshSatTextSecondary),
                 ) {
                     Text("Cancel")
+                }
+            },
+        )
+    }
+
+    // Reboot confirmation dialog
+    if (showRebootConfirm) {
+        val secs = rebootDelay.toIntOrNull() ?: 5
+        AlertDialog(
+            onDismissRequest = { showRebootConfirm = false },
+            containerColor = MeshSatSurface,
+            title = { Text("Reboot Radio?") },
+            text = {
+                Text(
+                    "The radio will reboot in ${secs} seconds. Active connections will be interrupted.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val toRadio = MeshtasticProtocol.buildAdminReboot(myNodeNum, secs)
+                        onSend(toRadio)
+                        Toast.makeText(context, "Reboot command sent (${secs}s delay)", Toast.LENGTH_SHORT).show()
+                        showRebootConfirm = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MeshSatAmber),
+                ) {
+                    Text("Reboot")
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { showRebootConfirm = false }) {
+                    Text("Cancel", color = MeshSatTextMuted)
                 }
             },
         )

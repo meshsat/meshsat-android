@@ -22,6 +22,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.cubeos.meshsat.ui.screens.AboutScreen
+import com.cubeos.meshsat.ui.screens.AuditScreen
 import com.cubeos.meshsat.ui.screens.DashboardScreen
 import com.cubeos.meshsat.ui.screens.DeliveryScreen
 import com.cubeos.meshsat.ui.screens.GeofenceScreen
@@ -97,6 +98,7 @@ fun MeshSatUI() {
             composable("interfaces") { InterfacesScreen() }
             composable("radio-config") { RadioConfigScreen() }
             composable("passes") { PassPredictorScreen() }
+            composable("audit") { AuditScreen() }
         }
     }
 }

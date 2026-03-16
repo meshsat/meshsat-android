@@ -119,6 +119,10 @@ class GatewayService : Service() {
         var channelReg: ChannelRegistry? = null
             private set
 
+        // Phase J: exposed for audit log UI
+        var signingServiceRef: com.cubeos.meshsat.engine.SigningService? = null
+            private set
+
         private var notificationId = 100
     }
 
@@ -211,6 +215,7 @@ class GatewayService : Service() {
         localApiServer?.stop()
         localApiServer = null
         signingService = null
+        signingServiceRef = null
         configManager = null
         deadManSwitch?.stop()
         deadManSwitch = null
@@ -304,6 +309,7 @@ class GatewayService : Service() {
                 val signing = com.cubeos.meshsat.engine.SigningService(db.auditLogDao(), kvStore)
                 signing.loadLastHash()
                 signingService = signing
+                signingServiceRef = signing
                 Log.i("MeshSat", "SigningService initialized: ${signing.signerId.take(16)}...")
 
                 // Config manager

@@ -908,6 +908,14 @@ fun SettingsScreen(navController: NavController? = null) {
             Text("Geofence Zones", style = MaterialTheme.typography.bodyMedium)
         }
 
+        Button(
+            onClick = { navController?.navigate("audit") },
+            colors = ButtonDefaults.buttonColors(containerColor = MeshSatSurface),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text("Audit Log", style = MaterialTheme.typography.bodyMedium)
+        }
+
         // --- About ---
         Button(
             onClick = { navController?.navigate("about") },
