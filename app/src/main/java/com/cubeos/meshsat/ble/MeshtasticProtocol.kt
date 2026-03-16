@@ -216,6 +216,205 @@ object MeshtasticProtocol {
     /** Format a node number as hex string (e.g., !27ca8f1c). */
     fun formatNodeId(num: Long): String = "!%08x".format(num)
 
+    // ═══════════════════════════════════════════════════════════════════
+    // Admin message encoding — radio config + device admin commands
+    // ═══════════════════════════════════════════════════════════════════
+
+    const val PORTNUM_ADMIN_APP = 6
+
+    // Admin message field numbers
+    private const val ADMIN_GET_CONFIG_REQUEST = 5
+    private const val ADMIN_GET_MODULE_CONFIG_REQ = 7
+    private const val ADMIN_SET_CONFIG = 34
+    private const val ADMIN_SET_MODULE_CONFIG = 35
+    private const val ADMIN_FACTORY_RESET = 94
+    private const val ADMIN_REBOOT_SECONDS = 97
+    private const val ADMIN_SET_TIME_UNIX_SEC = 99
+
+    // Config section enum values
+    const val CONFIG_DEVICE = 0
+    const val CONFIG_POSITION = 1
+    const val CONFIG_POWER = 2
+    const val CONFIG_NETWORK = 3
+    const val CONFIG_DISPLAY = 4
+    const val CONFIG_LORA = 5
+    const val CONFIG_BLUETOOTH = 6
+    const val CONFIG_SECURITY = 7
+
+    // ModuleConfig section enum values
+    const val MODULE_MQTT = 0
+    const val MODULE_SERIAL = 1
+    const val MODULE_EXT_NOTIFICATION = 2
+    const val MODULE_STORE_FORWARD = 3
+    const val MODULE_RANGE_TEST = 4
+    const val MODULE_TELEMETRY = 5
+    const val MODULE_CANNED_MESSAGE = 6
+
+    /** LoRa region codes (Meshtastic RegionCode enum). */
+    enum class LoRaRegion(val code: Int, val label: String) {
+        Unset(0, "Unset"),
+        US(1, "US"),
+        EU_433(2, "EU 433"),
+        EU_868(3, "EU 868"),
+        CN(4, "CN"),
+        JP(5, "JP"),
+        ANZ(6, "ANZ"),
+        KR(7, "KR"),
+        TW(8, "TW"),
+        RU(9, "RU"),
+        IN(10, "IN"),
+        NZ_865(11, "NZ 865"),
+        TH(12, "TH"),
+        LORA_24(13, "2.4 GHz"),
+        UA_433(14, "UA 433"),
+        UA_868(15, "UA 868"),
+        MY_433(16, "MY 433"),
+        MY_919(17, "MY 919"),
+        SG_923(18, "SG 923"),
+        ;
+        companion object {
+            fun fromCode(code: Int): LoRaRegion = entries.find { it.code == code } ?: Unset
+        }
+    }
+
+    /** Modem preset codes (Meshtastic ModemPreset enum). */
+    enum class ModemPreset(val code: Int, val label: String) {
+        LongFast(0, "Long Fast"),
+        LongSlow(1, "Long Slow"),
+        VLongSlow(2, "Very Long Slow"),
+        MedSlow(3, "Medium Slow"),
+        MedFast(4, "Medium Fast"),
+        ShortSlow(5, "Short Slow"),
+        ShortFast(6, "Short Fast"),
+        LongMod(7, "Long Moderate"),
+        ShortTurbo(8, "Short Turbo"),
+        ;
+        companion object {
+            fun fromCode(code: Int): ModemPreset = entries.find { it.code == code } ?: LongFast
+        }
+    }
+
+    /**
+     * Build a ToRadio admin message requesting a config section.
+     * configType: CONFIG_DEVICE..CONFIG_SECURITY
+     */
+    fun buildAdminGetConfig(myNodeNum: Long, configType: Int): ByteArray {
+        val admin = encodeVarintField(ADMIN_GET_CONFIG_REQUEST, configType.toLong())
+        return buildAdminToRadio(myNodeNum, myNodeNum, admin)
+    }
+
+    /**
+     * Build a ToRadio admin message requesting a module config section.
+     * moduleType: MODULE_MQTT..MODULE_CANNED_MESSAGE
+     */
+    fun buildAdminGetModuleConfig(myNodeNum: Long, moduleType: Int): ByteArray {
+        val admin = encodeVarintField(ADMIN_GET_MODULE_CONFIG_REQ, moduleType.toLong())
+        return buildAdminToRadio(myNodeNum, myNodeNum, admin)
+    }
+
+    /**
+     * Build a ToRadio admin message to set a config section.
+     * configData is the raw protobuf of the Config message.
+     */
+    fun buildAdminSetConfig(myNodeNum: Long, configData: ByteArray): ByteArray {
+        val admin = encodeBytesField(ADMIN_SET_CONFIG, configData)
+        return buildAdminToRadio(myNodeNum, myNodeNum, admin)
+    }
+
+    /**
+     * Build a ToRadio admin message to set a module config section.
+     * configData is the raw protobuf of the ModuleConfig message.
+     */
+    fun buildAdminSetModuleConfig(myNodeNum: Long, configData: ByteArray): ByteArray {
+        val admin = encodeBytesField(ADMIN_SET_MODULE_CONFIG, configData)
+        return buildAdminToRadio(myNodeNum, myNodeNum, admin)
+    }
+
+    /** Build a ToRadio admin message to reboot the radio after delaySecs. */
+    fun buildAdminReboot(myNodeNum: Long, delaySecs: Int): ByteArray {
+        val admin = encodeVarintField(ADMIN_REBOOT_SECONDS, delaySecs.toLong())
+        return buildAdminToRadio(myNodeNum, myNodeNum, admin)
+    }
+
+    /** Build a ToRadio admin message to factory reset the radio. */
+    fun buildAdminFactoryReset(myNodeNum: Long): ByteArray {
+        val admin = encodeVarintField(ADMIN_FACTORY_RESET, 1L)
+        return buildAdminToRadio(myNodeNum, myNodeNum, admin)
+    }
+
+    /** Build a ToRadio admin message to set the radio's time. */
+    fun buildAdminSetTime(myNodeNum: Long, unixSec: Long): ByteArray {
+        // field 99, wire type 5 (fixed32)
+        val tag = (ADMIN_SET_TIME_UNIX_SEC shl 3) or 5
+        val admin = encodeVarint(tag.toLong()) + encodeFixed32(unixSec.toInt())
+        return buildAdminToRadio(myNodeNum, myNodeNum, admin)
+    }
+
+    /**
+     * Encode a LoRa config as Config protobuf (field 6 = lora sub-message).
+     * Config { lora: LoraConfig { region, modem_preset, tx_power, hop_limit, tx_enabled } }
+     */
+    fun encodeLoRaConfig(
+        region: Int,
+        modemPreset: Int,
+        txPower: Int,
+        hopLimit: Int,
+        txEnabled: Boolean,
+    ): ByteArray {
+        // LoraConfig sub-message fields (per Meshtastic Config.LoRaConfig protobuf):
+        // field 2: modem_preset (varint)
+        // field 4: region (varint)
+        // field 5: hop_limit (varint)
+        // field 6: tx_enabled (varint bool)
+        // field 7: tx_power (varint)
+        var lora = ByteArray(0)
+        if (modemPreset != 0) lora += encodeVarintField(2, modemPreset.toLong())
+        if (region != 0) lora += encodeVarintField(4, region.toLong())
+        if (hopLimit > 0) lora += encodeVarintField(5, hopLimit.toLong())
+        lora += encodeVarintField(6, if (txEnabled) 1L else 0L)
+        if (txPower > 0) lora += encodeVarintField(7, txPower.toLong())
+
+        // Config: field 6 = lora (length-delimited)
+        return encodeBytesField(6, lora)
+    }
+
+    // --- Internal: admin ToRadio wrapper ---
+
+    /**
+     * Wrap an admin payload in Data(portnum=ADMIN_APP, want_response=true)
+     * → MeshPacket(from, to, decoded, hop_limit=3, want_ack=true) → ToRadio.
+     */
+    private fun buildAdminToRadio(myNodeNum: Long, destNode: Long, adminPayload: ByteArray): ByteArray {
+        // Data: portnum=6 (admin), payload, want_response=true
+        val data = encodeVarintField(1, PORTNUM_ADMIN_APP.toLong()) +
+            encodeBytesField(2, adminPayload) +
+            encodeVarintField(3, 1L) // want_response
+
+        // MeshPacket: from (fixed32 field 1), to (fixed32 field 2), decoded (field 4), hop_limit (field 9), want_ack (field 10)
+        val pkt = encodeFixed32Field(1, myNodeNum.toInt()) +
+            encodeFixed32Field(2, destNode.toInt()) +
+            encodeBytesField(4, data) +
+            encodeVarintField(9, 3L) +  // hop_limit
+            encodeVarintField(10, 1L)   // want_ack
+
+        // ToRadio: field 1 = MeshPacket
+        return encodeBytesField(1, pkt)
+    }
+
+    private fun encodeFixed32(value: Int): ByteArray {
+        return byteArrayOf(
+            (value and 0xFF).toByte(),
+            ((value shr 8) and 0xFF).toByte(),
+            ((value shr 16) and 0xFF).toByte(),
+            ((value shr 24) and 0xFF).toByte(),
+        )
+    }
+
+    private fun encodeFixed32Field(fieldNumber: Int, value: Int): ByteArray {
+        val tag = (fieldNumber shl 3) or 5 // wire type 5 = 32-bit
+        return encodeVarint(tag.toLong()) + encodeFixed32(value)
+    }
+
     // --- Protobuf primitives ---
 
     private fun extractVarint(data: ByteArray, fieldNumber: Int): Long? {
