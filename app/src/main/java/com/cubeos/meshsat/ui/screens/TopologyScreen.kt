@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -19,6 +20,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -96,28 +99,27 @@ fun TopologyScreen() {
                 )
             }
         } else {
-            // Connection info
+            // Stats bar
+            val now = System.currentTimeMillis()
+            val onlineCount = nodes.count { node ->
+                node.nodeNum == myNodeNum ||
+                    (node.lastHeard > 0 && (now - node.lastHeard) < 15 * 60 * 1000)
+            }
+            val linkCount = onlineCount // each online node connects to myNode
+            val rssi = meshRssi?.value ?: 0
+            val avgSnrText = if (rssi != 0) "${rssi} dBm" else "-"
+
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(MeshSatSurface, RoundedCornerShape(8.dp))
                     .border(1.dp, MeshSatBorder, RoundedCornerShape(8.dp))
-                    .padding(12.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly,
             ) {
-                Text(
-                    text = "${nodes.size} nodes discovered",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = ColorMesh,
-                )
-                val rssi = meshRssi?.value ?: 0
-                if (rssi != 0) {
-                    Text(
-                        text = "RSSI: ${rssi}dBm",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MeshSatTextSecondary,
-                    )
-                }
+                TopologyStatItem("NODES", "$onlineCount / ${nodes.size}", ColorMesh)
+                TopologyStatItem("LINKS", "$linkCount", MeshSatTeal)
+                TopologyStatItem("AVG SNR", avgSnrText, MeshSatTextSecondary)
             }
 
             // Force-directed graph canvas
@@ -144,6 +146,7 @@ fun TopologyScreen() {
                     NodeInfoRow(
                         node = node,
                         isMyNode = node.nodeNum == myNodeNum,
+                        rssi = meshRssi?.value ?: 0,
                     )
                 }
             }
@@ -377,6 +380,7 @@ private fun simulateForces(
 private fun NodeInfoRow(
     node: MeshtasticProtocol.MeshNodeInfo,
     isMyNode: Boolean,
+    rssi: Int = 0,
 ) {
     val name = node.longName.ifBlank { MeshtasticProtocol.formatNodeId(node.nodeNum) }
 
@@ -468,7 +472,36 @@ private fun NodeInfoRow(
                     color = MeshSatTextMuted,
                 )
             }
+            if (rssi != 0 && isMyNode) {
+                Text(
+                    text = "SNR: ${rssi}dBm",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = ColorMesh,
+                )
+            }
         }
+    }
+}
+
+@Composable
+private fun TopologyStatItem(label: String, value: String, color: Color) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Bold,
+            color = MeshSatTextMuted,
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.labelSmall,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Bold,
+            color = color,
+        )
     }
 }
 

@@ -93,6 +93,7 @@ fun MessagesScreen() {
     var viewMode by remember { mutableStateOf("conversations") } // default to conversations
     var selectedSender by remember { mutableStateOf<String?>(null) }
     var searchQuery by remember { mutableStateOf("") }
+    var selectedTab by remember { mutableStateOf("all") }
 
     // When a conversation is selected, show chat view
     if (selectedSender != null) {
@@ -104,13 +105,36 @@ fun MessagesScreen() {
         return
     }
 
-    val messages by (if (searchQuery.isBlank()) {
+    val allMessages by (if (searchQuery.isBlank()) {
         db.messageDao().getRecent(100)
     } else {
         db.messageDao().search(searchQuery, 100)
     }).collectAsState(initial = emptyList())
 
+    // Filter messages by selected transport tab
+    val messages = remember(allMessages, selectedTab) {
+        when (selectedTab) {
+            "mesh" -> allMessages.filter { it.transport == "mesh" }
+            "iridium" -> allMessages.filter { it.transport == "iridium" }
+            "sms" -> allMessages.filter { it.transport == "sms" }
+            else -> allMessages
+        }
+    }
+
     val conversations by db.messageDao().getConversations().collectAsState(initial = emptyList())
+
+    // Stats
+    val nodeCount = GatewayService.meshtasticBle?.nodes?.collectAsState()?.value?.size ?: 0
+    val startOfDay = remember {
+        val cal = java.util.Calendar.getInstance()
+        cal.set(java.util.Calendar.HOUR_OF_DAY, 0)
+        cal.set(java.util.Calendar.MINUTE, 0)
+        cal.set(java.util.Calendar.SECOND, 0)
+        cal.set(java.util.Calendar.MILLISECOND, 0)
+        cal.timeInMillis
+    }
+    val messagesToday by db.messageDao().countSince(startOfDay).collectAsState(initial = 0)
+    val totalStored = allMessages.size
 
     Column(
         modifier = Modifier
@@ -122,6 +146,58 @@ fun MessagesScreen() {
             style = MaterialTheme.typography.headlineMedium,
             modifier = Modifier.padding(bottom = 4.dp),
         )
+
+        // Transport tab bar
+        Row(
+            modifier = Modifier.padding(bottom = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            listOf("all" to "All", "mesh" to "Mesh", "iridium" to "SBD", "sms" to "SMS").forEach { (key, label) ->
+                FilterChip(
+                    selected = selectedTab == key,
+                    onClick = { selectedTab = key },
+                    label = { Text(label, style = MaterialTheme.typography.bodySmall) },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = when (key) {
+                            "mesh" -> ColorMesh.copy(alpha = 0.2f)
+                            "iridium" -> ColorIridium.copy(alpha = 0.2f)
+                            "sms" -> ColorCellular.copy(alpha = 0.2f)
+                            else -> MeshSatTeal.copy(alpha = 0.2f)
+                        },
+                        selectedLabelColor = when (key) {
+                            "mesh" -> ColorMesh
+                            "iridium" -> ColorIridium
+                            "sms" -> ColorCellular
+                            else -> MeshSatTeal
+                        },
+                    ),
+                )
+            }
+        }
+
+        // Stats row
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Text(
+                text = "$nodeCount nodes",
+                style = MaterialTheme.typography.bodySmall,
+                color = MeshSatTextMuted,
+            )
+            Text(
+                text = "$messagesToday today",
+                style = MaterialTheme.typography.bodySmall,
+                color = MeshSatTextMuted,
+            )
+            Text(
+                text = "$totalStored stored",
+                style = MaterialTheme.typography.bodySmall,
+                color = MeshSatTextMuted,
+            )
+        }
 
         // View mode toggle
         Row(

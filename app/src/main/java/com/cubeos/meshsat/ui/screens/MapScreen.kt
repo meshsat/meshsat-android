@@ -7,6 +7,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,7 +15,12 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -36,6 +42,8 @@ import com.cubeos.meshsat.service.GatewayService
 import com.cubeos.meshsat.ui.theme.ColorMesh
 import com.cubeos.meshsat.ui.theme.MeshSatBorder
 import com.cubeos.meshsat.ui.theme.MeshSatSurface
+import com.cubeos.meshsat.ui.theme.MeshSatBlue
+import com.cubeos.meshsat.ui.theme.MeshSatGreen
 import com.cubeos.meshsat.ui.theme.MeshSatTeal
 import com.cubeos.meshsat.ui.theme.MeshSatTextMuted
 import com.cubeos.meshsat.ui.theme.ThemeState
@@ -61,6 +69,21 @@ fun MapScreen() {
 
     // Determine if we have any positions at all (phone or mesh nodes)
     val hasAnyPosition = meshNodes.isNotEmpty() || phoneLocation != null
+
+    // Layer toggles
+    var showGps by remember { mutableStateOf(true) }
+    var showMeshNodes by remember { mutableStateOf(true) }
+    var showTracks by remember { mutableStateOf(true) }
+
+    // Per-node visibility filters
+    var visibleNodeIds by remember(meshNodes) {
+        mutableStateOf(meshNodes.map { it.nodeId }.toSet())
+    }
+
+    // Filtered nodes for map display
+    val filteredMeshNodes = if (showMeshNodes) meshNodes.filter { it.nodeId in visibleNodeIds } else emptyList()
+    val filteredTrackPositions = if (showTracks) trackPositions.filter { it.nodeId in visibleNodeIds } else emptyList()
+    val effectivePhoneLocation = if (showGps) phoneLocation else null
 
     Column(
         modifier = Modifier
@@ -96,52 +119,167 @@ fun MapScreen() {
             ) {
                 val darkModePref by ThemeState.darkMode.collectAsState()
                 val isDark = darkModePref ?: true
-                LeafletMap(nodes = meshNodes, phoneLocation = phoneLocation, darkMode = isDark, trackPositions = trackPositions)
+                LeafletMap(
+                    nodes = filteredMeshNodes,
+                    phoneLocation = effectivePhoneLocation,
+                    darkMode = isDark,
+                    trackPositions = filteredTrackPositions,
+                )
             }
 
-            // Node list below map
+            // Layer controls + node list below map (scrollable)
             Column(
-                modifier = Modifier.padding(top = 8.dp),
+                modifier = Modifier
+                    .padding(top = 8.dp)
+                    .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                // Phone GPS
-                phoneLocation?.let { loc ->
+                // LAYERS card
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MeshSatSurface, RoundedCornerShape(8.dp))
+                        .border(1.dp, MeshSatBorder, RoundedCornerShape(8.dp))
+                        .padding(12.dp),
+                ) {
                     Text(
-                        text = "Phone GPS",
-                        style = MaterialTheme.typography.titleMedium,
+                        text = "LAYERS",
+                        style = MaterialTheme.typography.titleSmall,
                         color = MeshSatTeal,
+                        modifier = Modifier.padding(bottom = 4.dp),
                     )
-                    Row(
+                    LayerToggleRow(
+                        label = "GPS",
+                        dotColor = MeshSatGreen,
+                        checked = showGps,
+                        onCheckedChange = { showGps = it },
+                    )
+                    LayerToggleRow(
+                        label = "Mesh Nodes",
+                        dotColor = ColorMesh,
+                        checked = showMeshNodes,
+                        onCheckedChange = { showMeshNodes = it },
+                    )
+                    LayerToggleRow(
+                        label = "Tracks",
+                        dotColor = MeshSatBlue,
+                        checked = showTracks,
+                        onCheckedChange = { showTracks = it },
+                    )
+                }
+
+                // NODE FILTERS card (only if multiple mesh nodes)
+                if (meshNodes.size > 1) {
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .background(MeshSatSurface, RoundedCornerShape(6.dp))
-                            .border(1.dp, MeshSatBorder, RoundedCornerShape(6.dp))
-                            .padding(10.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
+                            .background(MeshSatSurface, RoundedCornerShape(8.dp))
+                            .border(1.dp, MeshSatBorder, RoundedCornerShape(8.dp))
+                            .padding(12.dp),
                     ) {
-                        Column {
-                            Text(text = "This Phone", style = MaterialTheme.typography.bodyMedium, color = MeshSatTeal)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
                             Text(
-                                text = "%.5f, %.5f  alt %dm".format(loc.latitude, loc.longitude, loc.altitude.toInt()),
+                                text = "NODE FILTERS",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = MeshSatTeal,
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                Text(
+                                    text = "Show all",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MeshSatTeal,
+                                    modifier = Modifier.clickable {
+                                        visibleNodeIds = meshNodes.map { it.nodeId }.toSet()
+                                    },
+                                )
+                                Text(
+                                    text = "Hide all",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MeshSatTextMuted,
+                                    modifier = Modifier.clickable {
+                                        visibleNodeIds = emptySet()
+                                    },
+                                )
+                            }
+                        }
+                        meshNodes.forEach { node ->
+                            val name = node.nodeName.ifBlank { MeshtasticProtocol.formatNodeId(node.nodeId) }
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        visibleNodeIds = if (node.nodeId in visibleNodeIds) {
+                                            visibleNodeIds - node.nodeId
+                                        } else {
+                                            visibleNodeIds + node.nodeId
+                                        }
+                                    },
+                            ) {
+                                Checkbox(
+                                    checked = node.nodeId in visibleNodeIds,
+                                    onCheckedChange = { checked ->
+                                        visibleNodeIds = if (checked) {
+                                            visibleNodeIds + node.nodeId
+                                        } else {
+                                            visibleNodeIds - node.nodeId
+                                        }
+                                    },
+                                )
+                                Text(
+                                    text = name,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = ColorMesh,
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Phone GPS info
+                if (showGps) {
+                    phoneLocation?.let { loc ->
+                        Text(
+                            text = "Phone GPS",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MeshSatTeal,
+                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(MeshSatSurface, RoundedCornerShape(6.dp))
+                                .border(1.dp, MeshSatBorder, RoundedCornerShape(6.dp))
+                                .padding(10.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column {
+                                Text(text = "This Phone", style = MaterialTheme.typography.bodyMedium, color = MeshSatTeal)
+                                Text(
+                                    text = "%.5f, %.5f  alt %dm".format(loc.latitude, loc.longitude, loc.altitude.toInt()),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MeshSatTextMuted,
+                                )
+                            }
+                            Text(
+                                text = "acc ${loc.accuracy.toInt()}m",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MeshSatTextMuted,
                             )
                         }
-                        Text(
-                            text = "acc ${loc.accuracy.toInt()}m",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MeshSatTextMuted,
-                        )
                     }
                 }
 
-                if (meshNodes.isNotEmpty()) {
+                if (filteredMeshNodes.isNotEmpty()) {
                     Text(
-                        text = "Mesh Nodes (${meshNodes.size})",
+                        text = "Mesh Nodes (${filteredMeshNodes.size})",
                         style = MaterialTheme.typography.titleMedium,
                     )
-                    meshNodes.forEach { node ->
+                    filteredMeshNodes.forEach { node ->
                         NodeRow(node)
                     }
                 }
@@ -283,5 +421,35 @@ private fun NodeRow(node: NodePosition) {
             )
         }
         Text(text = timeStr, style = MaterialTheme.typography.bodySmall, color = MeshSatTextMuted)
+    }
+}
+
+@Composable
+private fun LayerToggleRow(
+    label: String,
+    dotColor: androidx.compose.ui.graphics.Color,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onCheckedChange(!checked) },
+    ) {
+        Checkbox(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+        )
+        Box(
+            modifier = Modifier
+                .size(8.dp)
+                .background(dotColor, CircleShape),
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.padding(start = 8.dp),
+        )
     }
 }

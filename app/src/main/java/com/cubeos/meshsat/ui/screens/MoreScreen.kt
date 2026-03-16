@@ -49,6 +49,7 @@ fun MoreScreen(navController: NavController) {
 
         // Field Ops
         SectionHeader("Field Operations")
+        FeatureItem("Peers", "Node table with status, battery & last seen", navController, "peers")
         FeatureItem("Mesh Topology", "Node graph with battery & status", navController, "topology")
         FeatureItem("Geofence Zones", "Enter/exit alerts on map", navController, "geofence")
         FeatureItem("Audit Log", "Event trail & chain verify", navController, "audit")

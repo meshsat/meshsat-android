@@ -42,10 +42,16 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.cubeos.meshsat.data.AccessRuleEntity
+import com.cubeos.meshsat.data.AppDatabase
+import com.cubeos.meshsat.data.FailoverGroupEntity
+import com.cubeos.meshsat.data.FailoverMemberEntity
+import com.cubeos.meshsat.data.ObjectGroupEntity
 import com.cubeos.meshsat.engine.HealthScore
 import com.cubeos.meshsat.engine.InterfaceState
 import com.cubeos.meshsat.engine.InterfaceStatus
 import com.cubeos.meshsat.service.GatewayService
+import org.json.JSONArray
 import com.cubeos.meshsat.ui.theme.ColorCellular
 import com.cubeos.meshsat.ui.theme.ColorIridium
 import com.cubeos.meshsat.ui.theme.ColorMesh
@@ -70,7 +76,10 @@ import java.util.Locale
 
 private enum class IfaceTab(val label: String) {
     Interfaces("Interfaces"),
+    AccessRules("Access Rules"),
     Channels("Channels"),
+    ObjectGroups("Object Groups"),
+    Failover("Failover"),
     Health("Health"),
 }
 
@@ -190,7 +199,13 @@ fun InterfacesScreen() {
                 },
             )
 
+            IfaceTab.AccessRules -> AccessRulesTabContent()
+
             IfaceTab.Channels -> ChannelsTabContent()
+
+            IfaceTab.ObjectGroups -> ObjectGroupsTabContent()
+
+            IfaceTab.Failover -> FailoverTabContent()
 
             IfaceTab.Health -> HealthTabContent(healthScores = healthScores)
         }
@@ -683,6 +698,335 @@ private fun ScoreColumn(label: String, value: Int, color: Color) {
             style = MaterialTheme.typography.labelSmall,
             color = MeshSatTextMuted,
         )
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Access Rules Tab — read-only list of forwarding access rules
+// ═══════════════════════════════════════════════════════════════════════
+
+@Composable
+private fun AccessRulesTabContent() {
+    val context = LocalContext.current
+    val db = AppDatabase.getInstance(context)
+    val rules by db.accessRuleDao().getAll().collectAsState(initial = emptyList())
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(
+            text = "Access control rules for transport interfaces",
+            style = MaterialTheme.typography.bodySmall,
+            color = MeshSatTextMuted,
+            modifier = Modifier.padding(bottom = 4.dp),
+        )
+
+        if (rules.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 48.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = "No access rules configured.\nAdd rules in the Rules screen.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MeshSatTextMuted,
+                )
+            }
+        }
+
+        rules.forEach { rule ->
+            AccessRuleCard(rule)
+        }
+    }
+}
+
+@Composable
+private fun AccessRuleCard(rule: AccessRuleEntity) {
+    val actionColor = when (rule.action) {
+        "forward" -> MeshSatGreen
+        "drop" -> MeshSatRed
+        "log" -> MeshSatAmber
+        else -> MeshSatTextMuted
+    }
+    val dirColor = when (rule.direction) {
+        "ingress" -> ColorMesh
+        "egress" -> ColorIridium
+        else -> MeshSatTextMuted
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MeshSatSurface, RoundedCornerShape(8.dp))
+            .border(1.dp, MeshSatBorder, RoundedCornerShape(8.dp))
+            .then(if (!rule.enabled) Modifier.background(Color.Black.copy(alpha = 0.3f)) else Modifier)
+            .padding(12.dp),
+    ) {
+        // Row 1: name + enabled indicator
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = rule.name,
+                style = MaterialTheme.typography.titleSmall,
+            )
+            Text(
+                text = if (rule.enabled) "ENABLED" else "DISABLED",
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+                color = if (rule.enabled) MeshSatGreen else MeshSatTextMuted,
+                modifier = Modifier
+                    .background(
+                        (if (rule.enabled) MeshSatGreen else MeshSatTextMuted).copy(alpha = 0.12f),
+                        RoundedCornerShape(4.dp),
+                    )
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+            )
+        }
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        // Row 2: interface + direction + action badges
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = rule.interfaceId,
+                style = MaterialTheme.typography.labelSmall,
+                fontFamily = FontFamily.Monospace,
+                color = MeshSatTextSecondary,
+            )
+            Text(
+                text = rule.direction.uppercase(),
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+                color = dirColor,
+                modifier = Modifier
+                    .background(dirColor.copy(alpha = 0.12f), RoundedCornerShape(4.dp))
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+            )
+            Text(
+                text = rule.action.uppercase(),
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+                color = actionColor,
+                modifier = Modifier
+                    .background(actionColor.copy(alpha = 0.12f), RoundedCornerShape(4.dp))
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+            )
+        }
+
+        // Row 3: match stats
+        if (rule.matchCount > 0) {
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "Matches: ${rule.matchCount}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MeshSatTextMuted,
+            )
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Object Groups Tab — read-only list of object groups
+// ═══════════════════════════════════════════════════════════════════════
+
+@Composable
+private fun ObjectGroupsTabContent() {
+    val context = LocalContext.current
+    val db = AppDatabase.getInstance(context)
+    var groups by remember { mutableStateOf<List<ObjectGroupEntity>>(emptyList()) }
+
+    LaunchedEffect(Unit) {
+        groups = db.objectGroupDao().getAll()
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(
+            text = "Named groups of nodes, portnums, or senders",
+            style = MaterialTheme.typography.bodySmall,
+            color = MeshSatTextMuted,
+            modifier = Modifier.padding(bottom = 4.dp),
+        )
+
+        if (groups.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 48.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = "No object groups defined.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MeshSatTextMuted,
+                )
+            }
+        }
+
+        groups.forEach { group ->
+            val memberCount = try {
+                JSONArray(group.members).length()
+            } catch (_: Exception) {
+                0
+            }
+            val typeColor = when (group.type) {
+                "node" -> ColorMesh
+                "portnum" -> ColorIridium
+                "sender" -> ColorCellular
+                else -> MeshSatTeal
+            }
+
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MeshSatSurface, RoundedCornerShape(8.dp))
+                    .border(1.dp, MeshSatBorder, RoundedCornerShape(8.dp))
+                    .padding(12.dp),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = group.label,
+                            style = MaterialTheme.typography.titleSmall,
+                        )
+                        Text(
+                            text = group.type.uppercase(),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = typeColor,
+                            modifier = Modifier
+                                .background(typeColor.copy(alpha = 0.12f), RoundedCornerShape(4.dp))
+                                .padding(horizontal = 6.dp, vertical = 2.dp),
+                        )
+                    }
+
+                    Text(
+                        text = "$memberCount members",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MeshSatTextSecondary,
+                    )
+                }
+            }
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Failover Tab — read-only list of failover/broadcast groups
+// ═══════════════════════════════════════════════════════════════════════
+
+@Composable
+private fun FailoverTabContent() {
+    val context = LocalContext.current
+    val db = AppDatabase.getInstance(context)
+    var groups by remember { mutableStateOf<List<FailoverGroupEntity>>(emptyList()) }
+    var memberCounts by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
+
+    LaunchedEffect(Unit) {
+        val allGroups = db.failoverGroupDao().getAllGroups()
+        groups = allGroups
+        memberCounts = allGroups.associate { g ->
+            g.id to db.failoverGroupDao().getMembers(g.id).size
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(
+            text = "Failover and broadcast interface groups",
+            style = MaterialTheme.typography.bodySmall,
+            color = MeshSatTextMuted,
+            modifier = Modifier.padding(bottom = 4.dp),
+        )
+
+        if (groups.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 48.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = "No failover groups configured.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MeshSatTextMuted,
+                )
+            }
+        }
+
+        groups.forEach { group ->
+            val modeColor = when (group.mode) {
+                "failover" -> MeshSatAmber
+                "broadcast" -> ColorMesh
+                else -> MeshSatTeal
+            }
+            val count = memberCounts[group.id] ?: 0
+
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MeshSatSurface, RoundedCornerShape(8.dp))
+                    .border(1.dp, MeshSatBorder, RoundedCornerShape(8.dp))
+                    .padding(12.dp),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = group.label,
+                            style = MaterialTheme.typography.titleSmall,
+                        )
+                        Text(
+                            text = group.mode.uppercase(),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = modeColor,
+                            modifier = Modifier
+                                .background(modeColor.copy(alpha = 0.12f), RoundedCornerShape(4.dp))
+                                .padding(horizontal = 6.dp, vertical = 2.dp),
+                        )
+                    }
+
+                    Text(
+                        text = "$count members",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MeshSatTextSecondary,
+                    )
+                }
+            }
+        }
     }
 }
 
