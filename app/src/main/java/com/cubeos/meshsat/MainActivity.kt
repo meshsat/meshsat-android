@@ -55,7 +55,7 @@ class MainActivity : ComponentActivity() {
         requestMissingPermissions()
 
         // Start gateway service so BLE/SPP transports are always available
-        startService(Intent(this, com.cubeos.meshsat.service.GatewayService::class.java))
+        startForegroundService(Intent(this, com.cubeos.meshsat.service.GatewayService::class.java))
 
         setContent {
             MeshSatTheme {

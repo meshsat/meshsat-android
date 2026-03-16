@@ -145,16 +145,21 @@ class GatewayService : Service() {
         iridiumSpp = IridiumSpp(this)
 
         startForegroundNotification()
-        loadRulesFromDb()
-        deduplicator.startPruner(scope)
-        initInterfaceManager()
-        initDispatcher()
-        initFieldIntelligence()
-        initSigningAndApi()
-        observeTransports()
-        startSignalPolling()
-        startLocationUpdates()
-        initMsvqsc()
+
+        try {
+            loadRulesFromDb()
+            deduplicator.startPruner(scope)
+            initInterfaceManager()
+            initDispatcher()
+            initFieldIntelligence()
+            initSigningAndApi()
+            observeTransports()
+            startSignalPolling()
+            startLocationUpdates()
+            initMsvqsc()
+        } catch (e: Exception) {
+            Log.e("MeshSat", "Service init error (non-fatal): ${e.message}", e)
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -1133,7 +1138,23 @@ class GatewayService : Service() {
             .setOngoing(true)
             .build()
 
-        startForeground(1, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(1, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
+            } else {
+                @Suppress("DEPRECATION")
+                startForeground(1, notification)
+            }
+        } catch (e: Exception) {
+            // Fallback: start without foreground service type (e.g. missing permission)
+            Log.w("MeshSat", "startForeground with type failed, retrying without: ${e.message}")
+            try {
+                @Suppress("DEPRECATION")
+                startForeground(1, notification)
+            } catch (e2: Exception) {
+                Log.e("MeshSat", "startForeground failed entirely: ${e2.message}")
+            }
+        }
     }
 
     private fun updateNotification() {
