@@ -57,6 +57,10 @@ class MeshtasticBle(private val context: Context) {
     private var toRadioChar: BluetoothGattCharacteristic? = null
     private var fromRadioChar: BluetoothGattCharacteristic? = null
 
+    /** Last connected BLE address, used for reconnect(). */
+    @Volatile var lastAddress: String? = null
+        private set
+
     private val _state = MutableStateFlow(State.Disconnected)
     val state: StateFlow<State> = _state
 
@@ -143,11 +147,22 @@ class MeshtasticBle(private val context: Context) {
     }
 
     fun connect(address: String) {
+        lastAddress = address
         val device = adapter?.getRemoteDevice(address) ?: run {
             scope.launch { _error.emit("Invalid BLE address: $address") }
             return
         }
         connect(device)
+    }
+
+    /** Reconnect to the last-known BLE address. No-op if no address was previously used. */
+    fun reconnect() {
+        val addr = lastAddress
+        if (addr != null) {
+            connect(addr)
+        } else {
+            scope.launch { _error.emit("No previous BLE address for reconnect") }
+        }
     }
 
     fun disconnect() {

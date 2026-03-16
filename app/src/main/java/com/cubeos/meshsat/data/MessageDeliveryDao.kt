@@ -48,10 +48,29 @@ interface MessageDeliveryDao {
     """)
     suspend fun expireDeliveries(now: Long = System.currentTimeMillis()): Int
 
-    @Query("UPDATE message_deliveries SET status = 'held', updated_at = :now WHERE channel = :channel AND status IN ('queued', 'retry')")
+    /**
+     * Hold deliveries for a channel going offline. Records held_at for TTL clock pausing.
+     */
+    @Query("UPDATE message_deliveries SET status = 'held', held_at = :now, updated_at = :now WHERE channel = :channel AND status IN ('queued', 'retry')")
     suspend fun holdForChannel(channel: String, now: Long = System.currentTimeMillis()): Int
 
-    @Query("UPDATE message_deliveries SET status = 'queued', updated_at = :now WHERE channel = :channel AND status = 'held'")
+    /**
+     * Unhold deliveries when channel comes back online.
+     * Extends expires_at by the duration spent in held state (TTL clock pauses while held).
+     * P0 messages (priority=0) have no expiry so held_at arithmetic is harmless.
+     */
+    @Query("""
+        UPDATE message_deliveries
+        SET status = 'queued',
+            expires_at = CASE
+                WHEN expires_at IS NOT NULL AND held_at IS NOT NULL
+                THEN expires_at + (:now - held_at)
+                ELSE expires_at
+            END,
+            held_at = NULL,
+            updated_at = :now
+        WHERE channel = :channel AND status = 'held'
+    """)
     suspend fun unholdForChannel(channel: String, now: Long = System.currentTimeMillis()): Int
 
     @Query("""
@@ -71,6 +90,52 @@ interface MessageDeliveryDao {
     /** Delivery stats by channel and status. */
     @Query("SELECT channel, status, COUNT(*) as cnt FROM message_deliveries GROUP BY channel, status ORDER BY channel, status")
     suspend fun stats(): List<DeliveryStatRow>
+
+    // --- Phase C: Sequence numbers ---
+
+    /** Assign a sequence number to a delivery (set before sending). */
+    @Query("UPDATE message_deliveries SET seq_num = :seqNum, updated_at = :now WHERE id = :id")
+    suspend fun setSeqNum(id: Long, seqNum: Long, now: Long = System.currentTimeMillis())
+
+    // --- Phase C: ACK tracking ---
+
+    /** Set ACK status to 'pending' after successful send (QoS >= 1). */
+    @Query("UPDATE message_deliveries SET ack_status = 'pending', ack_timestamp = :now, updated_at = :now WHERE id = :id")
+    suspend fun setAckPending(id: Long, now: Long = System.currentTimeMillis())
+
+    /**
+     * Mark delivery as ACKed → promotes status to 'delivered'.
+     */
+    @Query("UPDATE message_deliveries SET ack_status = 'acked', ack_timestamp = :now, status = 'delivered', updated_at = :now WHERE id = :id")
+    suspend fun setAcked(id: Long, now: Long = System.currentTimeMillis())
+
+    /** Mark delivery as NACKed (negative acknowledgment). */
+    @Query("UPDATE message_deliveries SET ack_status = 'nacked', ack_timestamp = :now, updated_at = :now WHERE id = :id")
+    suspend fun setNacked(id: Long, now: Long = System.currentTimeMillis())
+
+    /**
+     * Find deliveries with pending ACKs that have timed out.
+     * Returns deliveries where ack_status='pending' and ack_timestamp is older than timeoutMs.
+     */
+    @Query("""
+        SELECT * FROM message_deliveries
+        WHERE channel = :channel AND ack_status = 'pending'
+          AND ack_timestamp IS NOT NULL AND ack_timestamp <= :cutoff
+        ORDER BY created_at ASC
+    """)
+    suspend fun getPendingAcks(channel: String, cutoff: Long): List<MessageDeliveryEntity>
+
+    /** Mark timed-out pending ACKs as 'timeout'. */
+    @Query("""
+        UPDATE message_deliveries
+        SET ack_status = 'timeout', updated_at = :now
+        WHERE ack_status = 'pending' AND ack_timestamp IS NOT NULL AND ack_timestamp <= :cutoff
+    """)
+    suspend fun timeoutPendingAcks(cutoff: Long, now: Long = System.currentTimeMillis()): Int
+
+    /** Get delivery by channel and sequence number (for ACK correlation). */
+    @Query("SELECT * FROM message_deliveries WHERE channel = :channel AND seq_num = :seqNum AND seq_num > 0 LIMIT 1")
+    suspend fun getByChannelAndSeq(channel: String, seqNum: Long): MessageDeliveryEntity?
 }
 
 data class DeliveryStatRow(

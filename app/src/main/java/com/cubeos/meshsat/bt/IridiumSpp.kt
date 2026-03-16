@@ -58,6 +58,10 @@ class IridiumSpp(private val context: Context) {
     private var inputStream: InputStream? = null
     private var outputStream: OutputStream? = null
 
+    /** Last connected SPP address, used for reconnect(). */
+    @Volatile var lastAddress: String? = null
+        private set
+
     private val _state = MutableStateFlow(State.Disconnected)
     val state: StateFlow<State> = _state
 
@@ -100,11 +104,22 @@ class IridiumSpp(private val context: Context) {
     // --- Connect / Disconnect ---
 
     fun connect(address: String) {
+        lastAddress = address
         val device = adapter?.getRemoteDevice(address) ?: run {
             scope.launch { _error.emit("Invalid Bluetooth address: $address") }
             return
         }
         connect(device)
+    }
+
+    /** Reconnect to the last-known SPP address. No-op if no address was previously used. */
+    fun reconnect() {
+        val addr = lastAddress
+        if (addr != null) {
+            connect(addr)
+        } else {
+            scope.launch { _error.emit("No previous SPP address for reconnect") }
+        }
     }
 
     fun connect(device: BluetoothDevice) {

@@ -8,6 +8,9 @@ import androidx.room.PrimaryKey
  * Delivery ledger entry — tracks per-(message, channel) lifecycle.
  * Statuses: queued → sending → sent → delivered / failed → retry → dead / expired / denied / held.
  * Port of Go's database.MessageDelivery.
+ *
+ * Phase C additions: held_at (TTL clock pausing), seq_num (per-interface sequence),
+ * ack_status/ack_timestamp (delivery confirmation tracking).
  */
 @Entity(tableName = "message_deliveries")
 data class MessageDeliveryEntity(
@@ -27,6 +30,10 @@ data class MessageDeliveryEntity(
     @ColumnInfo(name = "ttl_seconds") val ttlSeconds: Int = 0,
     @ColumnInfo(name = "expires_at") val expiresAt: Long? = null,   // epoch millis
     @ColumnInfo(name = "qos_level") val qosLevel: Int = 1,
+    @ColumnInfo(name = "held_at") val heldAt: Long? = null,         // epoch millis — when moved to 'held'
+    @ColumnInfo(name = "seq_num") val seqNum: Long = 0,             // per-interface monotonic sequence
+    @ColumnInfo(name = "ack_status") val ackStatus: String? = null,  // null, "pending", "acked", "nacked", "timeout"
+    @ColumnInfo(name = "ack_timestamp") val ackTimestamp: Long? = null, // epoch millis
     @ColumnInfo(name = "created_at") val createdAt: Long = System.currentTimeMillis(),
     @ColumnInfo(name = "updated_at") val updatedAt: Long = System.currentTimeMillis(),
 ) {

@@ -25,12 +25,17 @@ import kotlin.time.Duration.Companion.seconds
  * Dispatcher evaluates access rules and fans out messages to per-channel delivery workers.
  * Port of Go's engine.Dispatcher — uses Kotlin coroutines instead of goroutines.
  *
+ * Phase C additions: InterfaceManager integration for state-driven hold/unhold,
+ * SequenceTracker for per-interface monotonic sequence numbers,
+ * ACK tracking for at-least-once delivery semantics (QoS >= 1).
+ *
  * @param deliveryDao Room DAO for the message_deliveries table.
  * @param accessEvaluator Access rule evaluator (ingress/egress).
  * @param failoverResolver Resolves failover group IDs to concrete interfaces.
  * @param registry Channel registry for retry config and capabilities.
  * @param deliveryCallback Called by workers to actually send a message to a transport.
  * @param scope Coroutine scope for background work.
+ * @param sequenceTracker Per-interface monotonic sequence counter (Phase C).
  */
 class Dispatcher(
     private val deliveryDao: MessageDeliveryDao,
@@ -39,6 +44,7 @@ class Dispatcher(
     private val registry: ChannelRegistry,
     private val deliveryCallback: DeliveryCallback,
     private val scope: CoroutineScope,
+    private val sequenceTracker: SequenceTracker = SequenceTracker(),
 ) {
     /** Callback for actual message delivery to a transport. */
     fun interface DeliveryCallback {
@@ -136,6 +142,27 @@ class Dispatcher(
     fun stop() {
         workers.values.forEach { it.cancel() }
         workers.clear()
+    }
+
+    /**
+     * Handle an InterfaceManager state change.
+     * Called from InterfaceManager's state change callback to drive hold/unhold.
+     */
+    fun onInterfaceStateChange(interfaceId: String, channelType: String, old: InterfaceState, new: InterfaceState) {
+        when {
+            new == InterfaceState.Online && old != InterfaceState.Online -> {
+                startWorker(interfaceId)
+            }
+            new != InterfaceState.Online && old == InterfaceState.Online -> {
+                stopWorker(interfaceId)
+            }
+            new == InterfaceState.Error && old != InterfaceState.Online -> {
+                // Already offline, ensure held
+                scope.launch {
+                    deliveryDao.holdForChannel(interfaceId)
+                }
+            }
+        }
     }
 
     /**
@@ -319,8 +346,19 @@ class Dispatcher(
     }
 
     private suspend fun handleSuccess(channelId: String, del: MessageDeliveryEntity) {
+        // Assign egress sequence number
+        val seqNum = sequenceTracker.nextEgressSeq(channelId)
+        deliveryDao.setSeqNum(del.id, seqNum)
+
         deliveryDao.setStatus(del.id, "sent")
-        Log.i(TAG, "Delivery ${del.id} sent to $channelId")
+
+        // For QoS >= 1, mark ACK as pending (at-least-once semantics)
+        if (del.qosLevel >= 1) {
+            deliveryDao.setAckPending(del.id)
+            Log.i(TAG, "Delivery ${del.id} sent to $channelId (seq=$seqNum, ack=pending)")
+        } else {
+            Log.i(TAG, "Delivery ${del.id} sent to $channelId (seq=$seqNum, qos=0)")
+        }
     }
 
     private suspend fun handleFailure(channelId: String, del: MessageDeliveryEntity, error: String) {

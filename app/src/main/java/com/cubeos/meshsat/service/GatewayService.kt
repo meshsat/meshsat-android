@@ -33,14 +33,20 @@ import com.cubeos.meshsat.data.Message
 import com.cubeos.meshsat.data.NodePosition
 import com.cubeos.meshsat.data.SettingsRepository
 import com.cubeos.meshsat.data.SignalRecord
+import com.cubeos.meshsat.engine.AckTracker
 import com.cubeos.meshsat.engine.Dispatcher
 import com.cubeos.meshsat.engine.FailoverResolver
+import com.cubeos.meshsat.engine.InterfaceConfig
+import com.cubeos.meshsat.engine.InterfaceManager
+import com.cubeos.meshsat.engine.InterfaceState
 import com.cubeos.meshsat.engine.InterfaceStatusProvider
+import com.cubeos.meshsat.engine.SequenceTracker
 import com.cubeos.meshsat.rules.AccessEvaluator
 import com.cubeos.meshsat.rules.ForwardingRule
 import com.cubeos.meshsat.rules.RouteMessage
 import com.cubeos.meshsat.rules.RulesEngine
 import com.cubeos.meshsat.sms.SmsSender
+import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
@@ -103,6 +109,11 @@ class GatewayService : Service() {
     private var dispatcher: Dispatcher? = null
     private var accessEvaluator: AccessEvaluator? = null
 
+    // Phase C: transport hardening
+    private var interfaceManager: InterfaceManager? = null
+    private var ackTracker: AckTracker? = null
+    private val sequenceTracker = SequenceTracker()
+
     override fun onCreate() {
         super.onCreate()
         settings = SettingsRepository(this)
@@ -113,6 +124,7 @@ class GatewayService : Service() {
 
         startForegroundNotification()
         loadRulesFromDb()
+        initInterfaceManager()
         initDispatcher()
         observeTransports()
         startSignalPolling()
@@ -156,8 +168,12 @@ class GatewayService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        ackTracker?.stop()
+        ackTracker = null
         dispatcher?.stop()
         dispatcher = null
+        interfaceManager?.stopAll()
+        interfaceManager = null
         accessEvaluator = null
         sosJob?.cancel()
         meshtasticBle?.disconnect()
@@ -196,6 +212,110 @@ class GatewayService : Service() {
     }
 
     /**
+     * Initialize the Phase C InterfaceManager with the 3 Android transports.
+     * Registers connect/disconnect callbacks and observes transport state flows
+     * to drive state machine transitions.
+     */
+    private fun initInterfaceManager() {
+        val mgr = InterfaceManager(scope)
+
+        // Register the 3 Android interfaces
+        mgr.register(InterfaceConfig(
+            id = "mesh_0", channelType = "mesh",
+            autoReconnect = true,
+            initialBackoff = 5.seconds,
+            maxBackoff = 60.seconds,
+        ))
+        mgr.register(InterfaceConfig(
+            id = "iridium_0", channelType = "iridium",
+            autoReconnect = true,
+            initialBackoff = 10.seconds,
+            maxBackoff = 120.seconds,
+        ))
+        mgr.register(InterfaceConfig(
+            id = "sms_0", channelType = "sms",
+            autoReconnect = false,
+            alwaysOnline = true, // SMS is always available via Android
+        ))
+
+        // Connect callback — triggers actual BLE/SPP connection
+        // Uses the saved BLE/SPP addresses from settings to reconnect.
+        mgr.setConnectCallback { interfaceId ->
+            when {
+                interfaceId.startsWith("mesh") -> {
+                    val ble = meshtasticBle ?: return@setConnectCallback "mesh transport not available"
+                    // BLE address was saved on first connect; we don't have a flow for it,
+                    // so we rely on the transport layer's last-known address.
+                    // If the user hasn't connected before, the InterfaceManager won't auto-reconnect.
+                    ble.reconnect()
+                    null // connection is async — setOnline called from state observer
+                }
+                interfaceId.startsWith("iridium") -> {
+                    val spp = iridiumSpp ?: return@setConnectCallback "iridium transport not available"
+                    spp.reconnect()
+                    null
+                }
+                else -> null
+            }
+        }
+
+        // Disconnect callback
+        mgr.setDisconnectCallback { interfaceId ->
+            when {
+                interfaceId.startsWith("mesh") -> meshtasticBle?.disconnect()
+                interfaceId.startsWith("iridium") -> iridiumSpp?.disconnect()
+            }
+        }
+
+        interfaceManager = mgr
+
+        // Observe BLE state → drive InterfaceManager
+        meshtasticBle?.let { ble ->
+            scope.launch {
+                ble.state.collect { state ->
+                    when (state) {
+                        MeshtasticBle.State.Connected -> mgr.setOnline("mesh_0")
+                        MeshtasticBle.State.Disconnected -> mgr.setOffline("mesh_0")
+                        MeshtasticBle.State.Scanning,
+                        MeshtasticBle.State.Connecting -> mgr.setConnecting("mesh_0")
+                    }
+                }
+            }
+        }
+
+        // Observe SPP state → drive InterfaceManager
+        iridiumSpp?.let { spp ->
+            scope.launch {
+                spp.state.collect { state ->
+                    when (state) {
+                        IridiumSpp.State.Connected -> mgr.setOnline("iridium_0")
+                        IridiumSpp.State.Disconnected -> mgr.setOffline("iridium_0")
+                        IridiumSpp.State.Connecting -> mgr.setConnecting("iridium_0")
+                    }
+                }
+            }
+        }
+
+        // Observe BLE errors → drive InterfaceManager
+        meshtasticBle?.let { ble ->
+            scope.launch {
+                ble.error.collect { err ->
+                    if (err.isNotBlank()) mgr.setError("mesh_0", err)
+                }
+            }
+        }
+        iridiumSpp?.let { spp ->
+            scope.launch {
+                spp.error.collect { err ->
+                    if (err.isNotBlank()) mgr.setError("iridium_0", err)
+                }
+            }
+        }
+
+        Log.i("MeshSat", "InterfaceManager initialized with 3 interfaces")
+    }
+
+    /**
      * Initialize the Phase B structured dispatch stack:
      * AccessEvaluator → FailoverResolver → Dispatcher with delivery workers.
      * Falls back gracefully to the legacy RulesEngine if no access rules exist.
@@ -212,14 +332,15 @@ class GatewayService : Service() {
                 eval.reloadFromDb()
                 accessEvaluator = eval
 
-                // Interface status provider (checks live transport state)
+                // Interface status provider — delegates to InterfaceManager (Phase C)
+                val mgr = interfaceManager
                 val statusProvider = InterfaceStatusProvider { interfaceId ->
-                    when {
+                    mgr?.isOnline(interfaceId) ?: when {
                         interfaceId.startsWith("mesh") ->
                             meshtasticBle?.state?.value == MeshtasticBle.State.Connected
                         interfaceId.startsWith("iridium") ->
                             iridiumSpp?.state?.value == IridiumSpp.State.Connected
-                        interfaceId.startsWith("sms") -> true // SMS always available
+                        interfaceId.startsWith("sms") -> true
                         else -> false
                     }
                 }
@@ -232,7 +353,7 @@ class GatewayService : Service() {
                     deliverToTransport(interfaceId, payload, textPreview)
                 }
 
-                // Create and start dispatcher
+                // Create and start dispatcher (Phase C: with sequence tracker)
                 val disp = Dispatcher(
                     deliveryDao = db.messageDeliveryDao(),
                     accessEvaluator = eval,
@@ -240,7 +361,13 @@ class GatewayService : Service() {
                     registry = registry,
                     deliveryCallback = callback,
                     scope = scope,
+                    sequenceTracker = sequenceTracker,
                 )
+
+                // Wire InterfaceManager state changes to Dispatcher hold/unhold
+                interfaceManager?.setStateChangeCallback { id, channelType, old, new ->
+                    disp.onInterfaceStateChange(id, channelType, old, new)
+                }
 
                 // Start workers for the three Android interfaces
                 val interfaces = mapOf(
@@ -251,7 +378,12 @@ class GatewayService : Service() {
                 disp.start(interfaces)
                 dispatcher = disp
 
-                Log.i("MeshSat", "Dispatcher initialized (${eval.ruleCount()} access rules)")
+                // Phase C: Start ACK tracker
+                val tracker = AckTracker(db.messageDeliveryDao(), scope)
+                tracker.start()
+                ackTracker = tracker
+
+                Log.i("MeshSat", "Dispatcher initialized (${eval.ruleCount()} access rules, ACK tracker started)")
             } catch (e: Exception) {
                 Log.e("MeshSat", "Dispatcher init failed (legacy routing active): ${e.message}")
             }
@@ -445,6 +577,7 @@ class GatewayService : Service() {
                             )
                         )
                         postMessageNotification("Mesh: $nodeId", msg.text)
+                        interfaceManager?.recordActivity("mesh_0")
                         evaluateAndForward(ForwardingRule.Transport.MESH, msg.text, nodeId)
                         return@collect
                     }
@@ -538,6 +671,7 @@ class GatewayService : Service() {
                 )
 
                 postMessageNotification("Iridium: $imei", mtText)
+                interfaceManager?.recordActivity("iridium_0")
                 evaluateAndForward(ForwardingRule.Transport.IRIDIUM, mtText, imei)
             }
         }
