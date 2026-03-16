@@ -109,6 +109,10 @@ class GatewayService : Service() {
         var healthScorer: com.cubeos.meshsat.engine.HealthScorer? = null
             private set
 
+        // Phase H: exposed for bridge rules UI reload
+        var accessEval: AccessEvaluator? = null
+            private set
+
         private var notificationId = 100
     }
 
@@ -215,6 +219,7 @@ class GatewayService : Service() {
         interfaceManager?.stopAll()
         interfaceManager = null
         accessEvaluator = null
+        accessEval = null
         sosJob?.cancel()
         meshtasticBle?.disconnect()
         iridiumSpp?.disconnect()
@@ -466,6 +471,7 @@ class GatewayService : Service() {
                 val eval = AccessEvaluator(db.accessRuleDao(), db.objectGroupDao(), scope)
                 eval.reloadFromDb()
                 accessEvaluator = eval
+                accessEval = eval
 
                 // Interface status provider — delegates to InterfaceManager (Phase C)
                 val mgr = interfaceManager
