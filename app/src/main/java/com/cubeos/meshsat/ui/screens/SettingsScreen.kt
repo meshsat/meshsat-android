@@ -63,6 +63,9 @@ import com.cubeos.meshsat.ui.theme.MeshSatRed
 import com.cubeos.meshsat.ui.theme.MeshSatSurface
 import com.cubeos.meshsat.ui.theme.MeshSatTeal
 import com.cubeos.meshsat.ui.theme.MeshSatTextMuted
+import com.cubeos.meshsat.ui.theme.MeshSatTextSecondary
+import com.cubeos.meshsat.ui.theme.ColorCellular
+import com.cubeos.meshsat.codec.CannedCodebook
 import androidx.navigation.NavController
 import kotlinx.coroutines.launch
 
@@ -78,6 +81,9 @@ fun SettingsScreen(navController: NavController? = null) {
     val piPhone by settings.meshsatPiPhone.collectAsState(initial = "")
     val msvqscEnabled by settings.msvqscEnabled.collectAsState(initial = false)
     val msvqscStages by settings.msvqscStages.collectAsState(initial = "3")
+
+    val deadmanEnabled by settings.deadmanEnabled.collectAsState(initial = false)
+    val deadmanTimeoutMin by settings.deadmanTimeoutMin.collectAsState(initial = "120")
 
     var keyInput by remember(encryptionKey) { mutableStateOf(encryptionKey) }
     var phoneInput by remember(piPhone) { mutableStateOf(piPhone) }
@@ -548,6 +554,216 @@ fun SettingsScreen(navController: NavController? = null) {
             )
         }
 
+        // --- Dead Man's Switch ---
+        SectionCard("Dead Man's Switch") {
+            SettingRow("Enabled") {
+                Switch(
+                    checked = deadmanEnabled,
+                    onCheckedChange = {
+                        scope.launch {
+                            settings.setDeadmanEnabled(it)
+                            GatewayService.deadManSwitch?.setEnabled(it)
+                        }
+                    },
+                    colors = SwitchDefaults.colors(checkedTrackColor = MeshSatTeal),
+                )
+            }
+
+            if (deadmanEnabled) {
+                val timeoutOptions = listOf("30" to "30 min", "60" to "1 hour", "120" to "2 hours", "240" to "4 hours", "480" to "8 hours")
+                Text(
+                    text = "Timeout (triggers SOS if no activity)",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MeshSatTextMuted,
+                )
+                timeoutOptions.forEach { (value, label) ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(
+                                if (deadmanTimeoutMin == value) MeshSatTeal.copy(alpha = 0.15f)
+                                else MeshSatSurface,
+                                RoundedCornerShape(4.dp),
+                            )
+                            .clickable {
+                                scope.launch {
+                                    settings.setDeadmanTimeoutMin(value)
+                                    val mins = value.toLongOrNull() ?: 120
+                                    GatewayService.deadManSwitch?.setTimeout(
+                                        kotlin.time.Duration.parse("${mins}m")
+                                    )
+                                }
+                            }
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(text = label, style = MaterialTheme.typography.bodySmall)
+                        if (deadmanTimeoutMin == value) {
+                            Text(
+                                text = "selected",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MeshSatTeal,
+                            )
+                        }
+                    }
+                }
+
+                // Show triggered state
+                val dms = GatewayService.deadManSwitch
+                if (dms != null && dms.isTriggered()) {
+                    Text(
+                        text = "TRIGGERED — SOS was sent. Tap to reset.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MeshSatRed,
+                        modifier = Modifier
+                            .clickable { dms.touch() }
+                            .padding(vertical = 4.dp),
+                    )
+                }
+            }
+
+            Text(
+                text = "Automatically sends SOS if no user activity (message send, button press) within the timeout period.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MeshSatTextMuted,
+            )
+        }
+
+        // --- Channel Health ---
+        SectionCard("Channel Health") {
+            val healthScorer = GatewayService.healthScorer
+            if (healthScorer == null) {
+                Text(
+                    text = "Health scorer not available. Connect a transport first.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MeshSatTextMuted,
+                )
+            } else {
+                val interfaceStates = GatewayService.meshtasticBle?.let { "mesh_0" } ?: ""
+                val channels = listOf("mesh_0", "iridium_0", "sms_0")
+
+                channels.forEach { ch ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(MeshSatSurface, RoundedCornerShape(4.dp))
+                            .padding(8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = ch,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = when {
+                                ch.startsWith("mesh") -> ColorMesh
+                                ch.startsWith("iridium") -> ColorIridium
+                                ch.startsWith("sms") -> ColorCellular
+                                else -> MeshSatTextSecondary
+                            },
+                        )
+                        Text(
+                            text = "score: --",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MeshSatTextMuted,
+                        )
+                    }
+                }
+
+                Text(
+                    text = "Health = Signal(0.3) + SuccessRate(0.3) + Latency(0.2) + Cost(0.2). Scores update in real-time based on 24h delivery history.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MeshSatTextMuted,
+                )
+            }
+        }
+
+        // --- Burst Queue Status ---
+        SectionCard("Burst Queue (Iridium)") {
+            val bq = GatewayService.burstQueue
+            if (bq == null) {
+                Text(
+                    text = "Burst queue not initialized.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MeshSatTextMuted,
+                )
+            } else {
+                val pending = bq.pending()
+                InfoRow("Pending messages", pending.toString())
+                InfoRow("Max size", "${bq.maxSize} msgs")
+                InfoRow("Max age", bq.maxAge.toString())
+                InfoRow("Should flush", if (bq.shouldFlush()) "Yes" else "No")
+
+                if (pending > 0) {
+                    Button(
+                        onClick = {
+                            val (payload, count) = bq.flush()
+                            Toast.makeText(
+                                context,
+                                if (count > 0) "Flushed $count messages (${payload?.size ?: 0} bytes)"
+                                else "Queue empty",
+                                Toast.LENGTH_SHORT,
+                            ).show()
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = MeshSatTeal),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("Flush Now", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+
+            Text(
+                text = "TLV-framed message queue for efficient satellite pass transmission. Messages are priority-sorted and packed into a single SBD payload (max 340 bytes).",
+                style = MaterialTheme.typography.bodySmall,
+                color = MeshSatTextMuted,
+            )
+        }
+
+        // --- Canned Messages ---
+        SectionCard("Canned Messages") {
+            val entries = CannedCodebook.DEFAULT_ENTRIES
+            Text(
+                text = "${entries.size} brevity codes loaded",
+                style = MaterialTheme.typography.bodySmall,
+                color = MeshSatTextMuted,
+            )
+
+            entries.entries.take(10).forEach { (id, text) ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 2.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text(
+                        text = text,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        text = "#$id",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MeshSatTextMuted,
+                    )
+                }
+            }
+
+            if (entries.size > 10) {
+                Text(
+                    text = "... and ${entries.size - 10} more",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MeshSatTextMuted,
+                )
+            }
+
+            Text(
+                text = "Wire format: 2 bytes (0xCA + message ID). Auto-detected on receive.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MeshSatTextMuted,
+            )
+        }
+
         // --- MeshSat Pi Section ---
         SectionCard("MeshSat Pi") {
             OutlinedTextField(
@@ -587,6 +803,31 @@ fun SettingsScreen(navController: NavController? = null) {
             modifier = Modifier.fillMaxWidth(),
         ) {
             Text("Encrypt / Decrypt Tool", style = MaterialTheme.typography.bodyMedium)
+        }
+
+        // --- Phase G Screens ---
+        Button(
+            onClick = { navController?.navigate("topology") },
+            colors = ButtonDefaults.buttonColors(containerColor = MeshSatSurface),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text("Mesh Topology View", style = MaterialTheme.typography.bodyMedium)
+        }
+
+        Button(
+            onClick = { navController?.navigate("deliveries") },
+            colors = ButtonDefaults.buttonColors(containerColor = MeshSatSurface),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text("Delivery Status", style = MaterialTheme.typography.bodyMedium)
+        }
+
+        Button(
+            onClick = { navController?.navigate("geofence") },
+            colors = ButtonDefaults.buttonColors(containerColor = MeshSatSurface),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text("Geofence Zones", style = MaterialTheme.typography.bodyMedium)
         }
 
         // --- About ---

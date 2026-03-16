@@ -99,6 +99,16 @@ class GatewayService : Service() {
         private val _phoneLocation = MutableStateFlow<Location?>(null)
         val phoneLocation: StateFlow<Location?> = _phoneLocation
 
+        // Phase D: field intelligence singletons (exposed for UI observation)
+        var geofenceMonitor: com.cubeos.meshsat.engine.GeofenceMonitor? = null
+            private set
+        var deadManSwitch: com.cubeos.meshsat.engine.DeadManSwitch? = null
+            private set
+        var burstQueue: com.cubeos.meshsat.engine.BurstQueue? = null
+            private set
+        var healthScorer: com.cubeos.meshsat.engine.HealthScorer? = null
+            private set
+
         private var notificationId = 100
     }
 
@@ -134,6 +144,7 @@ class GatewayService : Service() {
         loadRulesFromDb()
         initInterfaceManager()
         initDispatcher()
+        initFieldIntelligence()
         initSigningAndApi()
         observeTransports()
         startSignalPolling()
@@ -181,6 +192,11 @@ class GatewayService : Service() {
         localApiServer = null
         signingService = null
         configManager = null
+        deadManSwitch?.stop()
+        deadManSwitch = null
+        geofenceMonitor = null
+        burstQueue = null
+        healthScorer = null
         ackTracker?.stop()
         ackTracker = null
         dispatcher?.stop()
@@ -197,6 +213,51 @@ class GatewayService : Service() {
         msvqscEncoder = null
         scope.cancel()
         super.onDestroy()
+    }
+
+    /** Initialize Phase D: field intelligence components (geofence, dead man's switch, burst queue, health). */
+    private fun initFieldIntelligence() {
+        try {
+            // Geofence monitor
+            val gm = com.cubeos.meshsat.engine.GeofenceMonitor()
+            geofenceMonitor = gm
+
+            // Dead man's switch (default 2h timeout, disabled by default)
+            val dms = com.cubeos.meshsat.engine.DeadManSwitch(
+                positionDao = db.nodePositionDao(),
+                timeout = kotlin.time.Duration.parse("2h"),
+            )
+            dms.sosCallback = { lat, lon, lastSeen ->
+                android.util.Log.w("MeshSat", "Dead man's switch triggered at $lat,$lon (last seen: $lastSeen)")
+                activateSos()
+            }
+            deadManSwitch = dms
+
+            // Burst queue (max 10 messages, 5 min age)
+            val bq = com.cubeos.meshsat.engine.BurstQueue(
+                maxSize = 10,
+                maxAge = kotlin.time.Duration.parse("5m"),
+            )
+            burstQueue = bq
+
+            // Health scorer (needs interfaceManager + channel registry)
+            val im = interfaceManager
+            if (im != null) {
+                val hs = com.cubeos.meshsat.engine.HealthScorer(
+                    interfaceManager = im,
+                    channelRegistry = com.cubeos.meshsat.channel.ChannelRegistry().also {
+                        com.cubeos.meshsat.channel.registerAndroidDefaults(it)
+                    },
+                    signalDao = db.signalDao(),
+                    deliveryDao = db.messageDeliveryDao(),
+                )
+                healthScorer = hs
+            }
+
+            android.util.Log.i("MeshSat", "Phase D field intelligence initialized")
+        } catch (e: Exception) {
+            android.util.Log.w("MeshSat", "Phase D init failed: ${e.message}")
+        }
     }
 
     /**
@@ -230,11 +291,11 @@ class GatewayService : Service() {
                     scope = scope,
                     interfaceManager = interfaceManager,
                     channelRegistry = null, // Not stored as field yet; could be wired later
-                    healthScorer = null,    // Will be wired in Phase G when HealthScorer is a service field
+                    healthScorer = healthScorer,
                     deliveryDao = db.messageDeliveryDao(),
                     auditLogDao = db.auditLogDao(),
-                    geofenceMonitor = null, // Will be wired when GeofenceMonitor is a service field
-                    deadManSwitch = null,   // Will be wired when DeadManSwitch is a service field
+                    geofenceMonitor = geofenceMonitor,
+                    deadManSwitch = deadManSwitch,
                     signingService = signing,
                     configManager = cfgMgr,
                 )

@@ -23,10 +23,13 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.cubeos.meshsat.ui.screens.AboutScreen
 import com.cubeos.meshsat.ui.screens.DashboardScreen
+import com.cubeos.meshsat.ui.screens.DeliveryScreen
+import com.cubeos.meshsat.ui.screens.GeofenceScreen
 import com.cubeos.meshsat.ui.screens.MapScreen
 import com.cubeos.meshsat.ui.screens.MessagesScreen
 import com.cubeos.meshsat.ui.screens.RulesScreen
 import com.cubeos.meshsat.ui.screens.SettingsScreen
+import com.cubeos.meshsat.ui.screens.TopologyScreen
 import com.cubeos.meshsat.ui.theme.MeshSatBg
 import com.cubeos.meshsat.ui.theme.MeshSatSurface
 import com.cubeos.meshsat.ui.theme.MeshSatTeal
@@ -85,6 +88,9 @@ fun MeshSatUI() {
             composable("rules") { RulesScreen() }
             composable("settings") { SettingsScreen(navController) }
             composable("about") { AboutScreen() }
+            composable("topology") { TopologyScreen() }
+            composable("deliveries") { DeliveryScreen() }
+            composable("geofence") { GeofenceScreen() }
         }
     }
 }

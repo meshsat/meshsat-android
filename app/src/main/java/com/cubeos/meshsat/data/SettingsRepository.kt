@@ -23,6 +23,8 @@ class SettingsRepository(private val context: Context) {
         val KEY_IRIDIUM_BT_ADDR = stringPreferencesKey("iridium_bt_address")
         val KEY_MSVQSC_ENABLED = booleanPreferencesKey("msvqsc_enabled")
         val KEY_MSVQSC_STAGES = stringPreferencesKey("msvqsc_stages") // "auto" or "2"-"8"
+        val KEY_DEADMAN_ENABLED = booleanPreferencesKey("deadman_enabled")
+        val KEY_DEADMAN_TIMEOUT_MIN = stringPreferencesKey("deadman_timeout_min") // minutes as string
     }
 
     val encryptionKey: Flow<String> = context.dataStore.data.map {
@@ -79,5 +81,21 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setMsvqscStages(stages: String) {
         context.dataStore.edit { it[KEY_MSVQSC_STAGES] = stages }
+    }
+
+    val deadmanEnabled: Flow<Boolean> = context.dataStore.data.map {
+        it[KEY_DEADMAN_ENABLED] ?: false
+    }
+
+    val deadmanTimeoutMin: Flow<String> = context.dataStore.data.map {
+        it[KEY_DEADMAN_TIMEOUT_MIN] ?: "120"
+    }
+
+    suspend fun setDeadmanEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[KEY_DEADMAN_ENABLED] = enabled }
+    }
+
+    suspend fun setDeadmanTimeoutMin(minutes: String) {
+        context.dataStore.edit { it[KEY_DEADMAN_TIMEOUT_MIN] = minutes }
     }
 }
