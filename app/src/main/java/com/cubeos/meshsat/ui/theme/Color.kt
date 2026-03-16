@@ -18,6 +18,15 @@ val MeshSatRed = Color(0xFFEF4444)        // red-500
 val MeshSatGreen = Color(0xFF22C55E)      // green-500
 val MeshSatBlue = Color(0xFF3B82F6)       // blue-500
 
+// MeshSat light theme
+val MeshSatBgLight = Color(0xFFF9FAFB)         // gray-50
+val MeshSatSurfaceLight2 = Color(0xFFFFFFFF)    // white
+val MeshSatSurfaceLightAlt = Color(0xFFF3F4F6)  // gray-100
+val MeshSatBorderLight = Color(0xFFD1D5DB)      // gray-300
+val MeshSatTextPrimaryLight = Color(0xFF111827)  // gray-900
+val MeshSatTextSecondaryLight = Color(0xFF4B5563) // gray-600
+val MeshSatTextMutedLight = Color(0xFF9CA3AF)    // gray-400
+
 // Signal quality colors
 val SignalExcellent = Color(0xFF22C55E)
 val SignalGood = Color(0xFF84CC16)

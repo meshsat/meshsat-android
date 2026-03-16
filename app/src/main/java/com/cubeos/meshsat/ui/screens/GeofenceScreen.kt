@@ -2,6 +2,7 @@ package com.cubeos.meshsat.ui.screens
 
 import android.annotation.SuppressLint
 import android.view.ViewGroup
+import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
@@ -58,6 +59,7 @@ import com.cubeos.meshsat.ui.theme.MeshSatSurface
 import com.cubeos.meshsat.ui.theme.MeshSatTeal
 import com.cubeos.meshsat.ui.theme.MeshSatTextMuted
 import com.cubeos.meshsat.ui.theme.MeshSatTextSecondary
+import com.cubeos.meshsat.ui.theme.ThemeState
 
 /**
  * Geofence Map screen — draw/manage polygon zones on the map,
@@ -107,11 +109,14 @@ fun GeofenceScreen() {
                 .weight(1f)
                 .border(1.dp, MeshSatBorder, RoundedCornerShape(8.dp)),
         ) {
-            GeofenceMap(
-                zones = zones,
-                phoneLocation = phoneLocation,
-                meshNodes = nodes.filter { it.nodeId != 0L },
-            )
+            val darkModePref by ThemeState.darkMode.collectAsState()
+                val isDark = darkModePref ?: true
+                GeofenceMap(
+                    zones = zones,
+                    phoneLocation = phoneLocation,
+                    meshNodes = nodes.filter { it.nodeId != 0L },
+                    darkMode = isDark,
+                )
         }
 
         // Zone list
@@ -220,9 +225,10 @@ private fun GeofenceMap(
     zones: List<GeofenceZone>,
     phoneLocation: android.location.Location?,
     meshNodes: List<com.cubeos.meshsat.data.NodePosition>,
+    darkMode: Boolean = true,
 ) {
-    val html = remember(zones, phoneLocation, meshNodes) {
-        buildGeofenceMapHtml(zones, phoneLocation, meshNodes)
+    val html = remember(zones, phoneLocation, meshNodes, darkMode) {
+        buildGeofenceMapHtml(zones, phoneLocation, meshNodes, darkMode)
     }
 
     AndroidView(
@@ -234,12 +240,13 @@ private fun GeofenceMap(
                 )
                 settings.javaScriptEnabled = true
                 settings.domStorageEnabled = true
+                settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                 webViewClient = WebViewClient()
                 setBackgroundColor(android.graphics.Color.parseColor("#111827"))
             }
         },
         update = { webView ->
-            webView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null)
+            webView.loadDataWithBaseURL("https://unpkg.com/", html, "text/html", "UTF-8", null)
         },
     )
 }
@@ -248,6 +255,7 @@ private fun buildGeofenceMapHtml(
     zones: List<GeofenceZone>,
     phoneLocation: android.location.Location?,
     meshNodes: List<com.cubeos.meshsat.data.NodePosition>,
+    darkMode: Boolean = true,
 ): String {
     // Calculate center from all available positions
     val allLats = mutableListOf<Double>()
@@ -301,17 +309,17 @@ private fun buildGeofenceMapHtml(
         <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
         <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
         <style>
-            body { margin: 0; padding: 0; background: #111827; }
+            body { margin: 0; padding: 0; background: ${if (darkMode) "#111827" else "#F9FAFB"}; }
             #map { width: 100%; height: 100vh; }
-            .leaflet-popup-content-wrapper { background: #1F2937; color: #E5E7EB; border-radius: 8px; }
-            .leaflet-popup-tip { background: #1F2937; }
+            .leaflet-popup-content-wrapper { background: ${if (darkMode) "#1F2937" else "#FFFFFF"}; color: ${if (darkMode) "#E5E7EB" else "#111827"}; border-radius: 8px; }
+            .leaflet-popup-tip { background: ${if (darkMode) "#1F2937" else "#FFFFFF"}; }
         </style>
     </head>
     <body>
         <div id="map"></div>
         <script>
             var map = L.map('map').setView([${"%.7f".format(centerLat)}, ${"%.7f".format(centerLon)}], 13);
-            L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/${if (darkMode) "dark_all" else "light_all"}/{z}/{x}/{y}{r}.png', {
                 maxZoom: 19,
             }).addTo(map);
             $phoneMarker

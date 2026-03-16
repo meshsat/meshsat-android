@@ -2,6 +2,7 @@ package com.cubeos.meshsat.ui.screens
 
 import android.annotation.SuppressLint
 import android.view.ViewGroup
+import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.background
@@ -34,6 +35,7 @@ import com.cubeos.meshsat.ui.theme.MeshSatBorder
 import com.cubeos.meshsat.ui.theme.MeshSatSurface
 import com.cubeos.meshsat.ui.theme.MeshSatTeal
 import com.cubeos.meshsat.ui.theme.MeshSatTextMuted
+import com.cubeos.meshsat.ui.theme.ThemeState
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -83,7 +85,9 @@ fun MapScreen() {
                     .weight(1f)
                     .border(1.dp, MeshSatBorder, RoundedCornerShape(8.dp)),
             ) {
-                LeafletMap(nodes = meshNodes, phoneLocation = phoneLocation)
+                val darkModePref by ThemeState.darkMode.collectAsState()
+                val isDark = darkModePref ?: true
+                LeafletMap(nodes = meshNodes, phoneLocation = phoneLocation, darkMode = isDark)
             }
 
             // Node list below map
@@ -139,8 +143,8 @@ fun MapScreen() {
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-private fun LeafletMap(nodes: List<NodePosition>, phoneLocation: android.location.Location?) {
-    val html = remember(nodes, phoneLocation) { buildLeafletHtml(nodes, phoneLocation) }
+private fun LeafletMap(nodes: List<NodePosition>, phoneLocation: android.location.Location?, darkMode: Boolean = true) {
+    val html = remember(nodes, phoneLocation, darkMode) { buildLeafletHtml(nodes, phoneLocation, darkMode) }
 
     AndroidView(
         factory = { ctx ->
@@ -151,17 +155,18 @@ private fun LeafletMap(nodes: List<NodePosition>, phoneLocation: android.locatio
                 )
                 settings.javaScriptEnabled = true
                 settings.domStorageEnabled = true
+                settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                 webViewClient = WebViewClient()
                 setBackgroundColor(android.graphics.Color.parseColor("#111827"))
             }
         },
         update = { webView ->
-            webView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null)
+            webView.loadDataWithBaseURL("https://unpkg.com/", html, "text/html", "UTF-8", null)
         },
     )
 }
 
-private fun buildLeafletHtml(nodes: List<NodePosition>, phoneLocation: android.location.Location?): String {
+private fun buildLeafletHtml(nodes: List<NodePosition>, phoneLocation: android.location.Location?, darkMode: Boolean = true): String {
     // Calculate center from all available positions
     val allLats = mutableListOf<Double>()
     val allLons = mutableListOf<Double>()
@@ -202,17 +207,17 @@ private fun buildLeafletHtml(nodes: List<NodePosition>, phoneLocation: android.l
         <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
         <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
         <style>
-            body { margin: 0; padding: 0; background: #111827; }
+            body { margin: 0; padding: 0; background: ${if (darkMode) "#111827" else "#F9FAFB"}; }
             #map { width: 100%; height: 100vh; }
-            .leaflet-popup-content-wrapper { background: #1F2937; color: #E5E7EB; border-radius: 8px; }
-            .leaflet-popup-tip { background: #1F2937; }
+            .leaflet-popup-content-wrapper { background: ${if (darkMode) "#1F2937" else "#FFFFFF"}; color: ${if (darkMode) "#E5E7EB" else "#111827"}; border-radius: 8px; }
+            .leaflet-popup-tip { background: ${if (darkMode) "#1F2937" else "#FFFFFF"}; }
         </style>
     </head>
     <body>
         <div id="map"></div>
         <script>
             var map = L.map('map').setView([${"%.7f".format(centerLat)}, ${"%.7f".format(centerLon)}], 13);
-            L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/${if (darkMode) "dark_all" else "light_all"}/{z}/{x}/{y}{r}.png', {
                 maxZoom: 19,
             }).addTo(map);
             $phoneMarker
