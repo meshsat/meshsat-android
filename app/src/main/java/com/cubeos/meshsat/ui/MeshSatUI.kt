@@ -25,6 +25,7 @@ import com.cubeos.meshsat.ui.screens.AboutScreen
 import com.cubeos.meshsat.ui.screens.DashboardScreen
 import com.cubeos.meshsat.ui.screens.DeliveryScreen
 import com.cubeos.meshsat.ui.screens.GeofenceScreen
+import com.cubeos.meshsat.ui.screens.InterfacesScreen
 import com.cubeos.meshsat.ui.screens.MapScreen
 import com.cubeos.meshsat.ui.screens.MessagesScreen
 import com.cubeos.meshsat.ui.screens.RulesScreen
@@ -91,6 +92,7 @@ fun MeshSatUI() {
             composable("topology") { TopologyScreen() }
             composable("deliveries") { DeliveryScreen() }
             composable("geofence") { GeofenceScreen() }
+            composable("interfaces") { InterfacesScreen() }
         }
     }
 }

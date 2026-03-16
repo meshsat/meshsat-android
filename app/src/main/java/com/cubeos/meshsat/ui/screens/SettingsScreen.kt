@@ -856,6 +856,15 @@ fun SettingsScreen(navController: NavController? = null) {
             Text("Encrypt / Decrypt Tool", style = MaterialTheme.typography.bodyMedium)
         }
 
+        // --- Phase I: Interface Management ---
+        Button(
+            onClick = { navController?.navigate("interfaces") },
+            colors = ButtonDefaults.buttonColors(containerColor = MeshSatSurface),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text("Interface Management", style = MaterialTheme.typography.bodyMedium)
+        }
+
         // --- Phase G Screens ---
         Button(
             onClick = { navController?.navigate("topology") },

@@ -113,6 +113,12 @@ class GatewayService : Service() {
         var accessEval: AccessEvaluator? = null
             private set
 
+        // Phase I: exposed for interface management UI
+        var ifaceManager: InterfaceManager? = null
+            private set
+        var channelReg: ChannelRegistry? = null
+            private set
+
         private var notificationId = 100
     }
 
@@ -218,6 +224,8 @@ class GatewayService : Service() {
         dispatcher = null
         interfaceManager?.stopAll()
         interfaceManager = null
+        ifaceManager = null
+        channelReg = null
         accessEvaluator = null
         accessEval = null
         sosJob?.cancel()
@@ -408,6 +416,7 @@ class GatewayService : Service() {
         }
 
         interfaceManager = mgr
+        ifaceManager = mgr  // Phase I: expose for UI
 
         // Observe BLE state → drive InterfaceManager
         meshtasticBle?.let { ble ->
@@ -466,6 +475,7 @@ class GatewayService : Service() {
                 // Channel registry (from Phase A)
                 val registry = ChannelRegistry()
                 registerAndroidDefaults(registry)
+                channelReg = registry  // Phase I: expose for UI
 
                 // Access evaluator
                 val eval = AccessEvaluator(db.accessRuleDao(), db.objectGroupDao(), scope)
