@@ -12,8 +12,13 @@ import androidx.room.RoomDatabase
         SignalRecord::class,
         NodePosition::class,
         ConversationKey::class,
+        AccessRuleEntity::class,
+        ObjectGroupEntity::class,
+        FailoverGroupEntity::class,
+        FailoverMemberEntity::class,
+        MessageDeliveryEntity::class,
     ],
-    version = 4,
+    version = 5,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -23,6 +28,10 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun signalDao(): SignalDao
     abstract fun nodePositionDao(): NodePositionDao
     abstract fun conversationKeyDao(): ConversationKeyDao
+    abstract fun accessRuleDao(): AccessRuleDao
+    abstract fun objectGroupDao(): ObjectGroupDao
+    abstract fun failoverGroupDao(): FailoverGroupDao
+    abstract fun messageDeliveryDao(): MessageDeliveryDao
 
     companion object {
         @Volatile

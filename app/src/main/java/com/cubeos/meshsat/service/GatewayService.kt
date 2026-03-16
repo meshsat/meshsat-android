@@ -22,6 +22,8 @@ import com.cubeos.meshsat.R
 import com.cubeos.meshsat.ble.MeshtasticBle
 import com.cubeos.meshsat.ble.MeshtasticProtocol
 import com.cubeos.meshsat.bt.IridiumSpp
+import com.cubeos.meshsat.channel.ChannelRegistry
+import com.cubeos.meshsat.channel.registerAndroidDefaults
 import com.cubeos.meshsat.crypto.AesGcmCrypto
 import com.cubeos.meshsat.crypto.MsvqscCodebook
 import com.cubeos.meshsat.crypto.MsvqscEncoder
@@ -31,11 +33,15 @@ import com.cubeos.meshsat.data.Message
 import com.cubeos.meshsat.data.NodePosition
 import com.cubeos.meshsat.data.SettingsRepository
 import com.cubeos.meshsat.data.SignalRecord
+import com.cubeos.meshsat.engine.Dispatcher
+import com.cubeos.meshsat.engine.FailoverResolver
+import com.cubeos.meshsat.engine.InterfaceStatusProvider
+import com.cubeos.meshsat.rules.AccessEvaluator
 import com.cubeos.meshsat.rules.ForwardingRule
+import com.cubeos.meshsat.rules.RouteMessage
 import com.cubeos.meshsat.rules.RulesEngine
 import com.cubeos.meshsat.sms.SmsSender
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
@@ -87,11 +93,15 @@ class GatewayService : Service() {
         private var notificationId = 100
     }
 
-    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val scope = CoroutineScope(kotlinx.coroutines.Dispatchers.IO + SupervisorJob())
     private lateinit var settings: SettingsRepository
     private lateinit var db: AppDatabase
     private var sosJob: kotlinx.coroutines.Job? = null
     private var msvqscEncoder: MsvqscEncoder? = null
+
+    // Phase B: structured dispatch (replaces basic if/else routing)
+    private var dispatcher: Dispatcher? = null
+    private var accessEvaluator: AccessEvaluator? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -103,6 +113,7 @@ class GatewayService : Service() {
 
         startForegroundNotification()
         loadRulesFromDb()
+        initDispatcher()
         observeTransports()
         startSignalPolling()
         startLocationUpdates()
@@ -145,6 +156,9 @@ class GatewayService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        dispatcher?.stop()
+        dispatcher = null
+        accessEvaluator = null
         sosJob?.cancel()
         meshtasticBle?.disconnect()
         iridiumSpp?.disconnect()
@@ -178,6 +192,132 @@ class GatewayService : Service() {
         scope.launch {
             val entities = db.forwardingRuleDao().getAllSync()
             rulesEngine.setRules(entities.map { it.toRule() })
+        }
+    }
+
+    /**
+     * Initialize the Phase B structured dispatch stack:
+     * AccessEvaluator → FailoverResolver → Dispatcher with delivery workers.
+     * Falls back gracefully to the legacy RulesEngine if no access rules exist.
+     */
+    private fun initDispatcher() {
+        scope.launch {
+            try {
+                // Channel registry (from Phase A)
+                val registry = ChannelRegistry()
+                registerAndroidDefaults(registry)
+
+                // Access evaluator
+                val eval = AccessEvaluator(db.accessRuleDao(), db.objectGroupDao(), scope)
+                eval.reloadFromDb()
+                accessEvaluator = eval
+
+                // Interface status provider (checks live transport state)
+                val statusProvider = InterfaceStatusProvider { interfaceId ->
+                    when {
+                        interfaceId.startsWith("mesh") ->
+                            meshtasticBle?.state?.value == MeshtasticBle.State.Connected
+                        interfaceId.startsWith("iridium") ->
+                            iridiumSpp?.state?.value == IridiumSpp.State.Connected
+                        interfaceId.startsWith("sms") -> true // SMS always available
+                        else -> false
+                    }
+                }
+
+                // Failover resolver
+                val failover = FailoverResolver(db.failoverGroupDao(), statusProvider)
+
+                // Delivery callback: routes to the correct transport
+                val callback = Dispatcher.DeliveryCallback { interfaceId, payload, textPreview ->
+                    deliverToTransport(interfaceId, payload, textPreview)
+                }
+
+                // Create and start dispatcher
+                val disp = Dispatcher(
+                    deliveryDao = db.messageDeliveryDao(),
+                    accessEvaluator = eval,
+                    failoverResolver = failover,
+                    registry = registry,
+                    deliveryCallback = callback,
+                    scope = scope,
+                )
+
+                // Start workers for the three Android interfaces
+                val interfaces = mapOf(
+                    "mesh_0" to "mesh",
+                    "iridium_0" to "iridium",
+                    "sms_0" to "sms",
+                )
+                disp.start(interfaces)
+                dispatcher = disp
+
+                Log.i("MeshSat", "Dispatcher initialized (${eval.ruleCount()} access rules)")
+            } catch (e: Exception) {
+                Log.e("MeshSat", "Dispatcher init failed (legacy routing active): ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Delivery callback: sends a message payload to the named interface.
+     * Returns null on success, error message on failure.
+     */
+    private suspend fun deliverToTransport(interfaceId: String, payload: ByteArray, textPreview: String): String? {
+        return try {
+            when {
+                interfaceId.startsWith("mesh") -> {
+                    val ble = meshtasticBle
+                        ?: return "mesh not available"
+                    if (ble.state.value != MeshtasticBle.State.Connected)
+                        return "mesh not connected"
+                    val proto = MeshtasticProtocol.encodeTextMessage(textPreview)
+                    ble.sendToRadio(proto)
+                    db.messageDao().insert(
+                        Message(
+                            transport = "mesh", direction = "tx", sender = "self",
+                            text = textPreview, forwarded = true, forwardedTo = "mesh:broadcast",
+                            timestamp = System.currentTimeMillis(),
+                        )
+                    )
+                    null // success
+                }
+                interfaceId.startsWith("iridium") -> {
+                    val spp = iridiumSpp
+                        ?: return "iridium not available"
+                    if (spp.state.value != IridiumSpp.State.Connected)
+                        return "iridium not connected"
+                    val data = if (payload.isNotEmpty()) payload else textPreview.toByteArray()
+                    if (data.size > 340) return "payload too large (${data.size} > 340)"
+                    val written = spp.writeMoBuffer(data)
+                    if (!written) return "MO buffer write failed"
+                    val result = spp.sbdix()
+                    if (result?.moSuccess != true) return "SBDIX failed: mo_status=${result?.moStatus}"
+                    db.messageDao().insert(
+                        Message(
+                            transport = "iridium", direction = "tx", sender = "self",
+                            text = textPreview, forwarded = true, forwardedTo = "iridium:sbd",
+                            timestamp = System.currentTimeMillis(),
+                        )
+                    )
+                    null // success
+                }
+                interfaceId.startsWith("sms") -> {
+                    val phone = settings.meshsatPiPhone.first()
+                    if (phone.isBlank()) return "no SMS destination configured"
+                    SmsSender.send(context = this, to = phone, text = textPreview)
+                    db.messageDao().insert(
+                        Message(
+                            transport = "sms", direction = "tx", sender = "self",
+                            recipient = phone, text = textPreview, forwarded = true,
+                            forwardedTo = "sms:$phone", timestamp = System.currentTimeMillis(),
+                        )
+                    )
+                    null // success
+                }
+                else -> "unknown interface: $interfaceId"
+            }
+        } catch (e: Exception) {
+            e.message ?: "delivery failed"
         }
     }
 
@@ -404,6 +544,24 @@ class GatewayService : Service() {
     }
 
     private suspend fun evaluateAndForward(source: ForwardingRule.Transport, text: String, sender: String) {
+        // Phase B: dispatch through access rules if available
+        val disp = dispatcher
+        if (disp != null) {
+            val sourceInterface = when (source) {
+                ForwardingRule.Transport.MESH -> "mesh_0"
+                ForwardingRule.Transport.IRIDIUM -> "iridium_0"
+                ForwardingRule.Transport.SMS -> "sms_0"
+            }
+            val routeMsg = RouteMessage(text = text, from = sender, portNum = 1)
+            val n = disp.dispatchAccess(sourceInterface, routeMsg, text.toByteArray())
+            if (n > 0) {
+                Log.i("MeshSat", "Dispatched $n deliveries via access rules from $sourceInterface")
+                return // access rules handled it
+            }
+            // Fall through to legacy rules if no access rules matched
+        }
+
+        // Legacy: simple forwarding rules
         val decisions = rulesEngine.evaluate(source = source, text = text, sender = sender)
         for (decision in decisions) {
             if (!decision.shouldForward) continue
