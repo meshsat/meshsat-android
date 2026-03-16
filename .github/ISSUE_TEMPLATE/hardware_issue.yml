@@ -1,0 +1,36 @@
+name: Hardware Issue
+description: Report a hardware compatibility issue
+labels: [hardware]
+body:
+  - type: markdown
+    attributes:
+      value: "## Hardware Issue"
+  - type: dropdown
+    id: hardware_type
+    attributes:
+      label: Hardware Type
+      options:
+        - Meshtastic Radio (BLE)
+        - Iridium 9603N / RockBLOCK
+        - HC-05 Bluetooth Adapter
+        - Phone / Android Device
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: model
+    attributes:
+      label: Hardware Model
+      placeholder: "Lilygo T-Echo, RockBLOCK 9603, HC-05, etc."
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Describe the issue
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce

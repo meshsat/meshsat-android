@@ -15,3 +15,7 @@ local.properties
 *.jks
 *.keystore
 .kotlin/
+
+# Claude Code — local-only, NEVER commit
+CLAUDE.md
+.claude/
