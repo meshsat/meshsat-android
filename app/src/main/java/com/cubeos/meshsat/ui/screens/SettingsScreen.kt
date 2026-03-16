@@ -874,6 +874,15 @@ fun SettingsScreen(navController: NavController? = null) {
             Text("Radio Configuration", style = MaterialTheme.typography.bodyMedium)
         }
 
+        // --- Phase J: Satellite Pass Predictor ---
+        Button(
+            onClick = { navController?.navigate("passes") },
+            colors = ButtonDefaults.buttonColors(containerColor = MeshSatSurface),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text("Satellite Pass Predictor", style = MaterialTheme.typography.bodyMedium)
+        }
+
         // --- Phase G Screens ---
         Button(
             onClick = { navController?.navigate("topology") },

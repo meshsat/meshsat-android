@@ -20,8 +20,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         FailoverMemberEntity::class,
         MessageDeliveryEntity::class,
         AuditLogEntity::class,
+        TleCacheEntity::class,
     ],
-    version = 7,
+    version = 8,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -36,6 +37,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun failoverGroupDao(): FailoverGroupDao
     abstract fun messageDeliveryDao(): MessageDeliveryDao
     abstract fun auditLogDao(): AuditLogDao
+    abstract fun tleCacheDao(): TleCacheDao
 
     companion object {
         @Volatile
@@ -48,6 +50,21 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL("ALTER TABLE message_deliveries ADD COLUMN seq_num INTEGER NOT NULL DEFAULT 0")
                 db.execSQL("ALTER TABLE message_deliveries ADD COLUMN ack_status TEXT")
                 db.execSQL("ALTER TABLE message_deliveries ADD COLUMN ack_timestamp INTEGER")
+            }
+        }
+
+        /** Migration 7→8: Phase J satellite pass predictor TLE cache table. */
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS tle_cache (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        satelliteName TEXT NOT NULL,
+                        line1 TEXT NOT NULL,
+                        line2 TEXT NOT NULL,
+                        fetchedAt INTEGER NOT NULL
+                    )
+                """.trimIndent())
             }
         }
 
@@ -81,7 +98,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "meshsat.db"
                 )
-                    .addMigrations(MIGRATION_5_6, MIGRATION_6_7)
+                    .addMigrations(MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
                     .fallbackToDestructiveMigration()
                     .build()
                     .also { INSTANCE = it }

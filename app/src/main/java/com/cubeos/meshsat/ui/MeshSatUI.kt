@@ -30,6 +30,7 @@ import com.cubeos.meshsat.ui.screens.MapScreen
 import com.cubeos.meshsat.ui.screens.MessagesScreen
 import com.cubeos.meshsat.ui.screens.RulesScreen
 import com.cubeos.meshsat.ui.screens.SettingsScreen
+import com.cubeos.meshsat.ui.screens.PassPredictorScreen
 import com.cubeos.meshsat.ui.screens.RadioConfigScreen
 import com.cubeos.meshsat.ui.screens.TopologyScreen
 import com.cubeos.meshsat.ui.theme.MeshSatBg
@@ -95,6 +96,7 @@ fun MeshSatUI() {
             composable("geofence") { GeofenceScreen() }
             composable("interfaces") { InterfacesScreen() }
             composable("radio-config") { RadioConfigScreen() }
+            composable("passes") { PassPredictorScreen() }
         }
     }
 }
