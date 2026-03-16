@@ -136,6 +136,20 @@ interface MessageDeliveryDao {
     /** Get delivery by channel and sequence number (for ACK correlation). */
     @Query("SELECT * FROM message_deliveries WHERE channel = :channel AND seq_num = :seqNum AND seq_num > 0 LIMIT 1")
     suspend fun getByChannelAndSeq(channel: String, seqNum: Long): MessageDeliveryEntity?
+
+    // --- Phase D: Health scorer queries ---
+
+    /** Count sent/delivered messages for a channel since a timestamp. */
+    @Query("SELECT COUNT(*) FROM message_deliveries WHERE channel = :channel AND status IN ('sent', 'delivered') AND created_at >= :since")
+    suspend fun countSentSince(channel: String, since: Long): Int
+
+    /** Count failed/dead messages for a channel since a timestamp. */
+    @Query("SELECT COUNT(*) FROM message_deliveries WHERE channel = :channel AND status IN ('failed', 'dead') AND created_at >= :since")
+    suspend fun countFailedSince(channel: String, since: Long): Int
+
+    /** Average delivery latency in ms for a channel since a timestamp. */
+    @Query("SELECT COALESCE(AVG(updated_at - created_at), 0) FROM message_deliveries WHERE channel = :channel AND status IN ('sent', 'delivered') AND created_at >= :since")
+    suspend fun avgLatencyMsSince(channel: String, since: Long): Long
 }
 
 data class DeliveryStatRow(

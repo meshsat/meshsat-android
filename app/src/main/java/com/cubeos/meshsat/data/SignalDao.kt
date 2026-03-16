@@ -17,6 +17,10 @@ interface SignalDao {
     @Query("SELECT * FROM signal_history WHERE source = :source AND timestamp > :since ORDER BY timestamp ASC")
     fun getSince(source: String, since: Long): Flow<List<SignalRecord>>
 
+    /** Most recent signal record for a source (for health scorer). */
+    @Query("SELECT * FROM signal_history WHERE source = :source ORDER BY timestamp DESC LIMIT 1")
+    suspend fun getLatestForSource(source: String): SignalRecord?
+
     @Query("DELETE FROM signal_history WHERE timestamp < :before")
     suspend fun deleteBefore(before: Long)
 }

@@ -23,6 +23,10 @@ interface NodePositionDao {
     @Query("SELECT * FROM node_positions WHERE nodeId = :nodeId ORDER BY timestamp DESC LIMIT :limit")
     fun getByNode(nodeId: Long, limit: Int = 100): Flow<List<NodePosition>>
 
+    /** Most recent position across all nodes (for deadman switch). */
+    @Query("SELECT * FROM node_positions ORDER BY timestamp DESC LIMIT 1")
+    suspend fun getLatest(): NodePosition?
+
     @Query("DELETE FROM node_positions WHERE timestamp < :before")
     suspend fun deleteBefore(before: Long)
 }
