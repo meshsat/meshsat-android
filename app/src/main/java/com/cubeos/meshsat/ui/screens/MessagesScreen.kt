@@ -1,10 +1,15 @@
 package com.cubeos.meshsat.ui.screens
 
+import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -95,6 +100,24 @@ fun MessagesScreen() {
     var searchQuery by remember { mutableStateOf("") }
     var selectedTab by remember { mutableStateOf("all") }
 
+    // SMS permission state
+    var smsPermissionGranted by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(context, Manifest.permission.RECEIVE_SMS) == PackageManager.PERMISSION_GRANTED &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.SEND_SMS) == PackageManager.PERMISSION_GRANTED
+        )
+    }
+    val smsPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { results ->
+        smsPermissionGranted = results.values.all { it }
+        if (smsPermissionGranted) {
+            Toast.makeText(context, "SMS enabled", Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(context, "SMS permissions denied — you can grant them later in Settings", Toast.LENGTH_LONG).show()
+        }
+    }
+
     // When a conversation is selected, show chat view
     if (selectedSender != null) {
         ConversationChatView(
@@ -146,6 +169,43 @@ fun MessagesScreen() {
             style = MaterialTheme.typography.headlineMedium,
             modifier = Modifier.padding(bottom = 4.dp),
         )
+
+        // SMS permission banner
+        if (!smsPermissionGranted) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MeshSatAmber.copy(alpha = 0.15f), RoundedCornerShape(8.dp))
+                    .border(1.dp, MeshSatAmber.copy(alpha = 0.4f), RoundedCornerShape(8.dp))
+                    .padding(12.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "SMS disabled",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MeshSatAmber,
+                    )
+                    Text(
+                        text = "Grant SMS permission to send and receive SMS messages through MeshSat.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MeshSatTextMuted,
+                    )
+                }
+                Button(
+                    onClick = {
+                        smsPermissionLauncher.launch(arrayOf(
+                            Manifest.permission.RECEIVE_SMS,
+                            Manifest.permission.SEND_SMS,
+                        ))
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MeshSatAmber),
+                ) {
+                    Text("Enable", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
 
         // Transport tab bar
         Row(
