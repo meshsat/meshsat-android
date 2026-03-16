@@ -76,6 +76,8 @@ fun SettingsScreen(navController: NavController? = null) {
     val encryptionEnabled by settings.encryptionEnabled.collectAsState(initial = false)
     val autoDecrypt by settings.autoDecryptSms.collectAsState(initial = true)
     val piPhone by settings.meshsatPiPhone.collectAsState(initial = "")
+    val msvqscEnabled by settings.msvqscEnabled.collectAsState(initial = false)
+    val msvqscStages by settings.msvqscStages.collectAsState(initial = "3")
 
     var keyInput by remember(encryptionKey) { mutableStateOf(encryptionKey) }
     var phoneInput by remember(piPhone) { mutableStateOf(piPhone) }
@@ -489,6 +491,58 @@ fun SettingsScreen(navController: NavController? = null) {
 
             Text(
                 text = "Fallback key — used when no per-conversation key is set. Per-conversation keys are managed in Messages > tap a conversation > lock icon.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MeshSatTextMuted,
+            )
+        }
+
+        // --- SMS Compression Section ---
+        SectionCard("SMS Compression (MSVQ-SC)") {
+            SettingRow("Lossy compression") {
+                Switch(
+                    checked = msvqscEnabled,
+                    onCheckedChange = { scope.launch { settings.setMsvqscEnabled(it) } },
+                    colors = SwitchDefaults.colors(checkedTrackColor = MeshSatTeal),
+                )
+            }
+
+            if (msvqscEnabled) {
+                Text(
+                    text = "Stages (fewer = smaller SMS, lower fidelity)",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MeshSatTextMuted,
+                )
+
+                val stageOptions = listOf("2" to "2 (5B, ZigBee)", "3" to "3 (7B, Cellular)", "4" to "4 (9B, Mesh)", "6" to "6 (13B, Iridium)", "8" to "8 (17B, max fidelity)")
+                stageOptions.forEach { (value, label) ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(
+                                if (msvqscStages == value) MeshSatTeal.copy(alpha = 0.15f)
+                                else MeshSatSurface,
+                                RoundedCornerShape(4.dp),
+                            )
+                            .clickable { scope.launch { settings.setMsvqscStages(value) } }
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(text = label, style = MaterialTheme.typography.bodySmall)
+                        if (msvqscStages == value) {
+                            Text(
+                                text = "selected",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MeshSatTeal,
+                            )
+                        }
+                    }
+                }
+            }
+
+            Text(
+                text = "Lossy semantic compression — the receiver gets the closest known phrase, not the exact original. " +
+                        "Works best for field/SAR messages. Incoming MSVQ-SC messages are always auto-detected and decoded regardless of this setting.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MeshSatTextMuted,
             )
