@@ -241,12 +241,14 @@ private fun GeofenceMap(
                 settings.javaScriptEnabled = true
                 settings.domStorageEnabled = true
                 settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                @Suppress("DEPRECATION")
+                settings.allowUniversalAccessFromFileURLs = true
                 webViewClient = WebViewClient()
                 setBackgroundColor(android.graphics.Color.parseColor("#111827"))
             }
         },
         update = { webView ->
-            webView.loadDataWithBaseURL("https://unpkg.com/", html, "text/html", "UTF-8", null)
+            webView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null)
         },
     )
 }

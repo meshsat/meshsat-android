@@ -6,7 +6,6 @@
 
     <!-- SMS (receive copies + send — no default SMS app role needed) -->
     <uses-permission android:name="android.permission.RECEIVE_SMS" />
-    <uses-permission android:name="android.permission.READ_SMS" />
     <uses-permission android:name="android.permission.SEND_SMS" />
 
     <!-- Bluetooth (Meshtastic BLE + HC-05 SPP) -->

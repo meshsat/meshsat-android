@@ -5,8 +5,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.automirrored.filled.Message
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -29,6 +29,7 @@ import com.cubeos.meshsat.ui.screens.GeofenceScreen
 import com.cubeos.meshsat.ui.screens.InterfacesScreen
 import com.cubeos.meshsat.ui.screens.MapScreen
 import com.cubeos.meshsat.ui.screens.MessagesScreen
+import com.cubeos.meshsat.ui.screens.MoreScreen
 import com.cubeos.meshsat.ui.screens.RulesScreen
 import com.cubeos.meshsat.ui.screens.SettingsScreen
 import com.cubeos.meshsat.ui.screens.PassPredictorScreen
@@ -40,11 +41,11 @@ import com.cubeos.meshsat.ui.theme.MeshSatTeal
 import com.cubeos.meshsat.ui.theme.MeshSatTextMuted
 
 private enum class Tab(val route: String, val label: String, val icon: ImageVector) {
-    Dashboard("dashboard", "Dashboard", Icons.Default.Dashboard),
+    Dashboard("dashboard", "Home", Icons.Default.Dashboard),
     Messages("messages", "Messages", Icons.AutoMirrored.Filled.Message),
     Map("map", "Map", Icons.Default.Map),
-    Rules("rules", "Rules", Icons.Default.SwapHoriz),
-    Settings("settings", "Settings", Icons.Default.Settings),
+    Passes("passes", "Passes", Icons.Default.DateRange),
+    More("more", "More", Icons.Default.Menu),
 }
 
 @Composable
@@ -91,6 +92,7 @@ fun MeshSatUI() {
             composable("map") { MapScreen() }
             composable("rules") { RulesScreen() }
             composable("settings") { SettingsScreen(navController) }
+            composable("more") { MoreScreen(navController) }
             composable("about") { AboutScreen() }
             composable("topology") { TopologyScreen() }
             composable("deliveries") { DeliveryScreen() }

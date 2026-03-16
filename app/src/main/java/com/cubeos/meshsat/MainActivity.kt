@@ -18,8 +18,6 @@ class MainActivity : ComponentActivity() {
     private val requiredPermissions: Array<String>
         get() {
             val perms = mutableListOf(
-                Manifest.permission.RECEIVE_SMS,
-                Manifest.permission.SEND_SMS,
                 Manifest.permission.ACCESS_FINE_LOCATION,
             )
             // BLE scan/connect permissions only exist on Android 12+ (API 31)
