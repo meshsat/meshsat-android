@@ -155,7 +155,10 @@ class MsvqscCodebook internal constructor(
         var bestSim = -1f
 
         for (i in corpus.indices) {
-            val sim = dot(reconstructed, corpusEmbeddings[i]) / (reconNorm * norm(corpusEmbeddings[i]))
+            val corpusNorm = norm(corpusEmbeddings[i])
+            val denom = reconNorm * corpusNorm
+            if (denom < 1e-8f) continue // skip zero vectors to avoid NaN
+            val sim = dot(reconstructed, corpusEmbeddings[i]) / denom
             if (sim > bestSim) {
                 bestSim = sim
                 bestIdx = i

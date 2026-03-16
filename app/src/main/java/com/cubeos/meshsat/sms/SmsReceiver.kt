@@ -206,13 +206,17 @@ class SmsReceiver : BroadcastReceiver() {
 
     companion object {
         private const val TAG = "SmsReceiver"
+        @Volatile
         private var cachedCodebook: MsvqscCodebook? = null
+        private val codebookLock = Any()
 
         private fun getCodebook(context: Context): MsvqscCodebook? {
-            if (cachedCodebook == null) {
+            cachedCodebook?.let { return it }
+            synchronized(codebookLock) {
+                cachedCodebook?.let { return it }
                 cachedCodebook = MsvqscCodebook.loadFromAssets(context)
+                return cachedCodebook
             }
-            return cachedCodebook
         }
     }
 }

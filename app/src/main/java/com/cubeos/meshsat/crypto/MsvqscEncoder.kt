@@ -74,45 +74,51 @@ class MsvqscEncoder private constructor(
             LongBuffer.wrap(tokens.ids.map { it.toLong() }.toLongArray()),
             longArrayOf(1, seqLen),
         )
-        val attMaskTensor = OnnxTensor.createTensor(
-            env,
-            LongBuffer.wrap(tokens.attentionMask.map { it.toLong() }.toLongArray()),
-            longArrayOf(1, seqLen),
-        )
-
-        val results = session.run(
-            mapOf(
-                "input_ids" to inputIdsTensor,
-                "attention_mask" to attMaskTensor,
+        try {
+            val attMaskTensor = OnnxTensor.createTensor(
+                env,
+                LongBuffer.wrap(tokens.attentionMask.map { it.toLong() }.toLongArray()),
+                longArrayOf(1, seqLen),
             )
-        )
+            try {
+                val results = session.run(
+                    mapOf(
+                        "input_ids" to inputIdsTensor,
+                        "attention_mask" to attMaskTensor,
+                    )
+                )
+                try {
+                    // Output: [1, seq_len, dim] → mean pooling → [dim]
+                    @Suppress("UNCHECKED_CAST")
+                    val output = results[0].value as Array<Array<FloatArray>>
+                    val hidden = output[0] // [seq_len, dim]
+                    val dim = hidden[0].size
 
-        // Output: [1, seq_len, dim] → mean pooling → [dim]
-        @Suppress("UNCHECKED_CAST")
-        val output = results[0].value as Array<Array<FloatArray>>
-        val hidden = output[0] // [seq_len, dim]
-        val dim = hidden[0].size
+                    // Mean pooling over non-masked tokens
+                    val pooled = FloatArray(dim)
+                    var count = 0f
+                    for (i in hidden.indices) {
+                        if (tokens.attentionMask[i] == 1) {
+                            for (d in 0 until dim) pooled[d] += hidden[i][d]
+                            count++
+                        }
+                    }
+                    if (count > 0) for (d in 0 until dim) pooled[d] /= count
 
-        // Mean pooling over non-masked tokens
-        val pooled = FloatArray(dim)
-        var count = 0f
-        for (i in hidden.indices) {
-            if (tokens.attentionMask[i] == 1) {
-                for (d in 0 until dim) pooled[d] += hidden[i][d]
-                count++
+                    // L2 normalize
+                    val n = sqrt(pooled.fold(0f) { acc, v -> acc + v * v })
+                    if (n > 0) for (d in 0 until dim) pooled[d] /= n
+
+                    return pooled
+                } finally {
+                    results.close()
+                }
+            } finally {
+                attMaskTensor.close()
             }
+        } finally {
+            inputIdsTensor.close()
         }
-        if (count > 0) for (d in 0 until dim) pooled[d] /= count
-
-        // L2 normalize
-        val n = sqrt(pooled.fold(0f) { acc, v -> acc + v * v })
-        if (n > 0) for (d in 0 until dim) pooled[d] /= n
-
-        inputIdsTensor.close()
-        attMaskTensor.close()
-        results.close()
-
-        return pooled
     }
 
     private fun quantize(embedding: FloatArray, maxStages: Int): IntArray {
