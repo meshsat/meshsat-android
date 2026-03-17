@@ -4,13 +4,14 @@ import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 
 /**
- * Register the 3 built-in Android transport channels.
+ * Register the 4 built-in Android transport channels.
  * Android-specific subset of meshsat/internal/channel/defaults.go.
  *
  * Android transports:
  * - mesh: Meshtastic BLE (binary, 237B MTU)
  * - iridium: Iridium 9603N via HC-05 SPP (binary, 340B MTU, paid)
  * - sms: Native Android SMS (text-only, 160 chars)
+ * - mqtt: Hub MQTT (TCP, unlimited payload, enables Hub-proxied TAK/APRS-IS)
  */
 fun registerAndroidDefaults(registry: ChannelRegistry) {
     registry.register(
@@ -77,6 +78,32 @@ fun registerAndroidDefaults(registry: ChannelRegistry) {
                 maxWait = 5.minutes,
                 maxRetries = 3,
                 backoffFunc = "exponential",
+            ),
+        )
+    )
+
+    registry.register(
+        ChannelDescriptor(
+            id = "mqtt",
+            label = "Hub MQTT",
+            isPaid = false,
+            canSend = true,
+            canReceive = true,
+            binaryCapable = true,
+            maxPayload = 0, // unlimited
+            defaultTtl = 300.seconds,
+            retryConfig = RetryConfig(
+                enabled = true,
+                initialWait = 5.seconds,
+                maxWait = 60.seconds,
+                maxRetries = 10,
+                backoffFunc = "exponential",
+            ),
+            options = listOf(
+                OptionField(key = "broker_url", label = "Hub Broker URL", type = "text"),
+                OptionField(key = "device_id", label = "Device ID", type = "text"),
+                OptionField(key = "username", label = "Username", type = "text"),
+                OptionField(key = "password", label = "Password", type = "text"),
             ),
         )
     )

@@ -89,6 +89,9 @@ dependencies {
     // NanoHTTPD (lightweight local REST API server)
     implementation("org.nanohttpd:nanohttpd:2.3.1")
 
+    // MQTT (Hub connectivity — Eclipse Paho)
+    implementation("org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.2.5")
+
     // Test
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")

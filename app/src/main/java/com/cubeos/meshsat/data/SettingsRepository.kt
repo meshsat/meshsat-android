@@ -25,6 +25,11 @@ class SettingsRepository(private val context: Context) {
         val KEY_MSVQSC_STAGES = stringPreferencesKey("msvqsc_stages") // "auto" or "2"-"8"
         val KEY_DEADMAN_ENABLED = booleanPreferencesKey("deadman_enabled")
         val KEY_DEADMAN_TIMEOUT_MIN = stringPreferencesKey("deadman_timeout_min") // minutes as string
+        val KEY_MQTT_BROKER_URL = stringPreferencesKey("mqtt_broker_url")
+        val KEY_MQTT_DEVICE_ID = stringPreferencesKey("mqtt_device_id")
+        val KEY_MQTT_USERNAME = stringPreferencesKey("mqtt_username")
+        val KEY_MQTT_PASSWORD = stringPreferencesKey("mqtt_password")
+        val KEY_MQTT_ENABLED = booleanPreferencesKey("mqtt_enabled")
     }
 
     val encryptionKey: Flow<String> = context.dataStore.data.map {
@@ -97,5 +102,47 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setDeadmanTimeoutMin(minutes: String) {
         context.dataStore.edit { it[KEY_DEADMAN_TIMEOUT_MIN] = minutes }
+    }
+
+    // --- MQTT Hub settings ---
+
+    val mqttEnabled: Flow<Boolean> = context.dataStore.data.map {
+        it[KEY_MQTT_ENABLED] ?: false
+    }
+
+    val mqttBrokerUrl: Flow<String> = context.dataStore.data.map {
+        it[KEY_MQTT_BROKER_URL] ?: ""
+    }
+
+    val mqttDeviceId: Flow<String> = context.dataStore.data.map {
+        it[KEY_MQTT_DEVICE_ID] ?: ""
+    }
+
+    val mqttUsername: Flow<String> = context.dataStore.data.map {
+        it[KEY_MQTT_USERNAME] ?: ""
+    }
+
+    val mqttPassword: Flow<String> = context.dataStore.data.map {
+        it[KEY_MQTT_PASSWORD] ?: ""
+    }
+
+    suspend fun setMqttEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[KEY_MQTT_ENABLED] = enabled }
+    }
+
+    suspend fun setMqttBrokerUrl(url: String) {
+        context.dataStore.edit { it[KEY_MQTT_BROKER_URL] = url }
+    }
+
+    suspend fun setMqttDeviceId(id: String) {
+        context.dataStore.edit { it[KEY_MQTT_DEVICE_ID] = id }
+    }
+
+    suspend fun setMqttUsername(username: String) {
+        context.dataStore.edit { it[KEY_MQTT_USERNAME] = username }
+    }
+
+    suspend fun setMqttPassword(password: String) {
+        context.dataStore.edit { it[KEY_MQTT_PASSWORD] = password }
     }
 }

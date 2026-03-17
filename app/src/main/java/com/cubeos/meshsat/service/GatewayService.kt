@@ -48,6 +48,7 @@ import com.cubeos.meshsat.rules.AccessEvaluator
 import com.cubeos.meshsat.rules.ForwardingRule
 import com.cubeos.meshsat.rules.RouteMessage
 import com.cubeos.meshsat.rules.RulesEngine
+import com.cubeos.meshsat.mqtt.MqttTransport
 import com.cubeos.meshsat.sms.SmsSender
 import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.CoroutineScope
@@ -118,6 +119,9 @@ class GatewayService : Service() {
             private set
         var channelReg: ChannelRegistry? = null
             private set
+        // Hub MQTT transport
+        var mqttTransport: MqttTransport? = null
+            private set
 
         // Phase J: exposed for audit log UI
         var signingServiceRef: com.cubeos.meshsat.engine.SigningService? = null
@@ -171,6 +175,7 @@ class GatewayService : Service() {
             startSignalPolling()
             startLocationUpdates()
             initMsvqsc()
+            initMqtt()
         } catch (e: Exception) {
             Log.e("MeshSat", "Service init error (non-fatal): ${e.message}", e)
         }
@@ -358,6 +363,92 @@ class GatewayService : Service() {
         }
     }
 
+    /** Initialize Hub MQTT transport if enabled in settings. */
+    private fun initMqtt() {
+        scope.launch {
+            try {
+                val enabled = settings.mqttEnabled.first()
+                if (!enabled) {
+                    Log.d("MeshSat", "MQTT Hub disabled in settings")
+                    return@launch
+                }
+                val brokerUrl = settings.mqttBrokerUrl.first()
+                val deviceId = settings.mqttDeviceId.first()
+                if (brokerUrl.isBlank() || deviceId.isBlank()) {
+                    Log.w("MeshSat", "MQTT: broker URL or device ID not configured")
+                    return@launch
+                }
+                val username = settings.mqttUsername.first()
+                val password = settings.mqttPassword.first()
+
+                val transport = MqttTransport(scope)
+                transport.setMessageCallback { topic, payload ->
+                    handleMqttInbound(topic, payload)
+                }
+                transport.connect(brokerUrl, deviceId, username, password)
+                mqttTransport = transport
+
+                // Observe state for InterfaceManager
+                scope.launch {
+                    transport.state.collect { state ->
+                        when (state) {
+                            MqttTransport.State.Connected ->
+                                interfaceManager?.setOnline("mqtt_0")
+                            MqttTransport.State.Error ->
+                                interfaceManager?.setError("mqtt_0", "connection error")
+                            MqttTransport.State.Disconnected ->
+                                interfaceManager?.setError("mqtt_0", "disconnected")
+                            else -> {}
+                        }
+                    }
+                }
+
+                Log.i("MeshSat", "MQTT Hub transport initialized")
+            } catch (e: Exception) {
+                Log.w("MeshSat", "MQTT init failed: ${e.message}")
+            }
+        }
+    }
+
+    /** Handle inbound MQTT messages (MT sends, TAK events, config updates). */
+    private fun handleMqttInbound(topic: String, payload: String) {
+        scope.launch {
+            try {
+                when {
+                    topic.contains("/mt/send") -> {
+                        // Inbound MT — store as message and route through dispatcher
+                        val json = org.json.JSONObject(payload)
+                        val text = json.optString("text", "")
+                        if (text.isNotBlank()) {
+                            db.messageDao().insert(
+                                Message(
+                                    transport = "mqtt", direction = "rx", sender = "hub",
+                                    text = text, timestamp = System.currentTimeMillis(),
+                                )
+                            )
+                            val msg = com.cubeos.meshsat.rules.RouteMessage(
+                                text = text, from = "hub", channel = 0, portNum = 1,
+                                visited = listOf("mqtt_0"),
+                            )
+                            dispatcher?.dispatchAccess("mqtt_0", msg, text.toByteArray())
+                        }
+                    }
+                    topic.contains("/tak/cot/in") -> {
+                        // TAK event from Hub — store as message
+                        db.messageDao().insert(
+                            Message(
+                                transport = "tak", direction = "rx", sender = "tak-server",
+                                text = payload.take(500), timestamp = System.currentTimeMillis(),
+                            )
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w("MeshSat", "MQTT inbound handling error: ${e.message}")
+            }
+        }
+    }
+
     private fun loadRulesFromDb() {
         scope.launch {
             val entities = db.forwardingRuleDao().getAllSync()
@@ -391,6 +482,12 @@ class GatewayService : Service() {
             autoReconnect = false,
             alwaysOnline = true, // SMS is always available via Android
         ))
+        mgr.register(InterfaceConfig(
+            id = "mqtt_0", channelType = "mqtt",
+            autoReconnect = true,
+            initialBackoff = 5.seconds,
+            maxBackoff = 120.seconds,
+        ))
 
         // Connect callback — triggers actual BLE/SPP connection
         // Uses the saved BLE/SPP addresses from settings to reconnect.
@@ -409,6 +506,18 @@ class GatewayService : Service() {
                     spp.reconnect()
                     null
                 }
+                interfaceId.startsWith("mqtt") -> {
+                    // MQTT reconnect — re-read settings and connect
+                    val brokerUrl = settings.mqttBrokerUrl.first()
+                    val deviceId = settings.mqttDeviceId.first()
+                    if (brokerUrl.isBlank() || deviceId.isBlank()) {
+                        return@setConnectCallback "mqtt not configured"
+                    }
+                    val transport = mqttTransport ?: MqttTransport(scope).also { mqttTransport = it }
+                    transport.connect(brokerUrl, deviceId,
+                        settings.mqttUsername.first(), settings.mqttPassword.first())
+                    null
+                }
                 else -> null
             }
         }
@@ -418,6 +527,7 @@ class GatewayService : Service() {
             when {
                 interfaceId.startsWith("mesh") -> meshtasticBle?.disconnect()
                 interfaceId.startsWith("iridium") -> iridiumSpp?.disconnect()
+                interfaceId.startsWith("mqtt") -> mqttTransport?.disconnect()
             }
         }
 
@@ -498,6 +608,8 @@ class GatewayService : Service() {
                         interfaceId.startsWith("iridium") ->
                             iridiumSpp?.state?.value == IridiumSpp.State.Connected
                         interfaceId.startsWith("sms") -> true
+                        interfaceId.startsWith("mqtt") ->
+                            mqttTransport?.isConnected == true
                         else -> false
                     }
                 }
@@ -526,11 +638,12 @@ class GatewayService : Service() {
                     disp.onInterfaceStateChange(id, channelType, old, new)
                 }
 
-                // Start workers for the three Android interfaces
+                // Start workers for all Android interfaces
                 val interfaces = mapOf(
                     "mesh_0" to "mesh",
                     "iridium_0" to "iridium",
                     "sms_0" to "sms",
+                    "mqtt_0" to "mqtt",
                 )
                 disp.start(interfaces)
                 dispatcher = disp
@@ -599,6 +712,20 @@ class GatewayService : Service() {
                             transport = "sms", direction = "tx", sender = "self",
                             recipient = phone, text = textPreview, forwarded = true,
                             forwardedTo = "sms:$phone", timestamp = System.currentTimeMillis(),
+                        )
+                    )
+                    null // success
+                }
+                interfaceId.startsWith("mqtt") -> {
+                    val mqtt = mqttTransport
+                        ?: return "mqtt not available"
+                    if (!mqtt.isConnected) return "mqtt not connected"
+                    mqtt.publishMODecoded(textPreview, channel = "android")
+                    db.messageDao().insert(
+                        Message(
+                            transport = "mqtt", direction = "tx", sender = "self",
+                            text = textPreview, forwarded = true,
+                            forwardedTo = "mqtt:hub", timestamp = System.currentTimeMillis(),
                         )
                     )
                     null // success
