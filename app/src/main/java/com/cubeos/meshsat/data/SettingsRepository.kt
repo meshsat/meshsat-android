@@ -30,6 +30,14 @@ class SettingsRepository(private val context: Context) {
         val KEY_MQTT_USERNAME = stringPreferencesKey("mqtt_username")
         val KEY_MQTT_PASSWORD = stringPreferencesKey("mqtt_password")
         val KEY_MQTT_ENABLED = booleanPreferencesKey("mqtt_enabled")
+
+        // APRS settings
+        val KEY_APRS_ENABLED = booleanPreferencesKey("aprs_enabled")
+        val KEY_APRS_CALLSIGN = stringPreferencesKey("aprs_callsign")
+        val KEY_APRS_SSID = stringPreferencesKey("aprs_ssid")
+        val KEY_APRS_KISS_HOST = stringPreferencesKey("aprs_kiss_host")
+        val KEY_APRS_KISS_PORT = stringPreferencesKey("aprs_kiss_port")
+        val KEY_APRS_FREQUENCY = stringPreferencesKey("aprs_frequency_mhz")
     }
 
     val encryptionKey: Flow<String> = context.dataStore.data.map {
@@ -144,5 +152,55 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setMqttPassword(password: String) {
         context.dataStore.edit { it[KEY_MQTT_PASSWORD] = password }
+    }
+
+    // --- APRS settings ---
+
+    val aprsEnabled: Flow<Boolean> = context.dataStore.data.map {
+        it[KEY_APRS_ENABLED] ?: false
+    }
+
+    val aprsCallsign: Flow<String> = context.dataStore.data.map {
+        it[KEY_APRS_CALLSIGN] ?: ""
+    }
+
+    val aprsSsid: Flow<String> = context.dataStore.data.map {
+        it[KEY_APRS_SSID] ?: "10"
+    }
+
+    val aprsKissHost: Flow<String> = context.dataStore.data.map {
+        it[KEY_APRS_KISS_HOST] ?: "localhost"
+    }
+
+    val aprsKissPort: Flow<String> = context.dataStore.data.map {
+        it[KEY_APRS_KISS_PORT] ?: "8001"
+    }
+
+    val aprsFrequency: Flow<String> = context.dataStore.data.map {
+        it[KEY_APRS_FREQUENCY] ?: "144.800"
+    }
+
+    suspend fun setAprsEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[KEY_APRS_ENABLED] = enabled }
+    }
+
+    suspend fun setAprsCallsign(callsign: String) {
+        context.dataStore.edit { it[KEY_APRS_CALLSIGN] = callsign }
+    }
+
+    suspend fun setAprsSsid(ssid: String) {
+        context.dataStore.edit { it[KEY_APRS_SSID] = ssid }
+    }
+
+    suspend fun setAprsKissHost(host: String) {
+        context.dataStore.edit { it[KEY_APRS_KISS_HOST] = host }
+    }
+
+    suspend fun setAprsKissPort(port: String) {
+        context.dataStore.edit { it[KEY_APRS_KISS_PORT] = port }
+    }
+
+    suspend fun setAprsFrequency(freq: String) {
+        context.dataStore.edit { it[KEY_APRS_FREQUENCY] = freq }
     }
 }

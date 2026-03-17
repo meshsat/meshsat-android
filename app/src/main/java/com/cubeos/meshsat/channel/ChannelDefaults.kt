@@ -4,7 +4,7 @@ import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 
 /**
- * Register the 4 built-in Android transport channels.
+ * Register the 5 built-in Android transport channels.
  * Android-specific subset of meshsat/internal/channel/defaults.go.
  *
  * Android transports:
@@ -12,6 +12,7 @@ import kotlin.time.Duration.Companion.seconds
  * - iridium: Iridium 9603N via HC-05 SPP (binary, 340B MTU, paid)
  * - sms: Native Android SMS (text-only, 160 chars)
  * - mqtt: Hub MQTT (TCP, unlimited payload, enables Hub-proxied TAK/APRS-IS)
+ * - aprs: APRS via APRSDroid KISS TCP (256B, local RF)
  */
 fun registerAndroidDefaults(registry: ChannelRegistry) {
     registry.register(
@@ -104,6 +105,28 @@ fun registerAndroidDefaults(registry: ChannelRegistry) {
                 OptionField(key = "device_id", label = "Device ID", type = "text"),
                 OptionField(key = "username", label = "Username", type = "text"),
                 OptionField(key = "password", label = "Password", type = "text"),
+            ),
+        )
+    )
+
+    registry.register(
+        ChannelDescriptor(
+            id = "aprs",
+            label = "APRS (APRSDroid)",
+            isPaid = false,
+            canSend = true,
+            canReceive = true,
+            binaryCapable = false,
+            maxPayload = 256,
+            retryConfig = RetryConfig(
+                enabled = false,
+                maxRetries = 1,
+            ),
+            options = listOf(
+                OptionField(key = "callsign", label = "Callsign", type = "text"),
+                OptionField(key = "ssid", label = "SSID", type = "number", default = "7"),
+                OptionField(key = "kiss_host", label = "KISS Host", type = "text", default = "localhost"),
+                OptionField(key = "kiss_port", label = "KISS Port", type = "number", default = "8001"),
             ),
         )
     )
