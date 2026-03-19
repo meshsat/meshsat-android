@@ -15,6 +15,7 @@ import androidx.core.content.ContextCompat
 import com.cubeos.meshsat.MainActivity
 import com.cubeos.meshsat.MeshSatApp
 import com.cubeos.meshsat.R
+import com.cubeos.meshsat.codec.ProtocolVersion
 import com.cubeos.meshsat.crypto.AesGcmCrypto
 import com.cubeos.meshsat.crypto.MsvqscCodebook
 import com.cubeos.meshsat.crypto.MsvqscWire
@@ -135,6 +136,11 @@ class SmsReceiver : BroadcastReceiver() {
         var payload = rawBytes
         var wasEncrypted = false
 
+        // Step 0: Strip protocol version byte (if present)
+        val versionResult = ProtocolVersion.stripVersionByte(payload)
+        ProtocolVersion.logVersionInfo(versionResult.version, sender)
+        payload = versionResult.data
+
         // Step 1: Try AES-GCM decrypt (if looks encrypted and auto-decrypt enabled)
         if (autoDecrypt && AesGcmCrypto.looksEncrypted(text)) {
             val convKey = db.conversationKeyDao().getBySender(sender)?.hexKey
@@ -142,7 +148,7 @@ class SmsReceiver : BroadcastReceiver() {
 
             if (keyToUse.isNotEmpty()) {
                 try {
-                    payload = AesGcmCrypto.decrypt(rawBytes, keyToUse)
+                    payload = AesGcmCrypto.decrypt(payload, keyToUse)
                     wasEncrypted = true
                     Log.d(TAG, "SMS decrypted from $sender (${if (convKey != null) "conv key" else "global key"})")
                 } catch (e: Exception) {

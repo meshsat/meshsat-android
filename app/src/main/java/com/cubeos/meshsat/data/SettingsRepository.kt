@@ -30,6 +30,8 @@ class SettingsRepository(private val context: Context) {
         val KEY_MQTT_USERNAME = stringPreferencesKey("mqtt_username")
         val KEY_MQTT_PASSWORD = stringPreferencesKey("mqtt_password")
         val KEY_MQTT_ENABLED = booleanPreferencesKey("mqtt_enabled")
+        val KEY_MQTT_CERT_PIN = stringPreferencesKey("mqtt_cert_pin")
+        val KEY_MQTT_CERT_PIN_BACKUP = stringPreferencesKey("mqtt_cert_pin_backup")
 
         // APRS settings
         val KEY_APRS_ENABLED = booleanPreferencesKey("aprs_enabled")
@@ -152,6 +154,22 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setMqttPassword(password: String) {
         context.dataStore.edit { it[KEY_MQTT_PASSWORD] = password }
+    }
+
+    val mqttCertPin: Flow<String> = context.dataStore.data.map {
+        it[KEY_MQTT_CERT_PIN] ?: ""
+    }
+
+    val mqttCertPinBackup: Flow<String> = context.dataStore.data.map {
+        it[KEY_MQTT_CERT_PIN_BACKUP] ?: ""
+    }
+
+    suspend fun setMqttCertPin(pin: String) {
+        context.dataStore.edit { it[KEY_MQTT_CERT_PIN] = pin }
+    }
+
+    suspend fun setMqttCertPinBackup(pin: String) {
+        context.dataStore.edit { it[KEY_MQTT_CERT_PIN_BACKUP] = pin }
     }
 
     // --- APRS settings ---

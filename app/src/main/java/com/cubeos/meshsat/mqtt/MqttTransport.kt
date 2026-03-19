@@ -53,8 +53,17 @@ class MqttTransport(
      * @param deviceId e.g. IMEI or user-configured device identifier
      * @param username optional auth username
      * @param password optional auth password
+     * @param certPin optional primary cert pin (base64-encoded SHA-256 SPKI hash)
+     * @param certPinBackup optional backup cert pin for rotation
      */
-    fun connect(brokerUrl: String, deviceId: String, username: String = "", password: String = "") {
+    fun connect(
+        brokerUrl: String,
+        deviceId: String,
+        username: String = "",
+        password: String = "",
+        certPin: String = "",
+        certPinBackup: String = "",
+    ) {
         if (brokerUrl.isBlank() || deviceId.isBlank()) {
             Log.w(TAG, "Cannot connect: broker URL or device ID is blank")
             return
@@ -75,6 +84,15 @@ class MqttTransport(
                     if (username.isNotBlank()) {
                         userName = username
                         this.password = password.toCharArray()
+                    }
+                    // Certificate pinning for SSL connections
+                    val pinBuilder = CertificatePinner.Builder()
+                        .addPin(certPin)
+                        .addPin(certPinBackup)
+                    if (pinBuilder.hasPins() && brokerUrl.startsWith("ssl://")) {
+                        val (sslFactory, _) = pinBuilder.build().createSSLSocketFactory()
+                        socketFactory = sslFactory
+                        Log.i(TAG, "Certificate pinning enabled for Hub MQTT")
                     }
                 }
 

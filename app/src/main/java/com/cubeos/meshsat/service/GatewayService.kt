@@ -36,6 +36,7 @@ import com.cubeos.meshsat.data.SignalRecord
 import com.cubeos.meshsat.engine.AckTracker
 import com.cubeos.meshsat.engine.Dispatcher
 import com.cubeos.meshsat.engine.FailoverResolver
+import com.cubeos.meshsat.engine.IridiumFragment
 import com.cubeos.meshsat.engine.InterfaceConfig
 import com.cubeos.meshsat.engine.InterfaceManager
 import com.cubeos.meshsat.engine.InterfaceState
@@ -48,6 +49,11 @@ import com.cubeos.meshsat.rules.AccessEvaluator
 import com.cubeos.meshsat.rules.ForwardingRule
 import com.cubeos.meshsat.rules.RouteMessage
 import com.cubeos.meshsat.rules.RulesEngine
+import com.cubeos.meshsat.aprs.AprsCodec
+import com.cubeos.meshsat.aprs.AprsConfig
+import com.cubeos.meshsat.aprs.Ax25Address
+import com.cubeos.meshsat.aprs.Ax25Codec
+import com.cubeos.meshsat.aprs.KissClient
 import com.cubeos.meshsat.mqtt.MqttTransport
 import com.cubeos.meshsat.sms.SmsSender
 import kotlin.time.Duration.Companion.seconds
@@ -122,6 +128,9 @@ class GatewayService : Service() {
         // Hub MQTT transport
         var mqttTransport: MqttTransport? = null
             private set
+        // APRS KISS TCP client
+        var kissClient: KissClient? = null
+            private set
 
         // Phase J: exposed for audit log UI
         var signingServiceRef: com.cubeos.meshsat.engine.SigningService? = null
@@ -143,6 +152,10 @@ class GatewayService : Service() {
     // Phase B: structured dispatch (replaces basic if/else routing)
     private var dispatcher: Dispatcher? = null
     private var accessEvaluator: AccessEvaluator? = null
+
+    // SBD fragmentation: wrapping counter for Iridium 2-byte fragment header.
+    private var iridiumMsgID = 0
+    private fun nextMsgID(): Int = (iridiumMsgID++ and 0xFF)
 
     // Phase C: transport hardening
     private var interfaceManager: InterfaceManager? = null
@@ -176,6 +189,7 @@ class GatewayService : Service() {
             startLocationUpdates()
             initMsvqsc()
             initMqtt()
+            initAprs()
         } catch (e: Exception) {
             Log.e("MeshSat", "Service init error (non-fatal): ${e.message}", e)
         }
@@ -380,12 +394,14 @@ class GatewayService : Service() {
                 }
                 val username = settings.mqttUsername.first()
                 val password = settings.mqttPassword.first()
+                val certPin = settings.mqttCertPin.first()
+                val certPinBackup = settings.mqttCertPinBackup.first()
 
                 val transport = MqttTransport(scope)
                 transport.setMessageCallback { topic, payload ->
                     handleMqttInbound(topic, payload)
                 }
-                transport.connect(brokerUrl, deviceId, username, password)
+                transport.connect(brokerUrl, deviceId, username, password, certPin, certPinBackup)
                 mqttTransport = transport
 
                 // Observe state for InterfaceManager
@@ -449,6 +465,80 @@ class GatewayService : Service() {
         }
     }
 
+    /** Initialize the APRS KISS TCP client if enabled and configured. */
+    private fun initAprs() {
+        scope.launch {
+            try {
+                val enabled = settings.aprsEnabled.first()
+                if (!enabled) {
+                    Log.d("MeshSat", "APRS disabled in settings")
+                    return@launch
+                }
+                val callsign = settings.aprsCallsign.first()
+                if (callsign.isBlank()) {
+                    Log.w("MeshSat", "APRS: callsign not configured")
+                    return@launch
+                }
+                val host = settings.aprsKissHost.first().ifBlank { "localhost" }
+                val port = settings.aprsKissPort.first().toIntOrNull() ?: 8001
+
+                val client = KissClient(scope)
+
+                // Frame callback: decode APRS and route through dispatcher
+                client.setFrameCallback { ax25Frame ->
+                    val pkt = AprsCodec.parse(ax25Frame)
+                    val text = when (pkt.dataType) {
+                        '!', '=', '/', '@' ->
+                            "[APRS:${pkt.source}] ${String.format("%.4f,%.4f", pkt.lat, pkt.lon)} ${pkt.comment}"
+                        ':' ->
+                            "[APRS:${pkt.source}\u2192${pkt.msgTo}] ${pkt.message}"
+                        else ->
+                            "[APRS:${pkt.source}] ${pkt.raw}"
+                    }
+
+                    scope.launch {
+                        db.messageDao().insert(
+                            Message(
+                                transport = "aprs", direction = "rx",
+                                sender = pkt.source, text = text,
+                                timestamp = System.currentTimeMillis(),
+                            )
+                        )
+                        val msg = RouteMessage(
+                            text = text, from = pkt.source, channel = 0, portNum = 1,
+                            visited = listOf("aprs_0"),
+                        )
+                        dispatcher?.dispatchAccess("aprs_0", msg, text.toByteArray())
+                        interfaceManager?.recordActivity("aprs_0")
+                    }
+                }
+
+                client.connect(host, port)
+                kissClient = client
+
+                // Observe state for InterfaceManager
+                scope.launch {
+                    client.state.collect { state ->
+                        when (state) {
+                            KissClient.State.Connected ->
+                                interfaceManager?.setOnline("aprs_0")
+                            KissClient.State.Disconnected ->
+                                interfaceManager?.setOffline("aprs_0")
+                            KissClient.State.Error ->
+                                interfaceManager?.setError("aprs_0", "KISS connection error")
+                            KissClient.State.Connecting ->
+                                interfaceManager?.setConnecting("aprs_0")
+                        }
+                    }
+                }
+
+                Log.i("MeshSat", "APRS KISS client initialized ($callsign on $host:$port)")
+            } catch (e: Exception) {
+                Log.w("MeshSat", "APRS init failed: ${e.message}")
+            }
+        }
+    }
+
     private fun loadRulesFromDb() {
         scope.launch {
             val entities = db.forwardingRuleDao().getAllSync()
@@ -488,6 +578,12 @@ class GatewayService : Service() {
             initialBackoff = 5.seconds,
             maxBackoff = 120.seconds,
         ))
+        mgr.register(InterfaceConfig(
+            id = "aprs_0", channelType = "aprs",
+            autoReconnect = true,
+            initialBackoff = 10.seconds,
+            maxBackoff = 120.seconds,
+        ))
 
         // Connect callback — triggers actual BLE/SPP connection
         // Uses the saved BLE/SPP addresses from settings to reconnect.
@@ -515,8 +611,20 @@ class GatewayService : Service() {
                     }
                     val transport = mqttTransport ?: MqttTransport(scope).also { mqttTransport = it }
                     transport.connect(brokerUrl, deviceId,
-                        settings.mqttUsername.first(), settings.mqttPassword.first())
+                        settings.mqttUsername.first(), settings.mqttPassword.first(),
+                        settings.mqttCertPin.first(), settings.mqttCertPinBackup.first())
                     null
+                }
+                interfaceId.startsWith("aprs") -> {
+                    val callsign = settings.aprsCallsign.first()
+                    if (callsign.isBlank()) {
+                        return@setConnectCallback "APRS callsign not configured"
+                    }
+                    val host = settings.aprsKissHost.first().ifBlank { "localhost" }
+                    val port = settings.aprsKissPort.first().toIntOrNull() ?: 8001
+                    val client = kissClient ?: KissClient(scope).also { kissClient = it }
+                    client.connect(host, port)
+                    null // connection is async — setOnline called from state observer
                 }
                 else -> null
             }
@@ -528,6 +636,7 @@ class GatewayService : Service() {
                 interfaceId.startsWith("mesh") -> meshtasticBle?.disconnect()
                 interfaceId.startsWith("iridium") -> iridiumSpp?.disconnect()
                 interfaceId.startsWith("mqtt") -> mqttTransport?.disconnect()
+                interfaceId.startsWith("aprs") -> kissClient?.disconnect()
             }
         }
 
@@ -577,7 +686,7 @@ class GatewayService : Service() {
             }
         }
 
-        Log.i("MeshSat", "InterfaceManager initialized with 3 interfaces")
+        Log.i("MeshSat", "InterfaceManager initialized with 5 interfaces")
     }
 
     /**
@@ -610,6 +719,8 @@ class GatewayService : Service() {
                         interfaceId.startsWith("sms") -> true
                         interfaceId.startsWith("mqtt") ->
                             mqttTransport?.isConnected == true
+                        interfaceId.startsWith("aprs") ->
+                            kissClient?.isConnected == true
                         else -> false
                     }
                 }
@@ -644,6 +755,7 @@ class GatewayService : Service() {
                     "iridium_0" to "iridium",
                     "sms_0" to "sms",
                     "mqtt_0" to "mqtt",
+                    "aprs_0" to "aprs",
                 )
                 disp.start(interfaces)
                 dispatcher = disp
@@ -689,11 +801,15 @@ class GatewayService : Service() {
                     if (spp.state.value != IridiumSpp.State.Connected)
                         return "iridium not connected"
                     val data = if (payload.isNotEmpty()) payload else textPreview.toByteArray()
-                    if (data.size > 340) return "payload too large (${data.size} > 340)"
-                    val written = spp.writeMoBuffer(data)
-                    if (!written) return "MO buffer write failed"
-                    val result = spp.sbdix()
-                    if (result?.moSuccess != true) return "SBDIX failed: mo_status=${result?.moStatus}"
+                    // Fragment messages >340B using Iridium 2-byte header.
+                    val fragments = IridiumFragment.fragment(data, IridiumFragment.MO_MTU, nextMsgID())
+                    val chunks = fragments ?: listOf(data)
+                    for ((i, chunk) in chunks.withIndex()) {
+                        val written = spp.writeMoBuffer(chunk)
+                        if (!written) return "MO buffer write failed (fragment $i/${chunks.size})"
+                        val result = spp.sbdix()
+                        if (result?.moSuccess != true) return "SBDIX failed (fragment $i/${chunks.size}): mo_status=${result?.moStatus}"
+                    }
                     db.messageDao().insert(
                         Message(
                             transport = "iridium", direction = "tx", sender = "self",
@@ -726,6 +842,28 @@ class GatewayService : Service() {
                             transport = "mqtt", direction = "tx", sender = "self",
                             text = textPreview, forwarded = true,
                             forwardedTo = "mqtt:hub", timestamp = System.currentTimeMillis(),
+                        )
+                    )
+                    null // success
+                }
+                interfaceId.startsWith("aprs") -> {
+                    val client = kissClient
+                        ?: return "aprs not available"
+                    if (!client.isConnected) return "aprs not connected"
+                    // Build AX.25 frame with APRS message payload
+                    val callsign = settings.aprsCallsign.first()
+                    val ssid = settings.aprsSsid.first().toIntOrNull() ?: 10
+                    val src = Ax25Address(callsign, ssid)
+                    val dst = Ax25Address("APMSHT", 0) // MeshSat tocall
+                    val path = listOf(Ax25Address("WIDE1", 1), Ax25Address("WIDE2", 1))
+                    val info = AprsCodec.encodeMessage("BLN1", textPreview.take(67))
+                    val ax25 = Ax25Codec.encode(dst, src, path, info)
+                    client.sendFrame(ax25)
+                    db.messageDao().insert(
+                        Message(
+                            transport = "aprs", direction = "tx", sender = "self",
+                            text = textPreview, forwarded = true,
+                            forwardedTo = "aprs:rf", timestamp = System.currentTimeMillis(),
                         )
                     )
                     null // success
@@ -1083,28 +1221,37 @@ class GatewayService : Service() {
         if (spp.state.value != IridiumSpp.State.Connected) return
 
         val data = text.toByteArray(Charsets.UTF_8)
-        if (data.size > 340) {
-            Log.w("MeshSat", "Iridium MO payload too large: ${data.size}")
-            return
+
+        // Fragment messages >340B using Iridium 2-byte header.
+        val fragments = IridiumFragment.fragment(data, IridiumFragment.MO_MTU, nextMsgID())
+        val chunks = fragments ?: listOf(data)
+
+        for ((i, chunk) in chunks.withIndex()) {
+            val written = spp.writeMoBuffer(chunk)
+            if (!written) {
+                Log.w("MeshSat", "Iridium MO buffer write failed for fragment $i/${chunks.size}")
+                return
+            }
+            val result = spp.sbdix()
+            if (result?.moSuccess != true) {
+                Log.w("MeshSat", "SBDIX failed for fragment $i/${chunks.size}: mo_status=${result?.moStatus}")
+                return
+            }
         }
 
-        val written = spp.writeMoBuffer(data)
-        if (written) {
-            val result = spp.sbdix()
-            db.messageDao().insert(
-                Message(
-                    transport = "iridium",
-                    direction = "tx",
-                    sender = "self",
-                    text = text,
-                    forwarded = true,
-                    forwardedTo = "iridium:sbd",
-                    timestamp = System.currentTimeMillis(),
-                )
+        db.messageDao().insert(
+            Message(
+                transport = "iridium",
+                direction = "tx",
+                sender = "self",
+                text = text,
+                forwarded = true,
+                forwardedTo = "iridium:sbd",
+                timestamp = System.currentTimeMillis(),
             )
-            if (result?.moSuccess != true) {
-                Log.w("MeshSat", "SBDIX failed: mo_status=${result?.moStatus}")
-            }
+        )
+        if (fragments != null) {
+            Log.i("MeshSat", "Iridium MO sent ${chunks.size} fragments (${data.size} bytes)")
         }
     }
 

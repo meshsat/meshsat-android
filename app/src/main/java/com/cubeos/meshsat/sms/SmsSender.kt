@@ -4,6 +4,7 @@ import android.content.Context
 import android.telephony.SmsManager
 import android.util.Base64
 import android.util.Log
+import com.cubeos.meshsat.codec.ProtocolVersion
 import com.cubeos.meshsat.crypto.AesGcmCrypto
 import com.cubeos.meshsat.crypto.MsvqscEncoder
 import com.cubeos.meshsat.crypto.MsvqscWire
@@ -57,7 +58,12 @@ object SmsSender {
             Log.d(TAG, "Encrypted: ${payload.size}B")
         }
 
-        // Step 3: Base64 encode for SMS transport (if binary payload)
+        // Step 3: Prepend protocol version byte (if payload was transformed)
+        if (compressed || !encryptionKey.isNullOrEmpty()) {
+            payload = ProtocolVersion.prependVersionByte(payload)
+        }
+
+        // Step 4: Base64 encode for SMS transport (if binary payload)
         val finalText = if (compressed || !encryptionKey.isNullOrEmpty()) {
             Base64.encodeToString(payload, Base64.NO_WRAP)
         } else {
@@ -68,7 +74,7 @@ object SmsSender {
                 (if (compressed) " [msvqsc]" else "") +
                 (if (!encryptionKey.isNullOrEmpty()) " [encrypted]" else ""))
 
-        // Step 4: Send via Android SMS API
+        // Step 5: Send via Android SMS API
         val smsManager = context.getSystemService(SmsManager::class.java)
         if (finalText.length > 160) {
             val parts = smsManager.divideMessage(finalText)
