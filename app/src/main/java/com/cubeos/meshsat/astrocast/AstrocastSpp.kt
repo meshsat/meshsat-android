@@ -116,8 +116,34 @@ class AstrocastSpp(private val context: Context) {
         if (_state.value != State.Error) _state.value = State.Disconnected
     }
 
-    /** Queue an uplink message (max 160 bytes). Returns the ACK counter or -1 on failure. */
+    private var nextFragMsgID = 0
+    private val reassemblyBuffer = AstrocastProtocol.ReassemblyBuffer()
+
+    /**
+     * Queue an uplink message. Supports auto-fragmentation for messages > 160 bytes
+     * (up to 636 bytes via 4 fragments). Returns the ACK counter or -1 on failure.
+     */
     suspend fun sendPayload(counter: Int, data: ByteArray): Int {
+        val fragments = AstrocastProtocol.fragmentMessage(nextFragMsgID, data)
+        if (fragments != null) {
+            // Fragmented send — each fragment is a separate uplink
+            nextFragMsgID = (nextFragMsgID + 1) and 0x0F
+            var lastCounter = -1
+            for ((i, frag) in fragments.withIndex()) {
+                val frame = AstrocastProtocol.payloadWrite(counter + i, frag)
+                val rsp = sendAndReceive(frame) ?: return -1
+                if (rsp.isError) {
+                    Log.w(TAG, "payload_w error (frag $i/${fragments.size}): ${AstrocastProtocol.ErrorCode.name(rsp.errorCode)}")
+                    return -1
+                }
+                lastCounter = AstrocastProtocol.parsePayloadWriteCounter(rsp)
+                Log.d(TAG, "Fragment $i/${fragments.size} queued (${frag.size}B)")
+            }
+            lastAckCounter = lastCounter
+            return lastAckCounter
+        }
+
+        // Single uplink — no fragmentation needed
         val frame = AstrocastProtocol.payloadWrite(counter, data)
         val rsp = sendAndReceive(frame) ?: return -1
         if (rsp.isError) {
@@ -126,6 +152,22 @@ class AstrocastSpp(private val context: Context) {
         }
         lastAckCounter = AstrocastProtocol.parsePayloadWriteCounter(rsp)
         return lastAckCounter
+    }
+
+    /**
+     * Process an inbound payload that may be fragmented.
+     * Returns the complete message (reassembled if fragmented), or null if more fragments needed.
+     */
+    fun processInboundPayload(data: ByteArray): ByteArray? {
+        if (data.isEmpty()) return null
+        val header = AstrocastProtocol.decodeFragmentHeader(data[0])
+        if (header.fragTotal == 1 && header.fragNum == 0 && header.msgID == 0) {
+            // Could be unfragmented — return as-is (no header stripping for plain messages)
+            return data
+        }
+        // Fragmented — strip header and feed to reassembly buffer
+        val payload = if (data.size > 1) data.copyOfRange(1, data.size) else byteArrayOf()
+        return reassemblyBuffer.addFragment(header, payload, System.currentTimeMillis() / 1000)
     }
 
     /** Dequeue the oldest sent message. */
