@@ -51,6 +51,15 @@ class SettingsRepository(private val context: Context) {
         val KEY_APRS_KISS_HOST = stringPreferencesKey("aprs_kiss_host")
         val KEY_APRS_KISS_PORT = stringPreferencesKey("aprs_kiss_port")
         val KEY_APRS_FREQUENCY = stringPreferencesKey("aprs_frequency_mhz")
+
+        // APRS-IS settings (MESHSAT-230)
+        val KEY_APRS_MODE = stringPreferencesKey("aprs_mode") // "kiss" or "is"
+        val KEY_APRS_IS_SERVER = stringPreferencesKey("aprs_is_server")
+        val KEY_APRS_IS_PORT = stringPreferencesKey("aprs_is_port")
+        val KEY_APRS_IS_PASSCODE = stringPreferencesKey("aprs_is_passcode")
+        val KEY_APRS_IS_FILTER_RANGE = stringPreferencesKey("aprs_is_filter_range_km")
+        val KEY_APRS_IS_BEACON_ENABLED = booleanPreferencesKey("aprs_is_beacon_enabled")
+        val KEY_APRS_IS_BEACON_INTERVAL = stringPreferencesKey("aprs_is_beacon_interval_min") // minutes
     }
 
     val encryptionKey: Flow<String> = context.dataStore.data.map {
@@ -322,5 +331,63 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setAprsFrequency(freq: String) {
         context.dataStore.edit { it[KEY_APRS_FREQUENCY] = freq }
+    }
+
+    // --- APRS-IS settings (MESHSAT-230) ---
+
+    val aprsMode: Flow<String> = context.dataStore.data.map {
+        it[KEY_APRS_MODE] ?: "kiss" // "kiss" or "is"
+    }
+
+    val aprsIsServer: Flow<String> = context.dataStore.data.map {
+        it[KEY_APRS_IS_SERVER] ?: "rotate.aprs2.net"
+    }
+
+    val aprsIsPort: Flow<String> = context.dataStore.data.map {
+        it[KEY_APRS_IS_PORT] ?: "14580"
+    }
+
+    val aprsIsPasscode: Flow<String> = context.dataStore.data.map {
+        it[KEY_APRS_IS_PASSCODE] ?: "-1"
+    }
+
+    val aprsIsFilterRange: Flow<String> = context.dataStore.data.map {
+        it[KEY_APRS_IS_FILTER_RANGE] ?: "100"
+    }
+
+    suspend fun setAprsMode(mode: String) {
+        context.dataStore.edit { it[KEY_APRS_MODE] = mode }
+    }
+
+    suspend fun setAprsIsServer(server: String) {
+        context.dataStore.edit { it[KEY_APRS_IS_SERVER] = server }
+    }
+
+    suspend fun setAprsIsPort(port: String) {
+        context.dataStore.edit { it[KEY_APRS_IS_PORT] = port }
+    }
+
+    suspend fun setAprsIsPasscode(passcode: String) {
+        context.dataStore.edit { it[KEY_APRS_IS_PASSCODE] = passcode }
+    }
+
+    suspend fun setAprsIsFilterRange(range: String) {
+        context.dataStore.edit { it[KEY_APRS_IS_FILTER_RANGE] = range }
+    }
+
+    val aprsIsBeaconEnabled: Flow<Boolean> = context.dataStore.data.map {
+        it[KEY_APRS_IS_BEACON_ENABLED] ?: false
+    }
+
+    val aprsIsBeaconInterval: Flow<String> = context.dataStore.data.map {
+        it[KEY_APRS_IS_BEACON_INTERVAL] ?: "10"
+    }
+
+    suspend fun setAprsIsBeaconEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[KEY_APRS_IS_BEACON_ENABLED] = enabled }
+    }
+
+    suspend fun setAprsIsBeaconInterval(interval: String) {
+        context.dataStore.edit { it[KEY_APRS_IS_BEACON_INTERVAL] = interval }
     }
 }

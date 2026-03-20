@@ -51,6 +51,7 @@ import com.cubeos.meshsat.rules.RouteMessage
 import com.cubeos.meshsat.rules.RulesEngine
 import com.cubeos.meshsat.aprs.AprsCodec
 import com.cubeos.meshsat.aprs.AprsConfig
+import com.cubeos.meshsat.aprs.AprsPacket
 import com.cubeos.meshsat.aprs.Ax25Address
 import com.cubeos.meshsat.aprs.Ax25Codec
 import com.cubeos.meshsat.aprs.KissClient
@@ -129,8 +130,10 @@ class GatewayService : Service() {
         // Hub MQTT transport
         var mqttTransport: MqttTransport? = null
             private set
-        // APRS KISS TCP client
+        // APRS transport (KISS TCP or APRS-IS)
         var kissClient: KissClient? = null
+            private set
+        var aprsIsClient: com.cubeos.meshsat.aprs.AprsIsClient? = null
             private set
 
         // Phase J: exposed for audit log UI
@@ -539,7 +542,7 @@ class GatewayService : Service() {
         Log.i("MeshSat", "SMS → MQTT relay initialized")
     }
 
-    /** Initialize the APRS KISS TCP client if enabled and configured. */
+    /** Initialize the APRS transport (KISS TCP or APRS-IS direct) if enabled. */
     private fun initAprs() {
         scope.launch {
             try {
@@ -553,63 +556,170 @@ class GatewayService : Service() {
                     Log.w("MeshSat", "APRS: callsign not configured")
                     return@launch
                 }
-                val host = settings.aprsKissHost.first().ifBlank { "localhost" }
-                val port = settings.aprsKissPort.first().toIntOrNull() ?: 8001
+                val ssid = settings.aprsSsid.first()
+                val fullCallsign = if (ssid.isNotBlank() && ssid != "0") "$callsign-$ssid" else callsign
+                val mode = settings.aprsMode.first()
 
-                val client = KissClient(scope)
-
-                // Frame callback: decode APRS and route through dispatcher
-                client.setFrameCallback { ax25Frame ->
-                    val pkt = AprsCodec.parse(ax25Frame)
-                    val text = when (pkt.dataType) {
-                        '!', '=', '/', '@' ->
-                            "[APRS:${pkt.source}] ${String.format("%.4f,%.4f", pkt.lat, pkt.lon)} ${pkt.comment}"
-                        ':' ->
-                            "[APRS:${pkt.source}\u2192${pkt.msgTo}] ${pkt.message}"
-                        else ->
-                            "[APRS:${pkt.source}] ${pkt.raw}"
-                    }
-
-                    scope.launch {
-                        db.messageDao().insert(
-                            Message(
-                                transport = "aprs", direction = "rx",
-                                sender = pkt.source, text = text,
-                                timestamp = System.currentTimeMillis(),
-                            )
-                        )
-                        val msg = RouteMessage(
-                            text = text, from = pkt.source, channel = 0, portNum = 1,
-                            visited = listOf("aprs_0"),
-                        )
-                        dispatcher?.dispatchAccess("aprs_0", msg, text.toByteArray())
-                        interfaceManager?.recordActivity("aprs_0")
-                    }
+                if (mode == "is") {
+                    initAprsIs(fullCallsign)
+                } else {
+                    initAprsKiss(fullCallsign)
                 }
-
-                client.connect(host, port)
-                kissClient = client
-
-                // Observe state for InterfaceManager
-                scope.launch {
-                    client.state.collect { state ->
-                        when (state) {
-                            KissClient.State.Connected ->
-                                interfaceManager?.setOnline("aprs_0")
-                            KissClient.State.Disconnected ->
-                                interfaceManager?.setOffline("aprs_0")
-                            KissClient.State.Error ->
-                                interfaceManager?.setError("aprs_0", "KISS connection error")
-                            KissClient.State.Connecting ->
-                                interfaceManager?.setConnecting("aprs_0")
-                        }
-                    }
-                }
-
-                Log.i("MeshSat", "APRS KISS client initialized ($callsign on $host:$port)")
             } catch (e: Exception) {
                 Log.w("MeshSat", "APRS init failed: ${e.message}")
             }
+        }
+    }
+
+    /** Initialize APRS via KISS TCP (APRSDroid/Direwolf). */
+    private suspend fun initAprsKiss(fullCallsign: String) {
+        val host = settings.aprsKissHost.first().ifBlank { "localhost" }
+        val port = settings.aprsKissPort.first().toIntOrNull() ?: 8001
+
+        val client = KissClient(scope)
+        client.setFrameCallback { ax25Frame ->
+            val pkt = AprsCodec.parse(ax25Frame)
+            handleAprsPacket(pkt)
+        }
+
+        client.connect(host, port)
+        kissClient = client
+
+        scope.launch {
+            client.state.collect { state ->
+                when (state) {
+                    KissClient.State.Connected -> interfaceManager?.setOnline("aprs_0")
+                    KissClient.State.Disconnected -> interfaceManager?.setOffline("aprs_0")
+                    KissClient.State.Error -> interfaceManager?.setError("aprs_0", "KISS connection error")
+                    KissClient.State.Connecting -> interfaceManager?.setConnecting("aprs_0")
+                }
+            }
+        }
+
+        Log.i("MeshSat", "APRS KISS initialized ($fullCallsign on $host:$port)")
+    }
+
+    /** Initialize APRS via direct APRS-IS TCP connection (MESHSAT-230). */
+    private suspend fun initAprsIs(fullCallsign: String) {
+        val server = settings.aprsIsServer.first().ifBlank { "rotate.aprs2.net" }
+        val port = settings.aprsIsPort.first().toIntOrNull() ?: 14580
+        val passcode = settings.aprsIsPasscode.first().ifBlank { "-1" }
+        val filterRange = settings.aprsIsFilterRange.first().toIntOrNull() ?: 100
+
+        // Use phone GPS for filter center
+        val location = _phoneLocation.value
+        val filterLat = location?.latitude ?: 0.0
+        val filterLon = location?.longitude ?: 0.0
+
+        val client = com.cubeos.meshsat.aprs.AprsIsClient(scope)
+        client.setPacketCallback { pkt -> handleAprsPacket(pkt) }
+
+        client.connect(
+            server = server,
+            port = port,
+            callsign = fullCallsign,
+            passcode = passcode,
+            filterLat = filterLat,
+            filterLon = filterLon,
+            filterRange = filterRange,
+        )
+        aprsIsClient = client
+
+        scope.launch {
+            client.state.collect { state ->
+                when (state) {
+                    com.cubeos.meshsat.aprs.AprsIsClient.State.Connected ->
+                        interfaceManager?.setOnline("aprs_0")
+                    com.cubeos.meshsat.aprs.AprsIsClient.State.Disconnected ->
+                        interfaceManager?.setOffline("aprs_0")
+                    com.cubeos.meshsat.aprs.AprsIsClient.State.Error ->
+                        interfaceManager?.setError("aprs_0", "APRS-IS connection error")
+                    com.cubeos.meshsat.aprs.AprsIsClient.State.Connecting ->
+                        interfaceManager?.setConnecting("aprs_0")
+                }
+            }
+        }
+
+        Log.i("MeshSat", "APRS-IS initialized ($fullCallsign on $server:$port, filter=${filterRange}km)")
+
+        // Start position beaconing if enabled
+        val beaconEnabled = settings.aprsIsBeaconEnabled.first()
+        if (beaconEnabled) {
+            startAprsIsBeacon(client, fullCallsign)
+        }
+    }
+
+    /** Periodic APRS-IS position beacon using phone GPS. */
+    private fun startAprsIsBeacon(client: com.cubeos.meshsat.aprs.AprsIsClient, callsign: String) {
+        scope.launch {
+            val intervalMin = settings.aprsIsBeaconInterval.first().toLongOrNull() ?: 10L
+            val intervalMs = intervalMin * 60_000L
+            Log.i("MeshSat", "APRS-IS beacon started: every ${intervalMin}min")
+
+            while (client.isConnected) {
+                val loc = _phoneLocation.value
+                if (loc != null) {
+                    try {
+                        client.sendPosition(
+                            callsign = callsign,
+                            lat = loc.latitude,
+                            lon = loc.longitude,
+                            symbolTable = '/',
+                            symbolCode = '-',
+                            comment = "MeshSat Android",
+                        )
+                        Log.d("MeshSat", "APRS-IS beacon sent: %.4f,%.4f".format(loc.latitude, loc.longitude))
+                    } catch (e: Exception) {
+                        Log.w("MeshSat", "APRS-IS beacon failed: ${e.message}")
+                    }
+                } else {
+                    Log.d("MeshSat", "APRS-IS beacon skipped: no GPS fix")
+                }
+                kotlinx.coroutines.delay(intervalMs)
+            }
+        }
+    }
+
+    /** Handle an inbound APRS packet (from either KISS or APRS-IS). */
+    private fun handleAprsPacket(pkt: AprsPacket) {
+        val text = when (pkt.dataType) {
+            '!', '=', '/', '@' ->
+                "[APRS:${pkt.source}] ${String.format("%.4f,%.4f", pkt.lat, pkt.lon)} ${pkt.comment}"
+            ':' ->
+                "[APRS:${pkt.source}\u2192${pkt.msgTo}] ${pkt.message}"
+            else ->
+                "[APRS:${pkt.source}] ${pkt.raw}"
+        }
+
+        scope.launch {
+            db.messageDao().insert(
+                Message(
+                    transport = "aprs", direction = "rx",
+                    sender = pkt.source, text = text,
+                    timestamp = System.currentTimeMillis(),
+                )
+            )
+
+            // Store position from APRS station on the map
+            if (pkt.lat != 0.0 && pkt.lon != 0.0) {
+                val nodeHash = pkt.source.hashCode().toLong() and 0xFFFFFFFFL
+                db.nodePositionDao().insert(
+                    NodePosition(
+                        nodeId = nodeHash,
+                        nodeName = pkt.source,
+                        latitude = pkt.lat,
+                        longitude = pkt.lon,
+                        altitude = 0,
+                    )
+                )
+            }
+
+            val msg = RouteMessage(
+                text = text, from = pkt.source, channel = 0, portNum = 1,
+                visited = listOf("aprs_0"),
+            )
+            dispatcher?.dispatchAccess("aprs_0", msg, text.toByteArray())
+            interfaceManager?.recordActivity("aprs_0")
         }
     }
 

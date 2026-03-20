@@ -13,6 +13,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.core.content.ContextCompat
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -29,6 +30,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -101,6 +104,14 @@ fun SettingsScreen(navController: NavController? = null) {
     val aprsKissHost by settings.aprsKissHost.collectAsState(initial = "localhost")
     val aprsKissPort by settings.aprsKissPort.collectAsState(initial = "8001")
     val aprsFrequency by settings.aprsFrequency.collectAsState(initial = "144.800")
+    // APRS-IS settings (MESHSAT-230)
+    val aprsMode by settings.aprsMode.collectAsState(initial = "kiss")
+    val aprsIsServer by settings.aprsIsServer.collectAsState(initial = "rotate.aprs2.net")
+    val aprsIsPort by settings.aprsIsPort.collectAsState(initial = "14580")
+    val aprsIsPasscode by settings.aprsIsPasscode.collectAsState(initial = "-1")
+    val aprsIsFilterRange by settings.aprsIsFilterRange.collectAsState(initial = "100")
+    val aprsIsBeaconEnabled by settings.aprsIsBeaconEnabled.collectAsState(initial = false)
+    val aprsIsBeaconInterval by settings.aprsIsBeaconInterval.collectAsState(initial = "10")
 
     var keyInput by remember(encryptionKey) { mutableStateOf(encryptionKey) }
     var phoneInput by remember(piPhone) { mutableStateOf(piPhone) }
@@ -112,7 +123,14 @@ fun SettingsScreen(navController: NavController? = null) {
     var aprsHostInput by remember(aprsKissHost) { mutableStateOf(aprsKissHost) }
     var aprsPortInput by remember(aprsKissPort) { mutableStateOf(aprsKissPort) }
     var aprsFreqInput by remember(aprsFrequency) { mutableStateOf(aprsFrequency) }
-    val aprsState = GatewayService.kissClient?.state?.collectAsState()
+    val aprsKissState = GatewayService.kissClient?.state?.collectAsState()
+    // APRS-IS state (MESHSAT-230)
+    var aprsIsServerInput by remember(aprsIsServer) { mutableStateOf(aprsIsServer) }
+    var aprsIsPortInput by remember(aprsIsPort) { mutableStateOf(aprsIsPort) }
+    var aprsIsPasscodeInput by remember(aprsIsPasscode) { mutableStateOf(aprsIsPasscode) }
+    var aprsIsFilterRangeInput by remember(aprsIsFilterRange) { mutableStateOf(aprsIsFilterRange) }
+    var aprsIsBeaconIntervalInput by remember(aprsIsBeaconInterval) { mutableStateOf(aprsIsBeaconInterval) }
+    val aprsIsState = GatewayService.aprsIsClient?.state?.collectAsState()
 
     // BLE state
     val meshState = GatewayService.meshtasticBle?.state?.collectAsState()
@@ -917,7 +935,7 @@ fun SettingsScreen(navController: NavController? = null) {
         }
 
         // --- MeshSat Pi Section ---
-        SectionCard("APRS (APRSDroid KISS TCP)") {
+        SectionCard("APRS") {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -931,18 +949,57 @@ fun SettingsScreen(navController: NavController? = null) {
                 )
             }
 
-            // Connection status
-            aprsState?.let { state ->
-                val statusText = when (state.value) {
-                    com.cubeos.meshsat.aprs.KissClient.State.Connected -> "Connected"
-                    com.cubeos.meshsat.aprs.KissClient.State.Connecting -> "Connecting..."
-                    com.cubeos.meshsat.aprs.KissClient.State.Error -> "Error"
-                    com.cubeos.meshsat.aprs.KissClient.State.Disconnected -> "Disconnected"
-                }
-                val isOnline = state.value == com.cubeos.meshsat.aprs.KissClient.State.Connected
-                ConnectionStatusRow("KISS TNC", isOnline, statusText, MeshSatTeal)
+            // Mode selector: KISS TNC or APRS-IS direct
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                FilterChip(
+                    selected = aprsMode == "kiss",
+                    onClick = { scope.launch { settings.setAprsMode("kiss") } },
+                    label = { Text("KISS TNC", style = MaterialTheme.typography.bodySmall) },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = MeshSatTeal.copy(alpha = 0.2f),
+                    ),
+                )
+                FilterChip(
+                    selected = aprsMode == "is",
+                    onClick = { scope.launch { settings.setAprsMode("is") } },
+                    label = { Text("APRS-IS Direct", style = MaterialTheme.typography.bodySmall) },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = MeshSatTeal.copy(alpha = 0.2f),
+                    ),
+                )
             }
 
+            // Connection status (mode-aware)
+            if (aprsMode == "kiss") {
+                aprsKissState?.let { state ->
+                    val statusText = when (state.value) {
+                        com.cubeos.meshsat.aprs.KissClient.State.Connected -> "Connected"
+                        com.cubeos.meshsat.aprs.KissClient.State.Connecting -> "Connecting..."
+                        com.cubeos.meshsat.aprs.KissClient.State.Error -> "Error"
+                        com.cubeos.meshsat.aprs.KissClient.State.Disconnected -> "Disconnected"
+                    }
+                    val isOnline = state.value == com.cubeos.meshsat.aprs.KissClient.State.Connected
+                    ConnectionStatusRow("KISS TNC", isOnline, statusText, MeshSatTeal)
+                }
+            } else {
+                aprsIsState?.let { state ->
+                    val statusText = when (state.value) {
+                        com.cubeos.meshsat.aprs.AprsIsClient.State.Connected -> "Connected"
+                        com.cubeos.meshsat.aprs.AprsIsClient.State.Connecting -> "Connecting..."
+                        com.cubeos.meshsat.aprs.AprsIsClient.State.Error -> "Error"
+                        com.cubeos.meshsat.aprs.AprsIsClient.State.Disconnected -> "Disconnected"
+                    }
+                    val isOnline = state.value == com.cubeos.meshsat.aprs.AprsIsClient.State.Connected
+                    val verified = GatewayService.aprsIsClient?.verified == true
+                    val label = if (isOnline && verified) "APRS-IS (verified)" else "APRS-IS"
+                    ConnectionStatusRow(label, isOnline, statusText, MeshSatTeal)
+                }
+            }
+
+            // Common: callsign + SSID
             OutlinedTextField(
                 value = aprsCallsignInput,
                 onValueChange = { aprsCallsignInput = it.uppercase().take(6) },
@@ -970,26 +1027,43 @@ fun SettingsScreen(navController: NavController? = null) {
                 ),
             )
 
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            // KISS TNC settings
+            if (aprsMode == "kiss") {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = aprsHostInput,
+                        onValueChange = { aprsHostInput = it },
+                        label = { Text("KISS Host", style = MaterialTheme.typography.bodySmall) },
+                        singleLine = true,
+                        modifier = Modifier.weight(2f),
+                        textStyle = MaterialTheme.typography.bodyMedium,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = MeshSatTeal,
+                            unfocusedBorderColor = MeshSatBorder,
+                        ),
+                    )
+                    OutlinedTextField(
+                        value = aprsPortInput,
+                        onValueChange = { aprsPortInput = it.filter { c -> c.isDigit() }.take(5) },
+                        label = { Text("Port", style = MaterialTheme.typography.bodySmall) },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.weight(1f),
+                        textStyle = MaterialTheme.typography.bodyMedium,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = MeshSatTeal,
+                            unfocusedBorderColor = MeshSatBorder,
+                        ),
+                    )
+                }
+
                 OutlinedTextField(
-                    value = aprsHostInput,
-                    onValueChange = { aprsHostInput = it },
-                    label = { Text("KISS Host", style = MaterialTheme.typography.bodySmall) },
+                    value = aprsFreqInput,
+                    onValueChange = { aprsFreqInput = it },
+                    label = { Text("Frequency (MHz)", style = MaterialTheme.typography.bodySmall) },
                     singleLine = true,
-                    modifier = Modifier.weight(2f),
-                    textStyle = MaterialTheme.typography.bodyMedium,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = MeshSatTeal,
-                        unfocusedBorderColor = MeshSatBorder,
-                    ),
-                )
-                OutlinedTextField(
-                    value = aprsPortInput,
-                    onValueChange = { aprsPortInput = it.filter { c -> c.isDigit() }.take(5) },
-                    label = { Text("Port", style = MaterialTheme.typography.bodySmall) },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    modifier = Modifier.weight(1f),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    modifier = Modifier.fillMaxWidth(),
                     textStyle = MaterialTheme.typography.bodyMedium,
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = MeshSatTeal,
@@ -998,28 +1072,128 @@ fun SettingsScreen(navController: NavController? = null) {
                 )
             }
 
-            OutlinedTextField(
-                value = aprsFreqInput,
-                onValueChange = { aprsFreqInput = it },
-                label = { Text("Frequency (MHz)", style = MaterialTheme.typography.bodySmall) },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                modifier = Modifier.fillMaxWidth(),
-                textStyle = MaterialTheme.typography.bodyMedium,
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = MeshSatTeal,
-                    unfocusedBorderColor = MeshSatBorder,
-                ),
-            )
+            // APRS-IS Direct settings (MESHSAT-230)
+            if (aprsMode == "is") {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = aprsIsServerInput,
+                        onValueChange = { aprsIsServerInput = it },
+                        label = { Text("APRS-IS Server", style = MaterialTheme.typography.bodySmall) },
+                        singleLine = true,
+                        modifier = Modifier.weight(2f),
+                        textStyle = MaterialTheme.typography.bodyMedium,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = MeshSatTeal,
+                            unfocusedBorderColor = MeshSatBorder,
+                        ),
+                    )
+                    OutlinedTextField(
+                        value = aprsIsPortInput,
+                        onValueChange = { aprsIsPortInput = it.filter { c -> c.isDigit() }.take(5) },
+                        label = { Text("Port", style = MaterialTheme.typography.bodySmall) },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.weight(1f),
+                        textStyle = MaterialTheme.typography.bodyMedium,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = MeshSatTeal,
+                            unfocusedBorderColor = MeshSatBorder,
+                        ),
+                    )
+                }
+
+                // Passcode with auto-calculate button
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    OutlinedTextField(
+                        value = aprsIsPasscodeInput,
+                        onValueChange = { aprsIsPasscodeInput = it.filter { c -> c.isDigit() || c == '-' }.take(6) },
+                        label = { Text("Passcode", style = MaterialTheme.typography.bodySmall) },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.weight(1f),
+                        textStyle = MaterialTheme.typography.bodyMedium,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = MeshSatTeal,
+                            unfocusedBorderColor = MeshSatBorder,
+                        ),
+                    )
+                    OutlinedButton(
+                        onClick = {
+                            if (aprsCallsignInput.isNotBlank()) {
+                                aprsIsPasscodeInput = com.cubeos.meshsat.aprs.AprsIsPasscode.calculate(aprsCallsignInput)
+                            }
+                        },
+                        border = BorderStroke(1.dp, MeshSatTeal),
+                    ) {
+                        Text("Auto", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+
+                OutlinedTextField(
+                    value = aprsIsFilterRangeInput,
+                    onValueChange = { aprsIsFilterRangeInput = it.filter { c -> c.isDigit() }.take(4) },
+                    label = { Text("Filter radius (km)", style = MaterialTheme.typography.bodySmall) },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth(),
+                    textStyle = MaterialTheme.typography.bodyMedium,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = MeshSatTeal,
+                        unfocusedBorderColor = MeshSatBorder,
+                    ),
+                )
+
+                // Position beaconing
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("Position beacon", style = MaterialTheme.typography.bodyMedium)
+                    Switch(
+                        checked = aprsIsBeaconEnabled,
+                        onCheckedChange = { scope.launch { settings.setAprsIsBeaconEnabled(it) } },
+                        colors = SwitchDefaults.colors(checkedTrackColor = MeshSatTeal),
+                    )
+                }
+
+                if (aprsIsBeaconEnabled) {
+                    OutlinedTextField(
+                        value = aprsIsBeaconIntervalInput,
+                        onValueChange = { aprsIsBeaconIntervalInput = it.filter { c -> c.isDigit() }.take(3) },
+                        label = { Text("Beacon interval (min)", style = MaterialTheme.typography.bodySmall) },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.fillMaxWidth(),
+                        textStyle = MaterialTheme.typography.bodyMedium,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = MeshSatTeal,
+                            unfocusedBorderColor = MeshSatBorder,
+                        ),
+                    )
+                }
+            }
 
             Button(
                 onClick = {
                     scope.launch {
                         settings.setAprsCallsign(aprsCallsignInput)
                         settings.setAprsSsid(aprsSsidInput)
-                        settings.setAprsKissHost(aprsHostInput)
-                        settings.setAprsKissPort(aprsPortInput)
-                        settings.setAprsFrequency(aprsFreqInput)
+                        if (aprsMode == "kiss") {
+                            settings.setAprsKissHost(aprsHostInput)
+                            settings.setAprsKissPort(aprsPortInput)
+                            settings.setAprsFrequency(aprsFreqInput)
+                        } else {
+                            settings.setAprsIsServer(aprsIsServerInput)
+                            settings.setAprsIsPort(aprsIsPortInput)
+                            settings.setAprsIsPasscode(aprsIsPasscodeInput)
+                            settings.setAprsIsFilterRange(aprsIsFilterRangeInput)
+                            settings.setAprsIsBeaconInterval(aprsIsBeaconIntervalInput)
+                        }
                     }
                     Toast.makeText(context, "APRS settings saved", Toast.LENGTH_SHORT).show()
                 },
@@ -1029,8 +1203,14 @@ fun SettingsScreen(navController: NavController? = null) {
             }
 
             Text(
-                text = "Connect to APRSDroid's KISS TCP server for local RF APRS via AIOC + handheld radio. " +
-                    "SSID 7 = handheld, 10 = igate. EU: 144.800 MHz, NA: 144.390 MHz.",
+                text = if (aprsMode == "kiss") {
+                    "Connect to APRSDroid's KISS TCP server for local RF APRS via AIOC + handheld radio. " +
+                        "SSID 7 = handheld, 10 = igate. EU: 144.800 MHz, NA: 144.390 MHz."
+                } else {
+                    "Connect directly to APRS-IS (rotate.aprs2.net) over the internet. " +
+                        "No APRSDroid or radio needed. Use passcode -1 for receive-only, or Auto to calculate from callsign. " +
+                        "Position beacon sends GPS location at the configured interval."
+                },
                 style = MaterialTheme.typography.bodySmall,
                 color = MeshSatTextMuted,
             )
