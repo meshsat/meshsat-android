@@ -33,6 +33,12 @@ class SettingsRepository(private val context: Context) {
         val KEY_MQTT_CERT_PIN = stringPreferencesKey("mqtt_cert_pin")
         val KEY_MQTT_CERT_PIN_BACKUP = stringPreferencesKey("mqtt_cert_pin_backup")
 
+        // Per-channel compression mode: "off", "msvqsc", or "smaz2"
+        val KEY_COMPRESS_MESH = stringPreferencesKey("compress_mesh")
+        val KEY_COMPRESS_IRIDIUM = stringPreferencesKey("compress_iridium")
+        val KEY_COMPRESS_SMS = stringPreferencesKey("compress_sms")
+        val KEY_COMPRESS_MQTT = stringPreferencesKey("compress_mqtt")
+
         // APRS settings
         val KEY_APRS_ENABLED = booleanPreferencesKey("aprs_enabled")
         val KEY_APRS_CALLSIGN = stringPreferencesKey("aprs_callsign")
@@ -96,6 +102,33 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setMsvqscStages(stages: String) {
         context.dataStore.edit { it[KEY_MSVQSC_STAGES] = stages }
+    }
+
+    // --- Per-channel compression (MESHSAT-203) ---
+    // Values: "off", "msvqsc", "smaz2"
+
+    val compressMesh: Flow<String> = context.dataStore.data.map {
+        it[KEY_COMPRESS_MESH] ?: "msvqsc"
+    }
+    val compressIridium: Flow<String> = context.dataStore.data.map {
+        it[KEY_COMPRESS_IRIDIUM] ?: "off"   // Off by default — Hub can't decode MSVQ-SC yet
+    }
+    val compressSms: Flow<String> = context.dataStore.data.map {
+        it[KEY_COMPRESS_SMS] ?: "msvqsc"
+    }
+    val compressMqtt: Flow<String> = context.dataStore.data.map {
+        it[KEY_COMPRESS_MQTT] ?: "off"      // MQTT sends JSON, no compression needed
+    }
+
+    suspend fun setCompressMode(channel: String, mode: String) {
+        val key = when (channel) {
+            "mesh" -> KEY_COMPRESS_MESH
+            "iridium" -> KEY_COMPRESS_IRIDIUM
+            "sms" -> KEY_COMPRESS_SMS
+            "mqtt" -> KEY_COMPRESS_MQTT
+            else -> return
+        }
+        context.dataStore.edit { it[key] = mode }
     }
 
     val deadmanEnabled: Flow<Boolean> = context.dataStore.data.map {

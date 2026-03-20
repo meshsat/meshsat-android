@@ -18,7 +18,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -84,6 +86,10 @@ fun SettingsScreen(navController: NavController? = null) {
     val piPhone by settings.meshsatPiPhone.collectAsState(initial = "")
     val msvqscEnabled by settings.msvqscEnabled.collectAsState(initial = false)
     val msvqscStages by settings.msvqscStages.collectAsState(initial = "3")
+    val compressMesh by settings.compressMesh.collectAsState(initial = "msvqsc")
+    val compressIridium by settings.compressIridium.collectAsState(initial = "off")
+    val compressSms by settings.compressSms.collectAsState(initial = "msvqsc")
+    val compressMqtt by settings.compressMqtt.collectAsState(initial = "off")
 
     val deadmanEnabled by settings.deadmanEnabled.collectAsState(initial = false)
     val deadmanTimeoutMin by settings.deadmanTimeoutMin.collectAsState(initial = "120")
@@ -554,56 +560,90 @@ fun SettingsScreen(navController: NavController? = null) {
             )
         }
 
-        // --- SMS Compression Section ---
-        SectionCard("SMS Compression (MSVQ-SC)") {
-            SettingRow("Lossy compression") {
-                Switch(
-                    checked = msvqscEnabled,
-                    onCheckedChange = { scope.launch { settings.setMsvqscEnabled(it) } },
-                    colors = SwitchDefaults.colors(checkedTrackColor = MeshSatTeal),
-                )
-            }
+        // --- Per-Channel Compression Section (MESHSAT-203) ---
+        SectionCard("Compression") {
+            Text(
+                text = "Per-channel compression mode. MSVQ-SC is lossy semantic compression. " +
+                        "Incoming compressed messages are always auto-detected regardless of these settings.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MeshSatTextMuted,
+            )
 
-            if (msvqscEnabled) {
-                Text(
-                    text = "Stages (fewer = smaller SMS, lower fidelity)",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MeshSatTextMuted,
-                )
+            Spacer(Modifier.height(8.dp))
 
-                val stageOptions = listOf("2" to "2 (5B, ZigBee)", "3" to "3 (7B, Cellular)", "4" to "4 (9B, Mesh)", "6" to "6 (13B, Iridium)", "8" to "8 (17B, max fidelity)")
-                stageOptions.forEach { (value, label) ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(
-                                if (msvqscStages == value) MeshSatTeal.copy(alpha = 0.15f)
-                                else MeshSatSurface,
-                                RoundedCornerShape(4.dp),
-                            )
-                            .clickable { scope.launch { settings.setMsvqscStages(value) } }
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(text = label, style = MaterialTheme.typography.bodySmall)
-                        if (msvqscStages == value) {
+            val channels = listOf(
+                "sms" to "SMS" to compressSms,
+                "mesh" to "Mesh (LoRa)" to compressMesh,
+                "iridium" to "Iridium SBD" to compressIridium,
+                "mqtt" to "MQTT (Hub)" to compressMqtt,
+            )
+
+            channels.forEach { (channelPair, currentMode) ->
+                val (channelKey, channelLabel) = channelPair
+                val modes = listOf("off" to "Off", "msvqsc" to "MSVQ-SC")
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(text = channelLabel, style = MaterialTheme.typography.bodyMedium)
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        modes.forEach { (modeKey, modeLabel) ->
+                            val selected = currentMode == modeKey
                             Text(
-                                text = "selected",
+                                text = modeLabel,
                                 style = MaterialTheme.typography.bodySmall,
-                                color = MeshSatTeal,
+                                color = if (selected) MeshSatTeal else MeshSatTextMuted,
+                                modifier = Modifier
+                                    .background(
+                                        if (selected) MeshSatTeal.copy(alpha = 0.15f)
+                                        else MeshSatSurface,
+                                        RoundedCornerShape(4.dp),
+                                    )
+                                    .clickable {
+                                        scope.launch { settings.setCompressMode(channelKey, modeKey) }
+                                    }
+                                    .padding(horizontal = 8.dp, vertical = 4.dp),
                             )
                         }
                     }
                 }
             }
 
-            Text(
-                text = "Lossy semantic compression — the receiver gets the closest known phrase, not the exact original. " +
-                        "Works best for field/SAR messages. Incoming MSVQ-SC messages are always auto-detected and decoded regardless of this setting.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MeshSatTextMuted,
-            )
+            // MSVQ-SC stages (global, applies to all channels using MSVQ-SC)
+            val anyMsvqsc = compressSms == "msvqsc" || compressMesh == "msvqsc" || compressIridium == "msvqsc"
+            if (anyMsvqsc) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = "MSVQ-SC stages (fewer = smaller, lower fidelity)",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MeshSatTextMuted,
+                )
+
+                val stageOptions = listOf("2" to "2 (5B)", "3" to "3 (7B)", "4" to "4 (9B)", "6" to "6 (13B)", "8" to "8 (17B)")
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    stageOptions.forEach { (value, label) ->
+                        Text(
+                            text = label,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (msvqscStages == value) MeshSatTeal else MeshSatTextMuted,
+                            modifier = Modifier
+                                .background(
+                                    if (msvqscStages == value) MeshSatTeal.copy(alpha = 0.15f)
+                                    else MeshSatSurface,
+                                    RoundedCornerShape(4.dp),
+                                )
+                                .clickable { scope.launch { settings.setMsvqscStages(value) } }
+                                .padding(horizontal = 8.dp, vertical = 4.dp),
+                        )
+                    }
+                }
+            }
         }
 
         // --- Dead Man's Switch ---

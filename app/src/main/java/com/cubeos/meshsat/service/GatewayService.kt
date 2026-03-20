@@ -1205,15 +1205,16 @@ class GatewayService : Service() {
             null
         }
 
-        val msvqscOn = settings.msvqscEnabled.first()
+        val compressMode = settings.compressSms.first()
         val stages = settings.msvqscStages.first().toIntOrNull() ?: 3
+        val encoder = if (compressMode == "msvqsc") msvqscEncoder else null
 
         SmsSender.send(
             context = this,
             to = phone,
             text = text,
             encryptionKey = encKey,
-            msvqscEncoder = if (msvqscOn) msvqscEncoder else null,
+            msvqscEncoder = encoder,
             msvqscStages = stages,
         )
 
@@ -1328,7 +1329,7 @@ class GatewayService : Service() {
 
         val keyToUse = convKey?.ifEmpty { null } ?: if (encEnabled) globalKey.ifEmpty { null } else null
 
-        val msvqscOn = settings.msvqscEnabled.first()
+        val compressMode = settings.compressSms.first()
         val stages = settings.msvqscStages.first().toIntOrNull() ?: 3
 
         SmsSender.send(
@@ -1336,7 +1337,7 @@ class GatewayService : Service() {
             to = recipient,
             text = text,
             encryptionKey = keyToUse,
-            msvqscEncoder = if (msvqscOn) msvqscEncoder else null,
+            msvqscEncoder = if (compressMode == "msvqsc") msvqscEncoder else null,
             msvqscStages = stages,
         )
 
