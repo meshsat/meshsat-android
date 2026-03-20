@@ -310,7 +310,7 @@ private fun LeafletMap(nodes: List<NodePosition>, phoneLocation: android.locatio
             }
         },
         update = { webView ->
-            webView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null)
+            webView.loadDataWithBaseURL("https://meshsat.app/", html, "text/html", "UTF-8", null)
         },
     )
 }
