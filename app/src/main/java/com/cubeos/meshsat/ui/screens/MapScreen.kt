@@ -292,7 +292,7 @@ private fun LeafletMap(nodes: List<NodePosition>, phoneLocation: android.locatio
             }
         },
         update = { webView ->
-            webView.loadDataWithBaseURL("https://meshsat.app/", html, "text/html", "UTF-8", null)
+            webView.loadDataWithBaseURL("file:///android_asset/", html, "text/html", "UTF-8", null)
         },
     )
 }
@@ -349,8 +349,8 @@ private fun buildLeafletHtml(nodes: List<NodePosition>, phoneLocation: android.l
     <html>
     <head>
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-        <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+        <link rel="stylesheet" href="file:///android_asset/leaflet.css" />
+        <script src="file:///android_asset/leaflet.js"></script>
         <style>
             body { margin: 0; padding: 0; background: ${if (darkMode) "#111827" else "#F9FAFB"}; }
             #map { width: 100%; height: 100vh; }

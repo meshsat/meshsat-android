@@ -21,12 +21,10 @@ class MainActivity : ComponentActivity() {
                 Manifest.permission.ACCESS_FINE_LOCATION,
                 Manifest.permission.ACCESS_COARSE_LOCATION,
             )
-            // BLE scan/connect permissions only exist on Android 12+ (API 31)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 perms.add(Manifest.permission.BLUETOOTH_SCAN)
                 perms.add(Manifest.permission.BLUETOOTH_CONNECT)
             }
-            // POST_NOTIFICATIONS only exists on Android 13+ (API 33)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 perms.add(Manifest.permission.POST_NOTIFICATIONS)
             }
@@ -35,15 +33,27 @@ class MainActivity : ComponentActivity() {
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
-    ) { /* permissions granted or denied — app works either way */ }
+    ) { _ ->
+        // Permissions resolved (granted or denied) — now safe to start the service
+        startGatewayService()
+    }
+
+    private var serviceStarted = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        requestMissingPermissions()
 
-        // Start gateway service so BLE/SPP transports are always available
-        startForegroundService(Intent(this, com.cubeos.meshsat.service.GatewayService::class.java))
+        val missing = requiredPermissions.filter {
+            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+        }
+        if (missing.isNotEmpty()) {
+            // Request permissions first — service starts in the callback
+            permissionLauncher.launch(missing.toTypedArray())
+        } else {
+            // All permissions already granted — start immediately
+            startGatewayService()
+        }
 
         setContent {
             MeshSatTheme {
@@ -52,12 +62,13 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun requestMissingPermissions() {
-        val missing = requiredPermissions.filter {
-            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
-        }
-        if (missing.isNotEmpty()) {
-            permissionLauncher.launch(missing.toTypedArray())
+    private fun startGatewayService() {
+        if (serviceStarted) return
+        serviceStarted = true
+        try {
+            startForegroundService(Intent(this, com.cubeos.meshsat.service.GatewayService::class.java))
+        } catch (e: Exception) {
+            android.util.Log.e("MeshSat", "Failed to start gateway service: ${e.message}")
         }
     }
 }
