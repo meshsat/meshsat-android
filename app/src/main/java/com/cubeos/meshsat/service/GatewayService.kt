@@ -189,6 +189,7 @@ class GatewayService : Service() {
             startLocationUpdates()
             initMsvqsc()
             initMqtt()
+            initSmsRelay()
             initAprs()
         } catch (e: Exception) {
             Log.e("MeshSat", "Service init error (non-fatal): ${e.message}", e)
@@ -259,6 +260,7 @@ class GatewayService : Service() {
         iridiumSpp = null
         msvqscEncoder?.close()
         msvqscEncoder = null
+        com.cubeos.meshsat.sms.SmsReceiver.relayCallback = null
         scope.cancel()
         super.onDestroy()
     }
@@ -449,6 +451,22 @@ class GatewayService : Service() {
                             dispatcher?.dispatchAccess("mqtt_0", msg, text.toByteArray())
                         }
                     }
+                    topic.contains("/sms/outbound") -> {
+                        // Hub requests Android to send an SMS (MESHSAT-196)
+                        val json = org.json.JSONObject(payload)
+                        val to = json.optString("to", "")
+                        val text = json.optString("text", "")
+                        if (to.isNotBlank() && text.isNotBlank()) {
+                            SmsSender.send(this@GatewayService, to, text)
+                            db.messageDao().insert(
+                                Message(
+                                    transport = "sms", direction = "tx", sender = to,
+                                    text = text, timestamp = System.currentTimeMillis(),
+                                )
+                            )
+                            Log.i("MeshSat", "SMS sent via Hub relay: to=$to len=${text.length}")
+                        }
+                    }
                     topic.contains("/tak/cot/in") -> {
                         // TAK event from Hub — store as message
                         db.messageDao().insert(
@@ -463,6 +481,25 @@ class GatewayService : Service() {
                 Log.w("MeshSat", "MQTT inbound handling error: ${e.message}")
             }
         }
+    }
+
+    /**
+     * Wire inbound SMS relay to Hub via MQTT (MESHSAT-196).
+     * When an SMS is received, SmsReceiver calls this relay which publishes
+     * the message to meshsat/{deviceId}/sms/inbound on MQTT.
+     */
+    private fun initSmsRelay() {
+        com.cubeos.meshsat.sms.SmsReceiver.relayCallback =
+            com.cubeos.meshsat.sms.SmsRelayCallback { sender, text, rawText, wasEncrypted, wasCompressed ->
+                mqttTransport?.publishSmsInbound(
+                    sender = sender,
+                    text = text,
+                    rawText = rawText,
+                    wasEncrypted = wasEncrypted,
+                    wasCompressed = wasCompressed,
+                )
+            }
+        Log.i("MeshSat", "SMS → MQTT relay initialized")
     }
 
     /** Initialize the APRS KISS TCP client if enabled and configured. */

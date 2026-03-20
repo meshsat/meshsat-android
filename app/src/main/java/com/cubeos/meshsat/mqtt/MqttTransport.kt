@@ -203,6 +203,28 @@ class MqttTransport(
     }
 
     /**
+     * Publish a received SMS to the Hub for relay (MESHSAT-196).
+     * Topic: meshsat/{deviceId}/sms/inbound
+     */
+    fun publishSmsInbound(
+        sender: String,
+        text: String,
+        rawText: String = "",
+        wasEncrypted: Boolean = false,
+        wasCompressed: Boolean = false,
+    ) {
+        val json = JSONObject().apply {
+            put("sender", sender)
+            put("text", text)
+            if (rawText.isNotEmpty()) put("raw", rawText)
+            put("encrypted", wasEncrypted)
+            put("compressed", wasCompressed)
+            put("timestamp", System.currentTimeMillis() / 1000)
+        }
+        publish(topicSmsInbound(), QOS_AT_LEAST_ONCE, retained = false, json.toString())
+    }
+
+    /**
      * Publish a raw text message to an arbitrary topic.
      */
     fun publishRaw(topic: String, qos: Int, retained: Boolean, payload: String) {
@@ -220,6 +242,7 @@ class MqttTransport(
             topicMTSend(),
             topicTAKInbound(),
             topicConfigUpdate(),
+            topicSmsOutbound(),
         )
         val qos = IntArray(topics.size) { QOS_AT_LEAST_ONCE }
         try {
@@ -259,4 +282,6 @@ class MqttTransport(
     private fun topicMTSend() = "meshsat/$deviceId/mt/send"
     private fun topicTAKInbound() = "meshsat/$deviceId/tak/cot/in"
     private fun topicConfigUpdate() = "meshsat/$deviceId/config/update"
+    private fun topicSmsInbound() = "meshsat/$deviceId/sms/inbound"
+    private fun topicSmsOutbound() = "meshsat/$deviceId/sms/outbound"
 }

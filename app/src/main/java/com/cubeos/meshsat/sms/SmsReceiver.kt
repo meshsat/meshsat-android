@@ -87,6 +87,15 @@ class SmsReceiver : BroadcastReceiver() {
                         )
                     )
 
+                    // Relay to Hub via MQTT (MESHSAT-196)
+                    relayCallback?.onSmsReceived(
+                        sender = sender,
+                        text = result.displayText,
+                        rawText = text,
+                        wasEncrypted = result.wasEncrypted,
+                        wasCompressed = result.wasCompressed,
+                    )
+
                     postNotification(context, sender, result.displayText)
                 }
             } catch (e: Exception) {
@@ -215,6 +224,13 @@ class SmsReceiver : BroadcastReceiver() {
         @Volatile
         private var cachedCodebook: MsvqscCodebook? = null
         private val codebookLock = Any()
+
+        /**
+         * Optional relay callback for forwarding received SMS to Hub.
+         * Set by GatewayService to publish inbound SMS via MQTT.
+         */
+        @Volatile
+        var relayCallback: SmsRelayCallback? = null
 
         private fun getCodebook(context: Context): MsvqscCodebook? {
             cachedCodebook?.let { return it }
