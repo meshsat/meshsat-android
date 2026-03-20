@@ -21,6 +21,7 @@ object MeshtasticProtocol {
     const val PORTNUM_POSITION = 3
     const val PORTNUM_NODEINFO = 4
     const val PORTNUM_TELEMETRY = 67
+    const val PORTNUM_PRIVATE_APP = 256
 
     /** A decoded mesh text message. */
     data class MeshTextMessage(

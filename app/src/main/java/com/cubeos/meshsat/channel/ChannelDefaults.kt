@@ -111,6 +111,26 @@ fun registerAndroidDefaults(registry: ChannelRegistry) {
 
     registry.register(
         ChannelDescriptor(
+            id = "reticulum",
+            label = "Reticulum (LoRa)",
+            isPaid = false,
+            canSend = true,
+            canReceive = true,
+            binaryCapable = true,
+            maxPayload = 383,  // RnsConstants.ENCRYPTED_MDU — encrypted Reticulum MDU
+            retryConfig = RetryConfig(
+                enabled = false,
+                maxRetries = 1,
+            ),
+            options = listOf(
+                OptionField(key = "channel", label = "Mesh Channel", type = "number", default = "0"),
+                OptionField(key = "target_node", label = "Target Node", type = "text"),
+            ),
+        )
+    )
+
+    registry.register(
+        ChannelDescriptor(
             id = "aprs",
             label = "APRS (APRSDroid)",
             isPaid = false,
