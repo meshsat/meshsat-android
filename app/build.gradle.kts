@@ -77,6 +77,9 @@ dependencies {
     // DataStore (settings)
     implementation("androidx.datastore:datastore-preferences:1.1.2")
 
+    // Security — EncryptedSharedPreferences backed by Android Keystore (MESHSAT-194)
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
+
     // BLE
     implementation("no.nordicsemi.android:ble:2.8.0")
 

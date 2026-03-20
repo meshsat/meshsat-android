@@ -71,6 +71,7 @@ import com.cubeos.meshsat.bt.IridiumSpp
 import com.cubeos.meshsat.crypto.AesGcmCrypto
 import com.cubeos.meshsat.data.AppDatabase
 import com.cubeos.meshsat.data.ConversationKey
+import com.cubeos.meshsat.data.ConversationKeyRepository
 import com.cubeos.meshsat.data.ConversationSummary
 import com.cubeos.meshsat.data.Message
 import com.cubeos.meshsat.data.SettingsRepository
@@ -94,6 +95,7 @@ import java.util.Locale
 fun MessagesScreen() {
     val context = LocalContext.current
     val db = AppDatabase.getInstance(context)
+    val convKeyRepo = remember { ConversationKeyRepository(db.conversationKeyDao(), com.cubeos.meshsat.crypto.SecureKeyStore.getInstance(context)) }
 
     var viewMode by remember { mutableStateOf("conversations") } // default to conversations
     var selectedSender by remember { mutableStateOf<String?>(null) }
@@ -435,12 +437,13 @@ private fun ConversationChatView(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val settings = remember { SettingsRepository(context) }
+    val convKeyRepo = remember { ConversationKeyRepository(db.conversationKeyDao(), com.cubeos.meshsat.crypto.SecureKeyStore.getInstance(context)) }
 
     val messages by db.messageDao().getConversation(peer).collectAsState(initial = emptyList())
     val globalKey by settings.encryptionKey.collectAsState(initial = "")
 
-    // Per-conversation encryption key
-    val allConvKeys by db.conversationKeyDao().getAll().collectAsState(initial = emptyList())
+    // Per-conversation encryption key (decrypted transparently via SecureKeyStore)
+    val allConvKeys by convKeyRepo.getAll().collectAsState(initial = emptyList())
     val convKey = allConvKeys.find { it.sender == peer }
     val activeKey = convKey?.hexKey?.ifEmpty { null } ?: globalKey.ifEmpty { null }
 
@@ -502,11 +505,11 @@ private fun ConversationChatView(
                 onShowKeyToggle = { showKey = !showKey },
                 onSave = { key ->
                     scope.launch {
-                        db.conversationKeyDao().upsert(ConversationKey(sender = peer, hexKey = key))
+                        convKeyRepo.upsert(sender = peer, hexKey = key)
                     }
                 },
                 onRemove = {
-                    scope.launch { db.conversationKeyDao().deleteBySender(peer) }
+                    scope.launch { convKeyRepo.deleteBySender(peer) }
                     keyInput = ""
                 },
             )
@@ -898,8 +901,9 @@ private fun MessageCard(msg: Message) {
     val context = LocalContext.current
     val db = AppDatabase.getInstance(context)
     val settings = remember { SettingsRepository(context) }
+    val convKeyRepo = remember { ConversationKeyRepository(db.conversationKeyDao(), com.cubeos.meshsat.crypto.SecureKeyStore.getInstance(context)) }
 
-    val allConvKeys by db.conversationKeyDao().getAll().collectAsState(initial = emptyList())
+    val allConvKeys by convKeyRepo.getAll().collectAsState(initial = emptyList())
     val globalKey by settings.encryptionKey.collectAsState(initial = "")
     val convKey = allConvKeys.find { it.sender == msg.sender }
     val activeKey = convKey?.hexKey?.ifEmpty { null } ?: globalKey.ifEmpty { null }

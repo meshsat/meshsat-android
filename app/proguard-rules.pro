@@ -18,6 +18,10 @@
 -keep class ai.onnxruntime.** { *; }
 -keep class com.microsoft.onnxruntime.** { *; }
 
+# AndroidX Security — EncryptedSharedPreferences (MESHSAT-194)
+-keep class androidx.security.crypto.** { *; }
+-keep class com.cubeos.meshsat.crypto.SecureKeyStore { *; }
+
 # MSVQ-SC crypto classes (accessed via reflection in ONNX pipeline)
 -keep class com.cubeos.meshsat.crypto.MsvqscEncoder { *; }
 -keep class com.cubeos.meshsat.crypto.MsvqscCodebook { *; }

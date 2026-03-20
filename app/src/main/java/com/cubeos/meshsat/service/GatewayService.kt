@@ -177,12 +177,17 @@ class GatewayService : Service() {
         settings = SettingsRepository(this)
         db = AppDatabase.getInstance(this)
 
+        // Initialize SecureKeyStore early (triggers key migration from old storage — MESHSAT-194)
+        com.cubeos.meshsat.crypto.SecureKeyStore.getInstance(this)
+
         meshtasticBle = MeshtasticBle(this)
         iridiumSpp = IridiumSpp(this)
 
         startForegroundNotification()
 
         try {
+            // Complete encryption key migration (remove from DataStore after secure store confirmed)
+            scope.launch { settings.completeMigration() }
             loadRulesFromDb()
             deduplicator.startPruner(scope)
             initInterfaceManager()
@@ -326,14 +331,8 @@ class GatewayService : Service() {
     private fun initSigningAndApi() {
         scope.launch {
             try {
-                // KeyValueStore backed by SharedPreferences
-                val prefs = getSharedPreferences("meshsat_signing", MODE_PRIVATE)
-                val kvStore = object : KeyValueStore {
-                    override fun get(key: String): String? = prefs.getString(key, null)
-                    override fun set(key: String, value: String) {
-                        prefs.edit().putString(key, value).apply()
-                    }
-                }
+                // KeyValueStore backed by hardware-secured Android Keystore (MESHSAT-194)
+                val kvStore: KeyValueStore = com.cubeos.meshsat.crypto.SecureKeyStore.getInstance(this@GatewayService)
 
                 // Signing service
                 val signing = com.cubeos.meshsat.engine.SigningService(db.auditLogDao(), kvStore)
@@ -1414,7 +1413,8 @@ class GatewayService : Service() {
     /** Send SMS message to a specific recipient (called from conversation compose). */
     private suspend fun sendSmsMessage(text: String, recipient: String) {
         // Check if we should encrypt for this recipient
-        val convKey = db.conversationKeyDao().getBySender(recipient)?.hexKey
+        val convKeyRepo = com.cubeos.meshsat.data.ConversationKeyRepository(db.conversationKeyDao(), com.cubeos.meshsat.crypto.SecureKeyStore.getInstance(this))
+        val convKey = convKeyRepo.getBySender(recipient)?.hexKey
         val globalKey = settings.encryptionKey.first()
         val encEnabled = settings.encryptionEnabled.first()
 

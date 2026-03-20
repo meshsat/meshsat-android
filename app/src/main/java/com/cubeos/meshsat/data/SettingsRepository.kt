@@ -1,18 +1,23 @@
 package com.cubeos.meshsat.data
 
 import android.content.Context
+import android.util.Log
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.cubeos.meshsat.crypto.SecureKeyStore
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "meshsat_settings")
 
 class SettingsRepository(private val context: Context) {
+
+    private val secureStore: SecureKeyStore by lazy { SecureKeyStore.getInstance(context) }
 
     companion object {
         val KEY_ENCRYPTION_KEY = stringPreferencesKey("encryption_key")
@@ -49,7 +54,19 @@ class SettingsRepository(private val context: Context) {
     }
 
     val encryptionKey: Flow<String> = context.dataStore.data.map {
-        it[KEY_ENCRYPTION_KEY] ?: ""
+        // Read from SecureKeyStore (hardware-backed); fall back to DataStore for migration
+        val secureKey = secureStore.get("encryption_key")
+        if (secureKey != null) {
+            secureKey
+        } else {
+            val dsKey = it[KEY_ENCRYPTION_KEY] ?: ""
+            if (dsKey.isNotEmpty()) {
+                // Migrate from DataStore to SecureKeyStore
+                secureStore.set("encryption_key", dsKey)
+                Log.i("SettingsRepository", "Migrated encryption key to secure store")
+            }
+            dsKey
+        }
     }
 
     val encryptionEnabled: Flow<Boolean> = context.dataStore.data.map {
@@ -65,7 +82,35 @@ class SettingsRepository(private val context: Context) {
     }
 
     suspend fun setEncryptionKey(key: String) {
-        context.dataStore.edit { it[KEY_ENCRYPTION_KEY] = key }
+        // Store only in SecureKeyStore (hardware-backed). No plaintext copy in DataStore.
+        secureStore.set("encryption_key", key)
+    }
+
+    /**
+     * Complete migration: remove all secret values from plaintext DataStore after
+     * confirming they are stored in SecureKeyStore. Called once during service startup.
+     */
+    suspend fun completeMigration() {
+        val prefs = context.dataStore.data.first()
+        context.dataStore.edit { mutable ->
+            // Remove encryption key from DataStore if migrated to secure store
+            if (prefs[KEY_ENCRYPTION_KEY] != null && secureStore.contains("encryption_key")) {
+                mutable.remove(KEY_ENCRYPTION_KEY)
+                Log.i("SettingsRepository", "Removed encryption_key from DataStore")
+            }
+            // Remove MQTT password from DataStore if migrated
+            if (prefs[KEY_MQTT_PASSWORD] != null && secureStore.contains("mqtt_password")) {
+                mutable.remove(KEY_MQTT_PASSWORD)
+                Log.i("SettingsRepository", "Removed mqtt_password from DataStore")
+            }
+            // Remove cert pins from DataStore if migrated
+            if (prefs[KEY_MQTT_CERT_PIN] != null && secureStore.contains("mqtt_cert_pin")) {
+                mutable.remove(KEY_MQTT_CERT_PIN)
+            }
+            if (prefs[KEY_MQTT_CERT_PIN_BACKUP] != null && secureStore.contains("mqtt_cert_pin_backup")) {
+                mutable.remove(KEY_MQTT_CERT_PIN_BACKUP)
+            }
+        }
     }
 
     suspend fun setEncryptionEnabled(enabled: Boolean) {
@@ -166,7 +211,17 @@ class SettingsRepository(private val context: Context) {
     }
 
     val mqttPassword: Flow<String> = context.dataStore.data.map {
-        it[KEY_MQTT_PASSWORD] ?: ""
+        // Read from SecureKeyStore; fall back to DataStore for migration
+        val secure = secureStore.get("mqtt_password")
+        if (secure != null) {
+            secure
+        } else {
+            val dsVal = it[KEY_MQTT_PASSWORD] ?: ""
+            if (dsVal.isNotEmpty()) {
+                secureStore.set("mqtt_password", dsVal)
+            }
+            dsVal
+        }
     }
 
     suspend fun setMqttEnabled(enabled: Boolean) {
@@ -186,23 +241,37 @@ class SettingsRepository(private val context: Context) {
     }
 
     suspend fun setMqttPassword(password: String) {
-        context.dataStore.edit { it[KEY_MQTT_PASSWORD] = password }
+        secureStore.set("mqtt_password", password)
     }
 
     val mqttCertPin: Flow<String> = context.dataStore.data.map {
-        it[KEY_MQTT_CERT_PIN] ?: ""
+        val secure = secureStore.get("mqtt_cert_pin")
+        if (secure != null) {
+            secure
+        } else {
+            val dsVal = it[KEY_MQTT_CERT_PIN] ?: ""
+            if (dsVal.isNotEmpty()) secureStore.set("mqtt_cert_pin", dsVal)
+            dsVal
+        }
     }
 
     val mqttCertPinBackup: Flow<String> = context.dataStore.data.map {
-        it[KEY_MQTT_CERT_PIN_BACKUP] ?: ""
+        val secure = secureStore.get("mqtt_cert_pin_backup")
+        if (secure != null) {
+            secure
+        } else {
+            val dsVal = it[KEY_MQTT_CERT_PIN_BACKUP] ?: ""
+            if (dsVal.isNotEmpty()) secureStore.set("mqtt_cert_pin_backup", dsVal)
+            dsVal
+        }
     }
 
     suspend fun setMqttCertPin(pin: String) {
-        context.dataStore.edit { it[KEY_MQTT_CERT_PIN] = pin }
+        secureStore.set("mqtt_cert_pin", pin)
     }
 
     suspend fun setMqttCertPinBackup(pin: String) {
-        context.dataStore.edit { it[KEY_MQTT_CERT_PIN_BACKUP] = pin }
+        secureStore.set("mqtt_cert_pin_backup", pin)
     }
 
     // --- APRS settings ---
