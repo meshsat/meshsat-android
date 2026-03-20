@@ -148,6 +148,10 @@ class GatewayService : Service() {
         var aprsBeacon: com.cubeos.meshsat.aprs.AprsBeacon? = null
             private set
 
+        // APRS directed message tracker (MESHSAT-232)
+        var aprsMessageTracker: com.cubeos.meshsat.aprs.AprsMessageTracker? = null
+            private set
+
         private var notificationId = 100
     }
 
@@ -249,6 +253,8 @@ class GatewayService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        aprsMessageTracker?.cancelAll()
+        aprsMessageTracker = null
         aprsBeacon?.stop()
         aprsBeacon = null
         aprsIsClient?.disconnect()
@@ -574,12 +580,57 @@ class GatewayService : Service() {
                     initAprsKiss(fullCallsign)
                 }
 
+                // Initialize APRS directed message tracker (MESHSAT-232)
+                initAprsMessageTracker(fullCallsign, mode)
+
                 // Initialize APRS position beaconing (MESHSAT-231)
                 initAprsBeacon(fullCallsign, mode)
             } catch (e: Exception) {
                 Log.w("MeshSat", "APRS init failed: ${e.message}")
             }
         }
+    }
+
+    /** Initialize APRS directed message tracker with ACK/REJ (MESHSAT-232). */
+    private fun initAprsMessageTracker(fullCallsign: String, mode: String) {
+        val tracker = com.cubeos.meshsat.aprs.AprsMessageTracker(scope)
+        tracker.onSend = { to, text, msgId ->
+            scope.launch {
+                try {
+                    if (mode == "is") {
+                        aprsIsClient?.sendMessage(fullCallsign, to, text, msgId)
+                    } else {
+                        val client = kissClient ?: return@launch
+                        if (!client.isConnected) return@launch
+                        val ssid = fullCallsign.substringAfter("-", "10").toIntOrNull() ?: 10
+                        val callBase = fullCallsign.substringBefore("-")
+                        val src = Ax25Address(callBase, ssid)
+                        val dst = Ax25Address("APMSHT", 0)
+                        val path = listOf(Ax25Address("WIDE1", 1), Ax25Address("WIDE2", 1))
+                        val info = AprsCodec.encodeMessage(to, text, msgId)
+                        val ax25 = Ax25Codec.encode(dst, src, path, info)
+                        client.sendFrame(ax25)
+                    }
+                    Log.d("MeshSat", "APRS TX directed msg $msgId to $to: $text")
+                } catch (e: Exception) {
+                    Log.w("MeshSat", "APRS TX failed for msg $msgId: ${e.message}")
+                }
+            }
+        }
+        tracker.onStatusChange = { msgId, status ->
+            Log.i("MeshSat", "APRS msg $msgId delivery: $status")
+            scope.launch {
+                db.messageDao().insert(
+                    Message(
+                        transport = "aprs", direction = "rx",
+                        sender = "system", text = "[APRS] Message $msgId: $status",
+                        timestamp = System.currentTimeMillis(),
+                    )
+                )
+            }
+        }
+        aprsMessageTracker = tracker
+        Log.i("MeshSat", "APRS message tracker initialized (MESHSAT-232)")
     }
 
     /** Initialize APRS position beaconing if enabled (MESHSAT-231). */
@@ -703,6 +754,13 @@ class GatewayService : Service() {
 
     /** Handle an inbound APRS packet (from either KISS or APRS-IS). */
     private fun handleAprsPacket(pkt: AprsPacket) {
+        // MESHSAT-232: Check for ACK/REJ for our outbound messages first
+        val tracker = aprsMessageTracker
+        if (tracker != null && tracker.processInbound(pkt)) {
+            Log.d("MeshSat", "APRS ACK/REJ handled for msg from ${pkt.source}")
+            return // ACK/REJ packets are control-only, don't store as messages
+        }
+
         val text = when (pkt.dataType) {
             '!', '=', '/', '@' ->
                 "[APRS:${pkt.source}] ${String.format("%.4f,%.4f", pkt.lat, pkt.lon)} ${pkt.comment}"
@@ -720,6 +778,16 @@ class GatewayService : Service() {
                     timestamp = System.currentTimeMillis(),
                 )
             )
+
+            // MESHSAT-232: Send ACK for directed messages addressed to us with a msgId
+            if (pkt.dataType == ':' && pkt.msgId.isNotEmpty()) {
+                val callsign = settings.aprsCallsign.first()
+                val ssid = settings.aprsSsid.first()
+                val fullCallsign = if (ssid.isNotBlank() && ssid != "0") "$callsign-$ssid" else callsign
+                if (pkt.msgTo.equals(fullCallsign, ignoreCase = true)) {
+                    sendAprsAck(fullCallsign, pkt.source, pkt.msgId)
+                }
+            }
 
             // Store position from APRS station on the map
             if (pkt.lat != 0.0 && pkt.lon != 0.0) {
@@ -741,6 +809,30 @@ class GatewayService : Service() {
             )
             dispatcher?.dispatchAccess("aprs_0", msg, text.toByteArray())
             interfaceManager?.recordActivity("aprs_0")
+        }
+    }
+
+    /** Send an APRS ACK for a directed message we received (MESHSAT-232). */
+    private suspend fun sendAprsAck(ourCallsign: String, to: String, msgId: String) {
+        try {
+            val isClient = aprsIsClient
+            val kiss = kissClient
+            if (isClient?.isConnected == true) {
+                isClient.sendAck(ourCallsign, to, msgId)
+            } else if (kiss?.isConnected == true) {
+                val ssid = ourCallsign.substringAfter("-", "10").toIntOrNull() ?: 10
+                val callBase = ourCallsign.substringBefore("-")
+                val src = Ax25Address(callBase, ssid)
+                val dst = Ax25Address("APMSHT", 0)
+                val path = listOf(Ax25Address("WIDE1", 1), Ax25Address("WIDE2", 1))
+                val padded = to.padEnd(9)
+                val info = ":$padded:ack$msgId".toByteArray()
+                val ax25 = Ax25Codec.encode(dst, src, path, info)
+                kiss.sendFrame(ax25)
+            }
+            Log.d("MeshSat", "APRS ACK sent for msg $msgId to $to")
+        } catch (e: Exception) {
+            Log.w("MeshSat", "Failed to send APRS ACK for msg $msgId: ${e.message}")
         }
     }
 
@@ -1052,25 +1144,74 @@ class GatewayService : Service() {
                     null // success
                 }
                 interfaceId.startsWith("aprs") -> {
-                    val client = kissClient
-                        ?: return "aprs not available"
-                    if (!client.isConnected) return "aprs not connected"
-                    // Build AX.25 frame with APRS message payload
+                    val isClient = aprsIsClient
+                    val kiss = kissClient
+                    if (isClient?.isConnected != true && kiss?.isConnected != true)
+                        return "aprs not connected"
+
                     val callsign = settings.aprsCallsign.first()
-                    val ssid = settings.aprsSsid.first().toIntOrNull() ?: 10
-                    val src = Ax25Address(callsign, ssid)
-                    val dst = Ax25Address("APMSHT", 0) // MeshSat tocall
-                    val path = listOf(Ax25Address("WIDE1", 1), Ax25Address("WIDE2", 1))
-                    val info = AprsCodec.encodeMessage("BLN1", textPreview.take(67))
-                    val ax25 = Ax25Codec.encode(dst, src, path, info)
-                    client.sendFrame(ax25)
-                    db.messageDao().insert(
-                        Message(
-                            transport = "aprs", direction = "tx", sender = "self",
-                            text = textPreview, forwarded = true,
-                            forwardedTo = "aprs:rf", timestamp = System.currentTimeMillis(),
+                    val ssidStr = settings.aprsSsid.first()
+                    val fullCallsign = if (ssidStr.isNotBlank() && ssidStr != "0") "$callsign-$ssidStr" else callsign
+
+                    // MESHSAT-232: Directed message if text starts with @CALLSIGN
+                    val directedMatch = Regex("^@([A-Za-z0-9-]{1,9})\\s+(.+)$").find(textPreview)
+                    if (directedMatch != null) {
+                        val toCallsign = directedMatch.groupValues[1].uppercase()
+                        val msgText = directedMatch.groupValues[2].take(67)
+                        val tracker = aprsMessageTracker
+                        if (tracker != null) {
+                            val msgId = tracker.send(toCallsign, msgText)
+                            db.messageDao().insert(
+                                Message(
+                                    transport = "aprs", direction = "tx", sender = "self",
+                                    text = "[APRS:$fullCallsign\u2192$toCallsign] $msgText {$msgId}",
+                                    forwarded = true, forwardedTo = "aprs:$toCallsign",
+                                    timestamp = System.currentTimeMillis(),
+                                )
+                            )
+                        } else {
+                            // Tracker not initialized — send without ACK tracking
+                            if (isClient?.isConnected == true) {
+                                isClient.sendMessage(fullCallsign, toCallsign, msgText)
+                            } else if (kiss?.isConnected == true) {
+                                val ssid = ssidStr.toIntOrNull() ?: 10
+                                val src = Ax25Address(callsign, ssid)
+                                val dst = Ax25Address("APMSHT", 0)
+                                val path = listOf(Ax25Address("WIDE1", 1), Ax25Address("WIDE2", 1))
+                                val info = AprsCodec.encodeMessage(toCallsign, msgText)
+                                val ax25 = Ax25Codec.encode(dst, src, path, info)
+                                kiss.sendFrame(ax25)
+                            }
+                            db.messageDao().insert(
+                                Message(
+                                    transport = "aprs", direction = "tx", sender = "self",
+                                    text = "[APRS:$fullCallsign\u2192$toCallsign] $msgText",
+                                    forwarded = true, forwardedTo = "aprs:$toCallsign",
+                                    timestamp = System.currentTimeMillis(),
+                                )
+                            )
+                        }
+                    } else {
+                        // Bulletin (BLN1) — no ACK expected
+                        if (isClient?.isConnected == true) {
+                            isClient.sendMessage(fullCallsign, "BLN1", textPreview.take(67))
+                        } else if (kiss?.isConnected == true) {
+                            val ssid = ssidStr.toIntOrNull() ?: 10
+                            val src = Ax25Address(callsign, ssid)
+                            val dst = Ax25Address("APMSHT", 0)
+                            val path = listOf(Ax25Address("WIDE1", 1), Ax25Address("WIDE2", 1))
+                            val info = AprsCodec.encodeMessage("BLN1", textPreview.take(67))
+                            val ax25 = Ax25Codec.encode(dst, src, path, info)
+                            kiss.sendFrame(ax25)
+                        }
+                        db.messageDao().insert(
+                            Message(
+                                transport = "aprs", direction = "tx", sender = "self",
+                                text = textPreview, forwarded = true,
+                                forwardedTo = "aprs:rf", timestamp = System.currentTimeMillis(),
+                            )
                         )
-                    )
+                    }
                     null // success
                 }
                 else -> "unknown interface: $interfaceId"
