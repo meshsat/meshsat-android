@@ -137,6 +137,10 @@ class GatewayService : Service() {
         var signingServiceRef: com.cubeos.meshsat.engine.SigningService? = null
             private set
 
+        // TAK/CoT integration (MESHSAT-191)
+        var takIntegration: com.cubeos.meshsat.tak.TakIntegration? = null
+            private set
+
         private var notificationId = 100
     }
 
@@ -233,6 +237,7 @@ class GatewayService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        takIntegration = null
         localApiServer?.stop()
         localApiServer = null
         signingService = null
@@ -280,6 +285,9 @@ class GatewayService : Service() {
             )
             dms.sosCallback = { lat, lon, lastSeen ->
                 android.util.Log.w("MeshSat", "Dead man's switch triggered at $lat,$lon (last seen: $lastSeen)")
+                // Emit dead man CoT event to ATAK + Hub (MESHSAT-191)
+                val elapsed = (System.currentTimeMillis() / 1000) - lastSeen
+                takIntegration?.sendDeadman(lat, lon, elapsed.toInt())
                 activateSos()
             }
             deadManSwitch = dms
@@ -407,6 +415,14 @@ class GatewayService : Service() {
                 transport.connect(brokerUrl, deviceId, username, password, certPin, certPinBackup)
                 mqttTransport = transport
 
+                // Initialize TAK/CoT integration (MESHSAT-191)
+                takIntegration = com.cubeos.meshsat.tak.TakIntegration(
+                    context = this@GatewayService,
+                    mqtt = transport,
+                    deviceId = deviceId,
+                )
+                Log.i("MeshSat", "TAK/CoT integration initialized: callsign=${takIntegration?.callsign}")
+
                 // Observe state for InterfaceManager
                 scope.launch {
                     transport.state.collect { state ->
@@ -469,13 +485,34 @@ class GatewayService : Service() {
                         }
                     }
                     topic.contains("/tak/cot/in") -> {
-                        // TAK event from Hub — store as message
+                        // TAK event from Hub — parse CoT XML and store as message (MESHSAT-191)
+                        val tak = takIntegration
+                        val cotEvent = tak?.parseInbound(payload)
+                        val displayText = if (cotEvent != null && tak != null) {
+                            tak.formatForDisplay(cotEvent)
+                        } else {
+                            payload.take(500)
+                        }
+                        val sender = cotEvent?.detail?.contact?.callsign ?: "tak-server"
                         db.messageDao().insert(
                             Message(
-                                transport = "tak", direction = "rx", sender = "tak-server",
-                                text = payload.take(500), timestamp = System.currentTimeMillis(),
+                                transport = "tak", direction = "rx", sender = sender,
+                                text = displayText, timestamp = System.currentTimeMillis(),
                             )
                         )
+                        // Store position from inbound CoT if it has valid coords
+                        if (cotEvent != null && cotEvent.point.lat != 0.0 && cotEvent.point.lon != 0.0) {
+                            val nodeHash = sender.hashCode().toLong() and 0xFFFFFFFFL
+                            db.nodePositionDao().insert(
+                                NodePosition(
+                                    nodeId = nodeHash,
+                                    nodeName = sender,
+                                    latitude = cotEvent.point.lat,
+                                    longitude = cotEvent.point.lon,
+                                    altitude = cotEvent.point.hae.toInt(),
+                                )
+                            )
+                        }
                     }
                 }
             } catch (e: Exception) {
@@ -928,6 +965,14 @@ class GatewayService : Service() {
                     altitude = location.altitude.toInt(),
                 )
             )
+            // Emit CoT PLI to ATAK + Hub (MESHSAT-191)
+            takIntegration?.sendPosition(
+                lat = location.latitude,
+                lon = location.longitude,
+                alt = location.altitude,
+                course = location.bearing.toDouble(),
+                speed = location.speed.toDouble(),
+            )
         }
     }
 
@@ -1353,6 +1398,9 @@ class GatewayService : Service() {
                     timestamp = System.currentTimeMillis(),
                 )
             )
+
+            // Emit chat CoT to ATAK + Hub (MESHSAT-191)
+            takIntegration?.sendChat(text)
         }
     }
 
@@ -1441,6 +1489,14 @@ class GatewayService : Service() {
             }
 
             val sosText = "SOS EMERGENCY - MeshSat - $locStr"
+
+            // Emit SOS CoT event to ATAK + Hub (MESHSAT-191)
+            takIntegration?.sendSOS(
+                lat = location?.latitude ?: 0.0,
+                lon = location?.longitude ?: 0.0,
+                alt = location?.altitude ?: 0.0,
+                reason = sosText,
+            )
 
             repeat(3) { i ->
                 if (!_sosActive.value) return@launch
