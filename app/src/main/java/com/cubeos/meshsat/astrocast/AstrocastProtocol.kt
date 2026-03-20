@@ -181,9 +181,9 @@ object AstrocastProtocol {
 
         val hex = StringBuilder()
         for (b in data) hex.append(byteToHex(b))
-        // CRC is byte-swapped: high byte first in transmission
-        hex.append(byteToHex((crc shr 8).toByte()))
+        // CRC on wire: little-endian (low byte first, high byte second) — matches Go bridge
         hex.append(byteToHex((crc and 0xFF).toByte()))
+        hex.append(byteToHex((crc shr 8).toByte()))
 
         val frame = ByteArray(1 + hex.length + 1)
         frame[0] = STX
@@ -209,8 +209,9 @@ object AstrocastProtocol {
 
         // Split: data bytes and CRC (last 2 bytes)
         val data = bytes.copyOfRange(0, bytes.size - 2)
-        val receivedCrc = ((bytes[bytes.size - 2].toInt() and 0xFF) shl 8) or
-                (bytes[bytes.size - 1].toInt() and 0xFF)
+        // CRC on wire: little-endian [lo, hi] — reconstruct as uint16
+        val receivedCrc = (bytes[bytes.size - 2].toInt() and 0xFF) or
+                ((bytes[bytes.size - 1].toInt() and 0xFF) shl 8)
 
         // Verify CRC
         val computedCrc = crc16(data)
@@ -377,21 +378,134 @@ object AstrocastProtocol {
         return Pair(createdDate, data)
     }
 
+    // --- Fragmentation (MESHSAT-234) ---
+
+    /** Max uplink frame size (Astronode S limit). */
+    const val ASTRO_MAX_UPLINK = 160
+    /** Max payload per fragment (uplink minus 1-byte header). */
+    const val ASTRO_FRAG_PAYLOAD = ASTRO_MAX_UPLINK - 1
+    /** Max fragments per message. */
+    const val ASTRO_MAX_FRAGMENTS = 4
+
+    /**
+     * Encode 1-byte fragment header.
+     * Format: [MSG_ID:4bit][FRAG_NUM:2bit][FRAG_TOTAL-1:2bit]
+     * Matches Go bridge EncodeFragmentHeader exactly.
+     */
+    fun encodeFragmentHeader(msgID: Int, fragNum: Int, fragTotal: Int): Byte {
+        return (((msgID and 0x0F) shl 4) or
+                ((fragNum and 0x03) shl 2) or
+                ((fragTotal - 1) and 0x03)).toByte()
+    }
+
+    /** Decoded fragment header fields. */
+    data class FragmentHeader(val msgID: Int, val fragNum: Int, val fragTotal: Int)
+
+    /**
+     * Decode 1-byte fragment header.
+     * Matches Go bridge DecodeFragmentHeader exactly.
+     */
+    fun decodeFragmentHeader(b: Byte): FragmentHeader {
+        val v = b.toInt() and 0xFF
+        return FragmentHeader(
+            msgID = v ushr 4,
+            fragNum = (v ushr 2) and 0x03,
+            fragTotal = (v and 0x03) + 1,
+        )
+    }
+
+    /**
+     * Fragment a message for Astrocast uplink.
+     * Returns null if no fragmentation needed (message fits in single uplink).
+     * Each fragment: 1-byte header + up to 159 bytes payload.
+     * Max 4 fragments (636 bytes total).
+     * Matches Go bridge FragmentMessage exactly.
+     */
+    fun fragmentMessage(msgID: Int, data: ByteArray): List<ByteArray>? {
+        if (data.size <= ASTRO_MAX_UPLINK) return null
+
+        var numFrags = (data.size + ASTRO_FRAG_PAYLOAD - 1) / ASTRO_FRAG_PAYLOAD
+        val effectiveData = if (numFrags > ASTRO_MAX_FRAGMENTS) {
+            numFrags = ASTRO_MAX_FRAGMENTS
+            data.copyOfRange(0, ASTRO_MAX_FRAGMENTS * ASTRO_FRAG_PAYLOAD)
+        } else data
+
+        return (0 until numFrags).map { i ->
+            val start = i * ASTRO_FRAG_PAYLOAD
+            val end = minOf(start + ASTRO_FRAG_PAYLOAD, effectiveData.size)
+            val frag = ByteArray(1 + end - start)
+            frag[0] = encodeFragmentHeader(msgID and 0x0F, i, numFrags)
+            effectiveData.copyInto(frag, 1, start, end)
+            frag
+        }
+    }
+
+    /**
+     * Reassembly buffer for inbound fragmented messages.
+     * Collects fragments by msgID and reassembles when all are received.
+     * Matches Go bridge ReassemblyBuffer semantics.
+     */
+    class ReassemblyBuffer(private val maxAgeSec: Long = 300) {
+        private data class Entry(
+            val fragments: MutableMap<Int, ByteArray> = mutableMapOf(),
+            val total: Int,
+            val created: Long,
+        )
+
+        private val pending = mutableMapOf<Int, Entry>()
+
+        /**
+         * Add a fragment. Returns the reassembled message if all fragments received, else null.
+         */
+        fun addFragment(header: FragmentHeader, payload: ByteArray, nowSec: Long): ByteArray? {
+            val entry = pending.getOrPut(header.msgID) {
+                Entry(total = header.fragTotal, created = nowSec)
+            }
+            entry.fragments[header.fragNum] = payload
+
+            if (entry.fragments.size < entry.total) return null
+
+            // Reassemble in order
+            val result = ByteArray(entry.fragments.values.sumOf { it.size })
+            var offset = 0
+            for (i in 0 until entry.total) {
+                val frag = entry.fragments[i] ?: return null
+                frag.copyInto(result, offset)
+                offset += frag.size
+            }
+            pending.remove(header.msgID)
+            return result
+        }
+
+        /** Expire entries older than maxAge. */
+        fun expire(nowSec: Long) {
+            pending.entries.removeAll { nowSec - it.value.created > maxAgeSec }
+        }
+
+        /** Number of pending (incomplete) messages. */
+        val pendingCount: Int get() = pending.size
+    }
+
     // --- CRC-16 ---
 
     /**
-     * CRC-16 matching Astrocast C library:
-     * Init: 0xFFFF, byte-swapped output.
+     * CRC-16/CCITT-FALSE matching Astrocast C library and Go bridge.
+     * Polynomial: 0x1021, Init: 0xFFFF, no byte-swap — raw CRC value.
+     * Byte-swap for the wire happens in encodeFrame/decodeFrame (little-endian).
      */
     fun crc16(data: ByteArray): Int {
         var crc = 0xFFFF
         for (b in data) {
-            var x = (crc ushr 8) xor (b.toInt() and 0xFF)
-            x = x xor (x ushr 4)
-            crc = ((crc shl 8) xor (x shl 12) xor (x shl 5) xor x) and 0xFFFF
+            crc = crc xor ((b.toInt() and 0xFF) shl 8)
+            for (i in 0 until 8) {
+                crc = if (crc and 0x8000 != 0) {
+                    ((crc shl 1) xor 0x1021) and 0xFFFF
+                } else {
+                    (crc shl 1) and 0xFFFF
+                }
+            }
         }
-        // Byte-swap
-        return ((crc shl 8) and 0xFF00) or ((crc ushr 8) and 0x00FF)
+        return crc
     }
 
     // --- Helpers ---

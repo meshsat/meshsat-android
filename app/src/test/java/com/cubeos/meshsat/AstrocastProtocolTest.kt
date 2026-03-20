@@ -276,6 +276,121 @@ class AstrocastProtocolTest {
         assertEquals("BUFFER_EMPTY", ErrorCode.name(ErrorCode.BUFFER_EMPTY))
     }
 
+    // --- Fragmentation tests (MESHSAT-234) ---
+
+    @Test
+    fun `fragment header encode decode round-trip`() {
+        for (msgID in 0..15) {
+            for (fragNum in 0..3) {
+                for (fragTotal in 1..4) {
+                    val b = AstrocastProtocol.encodeFragmentHeader(msgID, fragNum, fragTotal)
+                    val h = AstrocastProtocol.decodeFragmentHeader(b)
+                    assertEquals("msgID", msgID, h.msgID)
+                    assertEquals("fragNum", fragNum, h.fragNum)
+                    assertEquals("fragTotal", fragTotal, h.fragTotal)
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `fragment header matches Go bridge encoding`() {
+        // Go: EncodeFragmentHeader(5, 2, 3) = (5 << 4) | (2 << 2) | (3-1) = 0x5A
+        val b = AstrocastProtocol.encodeFragmentHeader(5, 2, 3)
+        assertEquals(0x5A.toByte(), b)
+    }
+
+    @Test
+    fun `fragmentMessage returns null for small messages`() {
+        val data = ByteArray(160) // exactly 160 — fits in single uplink
+        assertNull(AstrocastProtocol.fragmentMessage(0, data))
+    }
+
+    @Test
+    fun `fragmentMessage splits 320 bytes into 3 fragments`() {
+        val data = ByteArray(320) { (it % 256).toByte() }
+        val frags = AstrocastProtocol.fragmentMessage(7, data)
+        assertNotNull(frags)
+        assertEquals(3, frags!!.size)
+
+        // Each fragment starts with a header byte
+        for ((i, frag) in frags.withIndex()) {
+            val h = AstrocastProtocol.decodeFragmentHeader(frag[0])
+            assertEquals(7, h.msgID)
+            assertEquals(i, h.fragNum)
+            assertEquals(3, h.fragTotal)
+        }
+
+        // First two fragments: 1 header + 159 payload = 160 bytes
+        assertEquals(160, frags[0].size)
+        assertEquals(160, frags[1].size)
+        // Last fragment: 1 header + (320 - 318) = 3 bytes
+        assertEquals(3, frags[2].size)
+    }
+
+    @Test
+    fun `fragmentMessage caps at 4 fragments`() {
+        val data = ByteArray(700) // would need 5 frags, but max is 4
+        val frags = AstrocastProtocol.fragmentMessage(0, data)
+        assertNotNull(frags)
+        assertEquals(4, frags!!.size)
+
+        // Total payload = 4 * 159 = 636 bytes (truncated from 700)
+        val totalPayload = frags.sumOf { it.size - 1 }
+        assertEquals(636, totalPayload)
+    }
+
+    @Test
+    fun `reassembly buffer collects and reassembles`() {
+        val buf = AstrocastProtocol.ReassemblyBuffer()
+        val now = 1000L
+
+        // Fragment 0 of 3
+        val h0 = AstrocastProtocol.FragmentHeader(msgID = 5, fragNum = 0, fragTotal = 3)
+        val r0 = buf.addFragment(h0, byteArrayOf(0x01, 0x02), now)
+        assertNull(r0)
+
+        // Fragment 2 of 3 (out of order)
+        val h2 = AstrocastProtocol.FragmentHeader(msgID = 5, fragNum = 2, fragTotal = 3)
+        val r2 = buf.addFragment(h2, byteArrayOf(0x05, 0x06), now)
+        assertNull(r2)
+
+        // Fragment 1 of 3 (completes the message)
+        val h1 = AstrocastProtocol.FragmentHeader(msgID = 5, fragNum = 1, fragTotal = 3)
+        val r1 = buf.addFragment(h1, byteArrayOf(0x03, 0x04), now)
+        assertNotNull(r1)
+        assertArrayEquals(byteArrayOf(0x01, 0x02, 0x03, 0x04, 0x05, 0x06), r1)
+        assertEquals(0, buf.pendingCount)
+    }
+
+    @Test
+    fun `reassembly buffer expires old entries`() {
+        val buf = AstrocastProtocol.ReassemblyBuffer(maxAgeSec = 60)
+        val h = AstrocastProtocol.FragmentHeader(msgID = 1, fragNum = 0, fragTotal = 2)
+        buf.addFragment(h, byteArrayOf(0x01), 100L)
+        assertEquals(1, buf.pendingCount)
+
+        buf.expire(200L) // 100 seconds later > 60 maxAge
+        assertEquals(0, buf.pendingCount)
+    }
+
+    @Test
+    fun `fragment and reassemble round-trip`() {
+        val original = ByteArray(400) { (it % 256).toByte() }
+        val frags = AstrocastProtocol.fragmentMessage(3, original)
+        assertNotNull(frags)
+
+        val buf = AstrocastProtocol.ReassemblyBuffer()
+        var result: ByteArray? = null
+        for (frag in frags!!) {
+            val h = AstrocastProtocol.decodeFragmentHeader(frag[0])
+            val payload = frag.copyOfRange(1, frag.size)
+            result = buf.addFragment(h, payload, 1000L)
+        }
+        assertNotNull(result)
+        assertArrayEquals(original, result)
+    }
+
     @Test
     fun `payload write rejects oversized payload`() {
         try {
@@ -284,6 +399,37 @@ class AstrocastProtocolTest {
         } catch (e: IllegalArgumentException) {
             assertTrue(e.message!!.contains("160"))
         }
+    }
+
+    @Test
+    fun `CRC-16 matches Go bridge CRC16CCITT for known vectors`() {
+        // Cross-implementation test vectors — these values were computed by the Go bridge's
+        // CRC16CCITT function (bit-by-bit CRC-16/CCITT-FALSE, poly 0x1021, init 0xFFFF).
+        // Android must produce identical raw CRC values.
+
+        // Single opcode byte: EVT_R (0x65)
+        // Go: CRC16CCITT([]byte{0x65}) = 0xDDF3
+        assertEquals(0xDDF3, AstrocastProtocol.crc16(byteArrayOf(0x65)))
+
+        // Single opcode byte: RTC_R (0x17)
+        // Go: CRC16CCITT([]byte{0x17}) = 0x8326
+        assertEquals(0x8326, AstrocastProtocol.crc16(byteArrayOf(0x17)))
+
+        // Opcode + payload: PLD_W (0x25) with counter [0x2A, 0x00] + "Hello"
+        // Go: CRC16CCITT([]byte{0x25, 0x2A, 0x00, 0x48, 0x65, 0x6C, 0x6C, 0x6F}) = 0x5486
+        val pldData = byteArrayOf(0x25, 0x2A, 0x00, 0x48, 0x65, 0x6C, 0x6C, 0x6F)
+        assertEquals(0x5486, AstrocastProtocol.crc16(pldData))
+    }
+
+    @Test
+    fun `wire CRC byte order matches Go bridge little-endian convention`() {
+        // Go bridge encodes CRC as [lo, hi] on the wire.
+        // For EVT_R (0x65), CRC = 0xDDF3 → wire LE: [0xF3, 0xDD] → hex "F3DD"
+        val frame = AstrocastProtocol.encodeFrame(OpCode.EVT_R) // 0x65
+        val hex = String(frame, 1, frame.size - 2, Charsets.US_ASCII)
+        // hex = "65" + CRC4 → last 4 chars are the CRC hex
+        val crcHex = hex.substring(hex.length - 4)
+        assertEquals("F3DD", crcHex)
     }
 
     @Test
