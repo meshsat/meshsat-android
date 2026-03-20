@@ -92,6 +92,9 @@ dependencies {
     // MQTT (Hub connectivity — Eclipse Paho)
     implementation("org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.2.5")
 
+    // QR code scanning (Hub key sync — MESHSAT-205)
+    implementation("com.journeyapps:zxing-android-embedded:4.3.0")
+
     // Test
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")

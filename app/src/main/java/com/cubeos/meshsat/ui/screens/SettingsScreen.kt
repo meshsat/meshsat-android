@@ -120,6 +120,25 @@ fun SettingsScreen(navController: NavController? = null) {
     val iridiumSignal = GatewayService.iridiumSpp?.signal?.collectAsState()
     val modemInfo = GatewayService.iridiumSpp?.modemInfo?.collectAsState()
 
+    // QR code scanner for Hub key sync (MESHSAT-205)
+    val qrScanLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val scanResult = com.journeyapps.barcodescanner.ScanIntentResult.parseActivityResult(
+            result.resultCode, result.data
+        )
+        val scannedKey = scanResult.contents
+        if (scannedKey != null && scannedKey.length == 64 &&
+            scannedKey.all { it in "0123456789abcdefABCDEF" }
+        ) {
+            keyInput = scannedKey
+            scope.launch { settings.setEncryptionKey(scannedKey) }
+            Toast.makeText(context, "Hub key imported via QR", Toast.LENGTH_SHORT).show()
+        } else if (scannedKey != null) {
+            Toast.makeText(context, "QR code doesn't contain a valid 64-char hex key", Toast.LENGTH_LONG).show()
+        }
+    }
+
     // BLE scan results
     val scanResults = remember { mutableStateListOf<BluetoothDevice>() }
     var scanning by remember { mutableStateOf(false) }
@@ -498,7 +517,7 @@ fun SettingsScreen(navController: NavController? = null) {
                 }
             }
 
-            // Share / Import from clipboard
+            // Share / Import / QR
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -553,8 +572,34 @@ fun SettingsScreen(navController: NavController? = null) {
                 }
             }
 
+            // QR code scan for Hub key sync (MESHSAT-205)
+            Button(
+                onClick = {
+                    try {
+                        val scanIntent = com.journeyapps.barcodescanner.ScanContract().createIntent(
+                            context,
+                            com.journeyapps.barcodescanner.ScanOptions().apply {
+                                setDesiredBarcodeFormats(com.journeyapps.barcodescanner.ScanOptions.QR_CODE)
+                                setPrompt("Scan Hub encryption key QR code")
+                                setBeepEnabled(false)
+                                setOrientationLocked(true)
+                            },
+                        )
+                        qrScanLauncher.launch(scanIntent)
+                    } catch (e: Exception) {
+                        Toast.makeText(context, "QR scanner not available: ${e.message}", Toast.LENGTH_LONG).show()
+                    }
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = MeshSatTeal),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Scan QR Code (Hub Key Sync)", style = MaterialTheme.typography.bodySmall)
+            }
+
             Text(
-                text = "Fallback key — used when no per-conversation key is set. Per-conversation keys are managed in Messages > tap a conversation > lock icon.",
+                text = "Fallback key — used when no per-conversation key is set. " +
+                        "To sync with Hub: go to Hub dashboard > Devices > select device > Generate Key, " +
+                        "then scan the QR code or paste the 64-char hex key.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MeshSatTextMuted,
             )

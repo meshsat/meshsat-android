@@ -54,6 +54,7 @@ import com.cubeos.meshsat.aprs.AprsConfig
 import com.cubeos.meshsat.aprs.Ax25Address
 import com.cubeos.meshsat.aprs.Ax25Codec
 import com.cubeos.meshsat.aprs.KissClient
+import com.cubeos.meshsat.codec.ProtocolVersion
 import com.cubeos.meshsat.mqtt.MqttTransport
 import com.cubeos.meshsat.sms.SmsSender
 import kotlin.time.Duration.Companion.seconds
@@ -1233,32 +1234,57 @@ class GatewayService : Service() {
         )
     }
 
-    private fun forwardToMesh(text: String) {
+    private suspend fun forwardToMesh(text: String) {
         val ble = meshtasticBle ?: return
         if (ble.state.value != MeshtasticBle.State.Connected) return
-        val proto = MeshtasticProtocol.encodeTextMessage(text)
+
+        val compressMode = settings.compressMesh.first()
+        val stages = settings.msvqscStages.first().toIntOrNull() ?: 3
+        val outText: String
+        if (compressMode == "msvqsc" && msvqscEncoder != null) {
+            val wire = msvqscEncoder!!.encode(text, stages)
+            if (wire != null) {
+                val versioned = ProtocolVersion.prependVersionByte(wire)
+                outText = android.util.Base64.encodeToString(versioned, android.util.Base64.NO_WRAP)
+                Log.d("MeshSat", "Mesh TX compressed: ${text.length} chars → ${outText.length} chars (MSVQ-SC $stages stages)")
+            } else {
+                outText = text
+            }
+        } else {
+            outText = text
+        }
+
+        val proto = MeshtasticProtocol.encodeTextMessage(outText)
         ble.sendToRadio(proto)
 
-        scope.launch {
-            db.messageDao().insert(
-                Message(
-                    transport = "mesh",
-                    direction = "tx",
-                    sender = "self",
-                    text = text,
-                    forwarded = true,
-                    forwardedTo = "mesh:broadcast",
-                    timestamp = System.currentTimeMillis(),
-                )
+        db.messageDao().insert(
+            Message(
+                transport = "mesh",
+                direction = "tx",
+                sender = "self",
+                text = text,
+                forwarded = true,
+                forwardedTo = "mesh:broadcast",
+                timestamp = System.currentTimeMillis(),
             )
-        }
+        )
     }
 
     private suspend fun forwardToIridium(text: String) {
         val spp = iridiumSpp ?: return
         if (spp.state.value != IridiumSpp.State.Connected) return
 
-        val data = text.toByteArray(Charsets.UTF_8)
+        val compressMode = settings.compressIridium.first()
+        val stages = settings.msvqscStages.first().toIntOrNull() ?: 3
+
+        var data = text.toByteArray(Charsets.UTF_8)
+        if (compressMode == "msvqsc" && msvqscEncoder != null) {
+            val wire = msvqscEncoder!!.encode(text, stages)
+            if (wire != null) {
+                data = ProtocolVersion.prependVersionByte(wire)
+                Log.d("MeshSat", "Iridium TX compressed: ${text.length} chars → ${data.size} bytes (MSVQ-SC $stages stages)")
+            }
+        }
 
         // Fragment messages >340B using Iridium 2-byte header.
         val fragments = IridiumFragment.fragment(data, IridiumFragment.MO_MTU, nextMsgID())
@@ -1297,10 +1323,27 @@ class GatewayService : Service() {
     fun sendMeshMessage(text: String, to: Long = 0xFFFFFFFFL, channel: Int = 0) {
         val ble = meshtasticBle ?: return
         if (ble.state.value != MeshtasticBle.State.Connected) return
-        val proto = MeshtasticProtocol.encodeTextMessage(text, to, channel)
-        ble.sendToRadio(proto)
 
         scope.launch {
+            val compressMode = settings.compressMesh.first()
+            val stages = settings.msvqscStages.first().toIntOrNull() ?: 3
+            val outText: String
+            if (compressMode == "msvqsc" && msvqscEncoder != null) {
+                val wire = msvqscEncoder!!.encode(text, stages)
+                if (wire != null) {
+                    val versioned = ProtocolVersion.prependVersionByte(wire)
+                    outText = android.util.Base64.encodeToString(versioned, android.util.Base64.NO_WRAP)
+                    Log.d("MeshSat", "Mesh TX compressed: ${text.length} chars → ${outText.length} chars (MSVQ-SC $stages stages)")
+                } else {
+                    outText = text
+                }
+            } else {
+                outText = text
+            }
+
+            val proto = MeshtasticProtocol.encodeTextMessage(outText, to, channel)
+            ble.sendToRadio(proto)
+
             db.messageDao().insert(
                 Message(
                     transport = "mesh",
