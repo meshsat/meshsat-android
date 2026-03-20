@@ -11,29 +11,24 @@ import java.security.SecureRandom
  * This is the DATA portion of an ANNOUNCE packet (inside RnsPacket.data).
  * The RnsPacket header already carries the destination hash and hop count.
  *
- * Announce data layout:
- *   [0:32]    public_key (X25519 encryption key, 32 bytes)
- *   [32:42]   name_hash (10 bytes)
- *   [42:52]   random_hash (10 bytes: 5 random + 5 timestamp)
- *   [52:84]   signature (Ed25519, 64 bytes) — covers hash_material
- *   [84..]    app_data (optional, variable length)
+ * Announce data layout (Reticulum wire-compatible):
+ *   [0:64]    public_key (X25519 encryption 32B + Ed25519 signing 32B)
+ *   [64:74]   name_hash (10 bytes)
+ *   [74:84]   random_hash (10 bytes: 5 random + 5 timestamp)
+ *   [84:148]  signature (Ed25519, 64 bytes) — covers hash_material
+ *   [148..]   app_data (optional, variable length)
  *
  * With optional ratchet (inserted before signature):
- *   [52:62]   ratchet_public_key_id (10 bytes, SHA-256(ratchet_pub)[:10])
- *   [62:94]   signature (64 bytes)
- *   [94..]    app_data (optional)
+ *   [84:94]   ratchet_public_key_id (10 bytes, SHA-256(ratchet_pub)[:10])
+ *   [94:158]  signature (64 bytes)
+ *   [158..]   app_data (optional)
  *
- * The signing key (Ed25519 public key) is implicit — the receiver can derive it
- * by looking up the identity from the destination hash, or the announce carries
- * the full identity (signing_pub + encryption_pub) as app_data on first contact.
- *
- * NOTE: Reticulum's announce format puts the signing public key in the identity
- * (known via prior announce or path cache), not in every announce. For initial
- * discovery, MeshSat embeds both public keys in app_data.
+ * The public_key field carries the full Reticulum identity (both keys),
+ * allowing stock RNS nodes to verify the announce without prior knowledge.
  */
 data class RnsAnnounce(
     val encryptionPub: ByteArray,    // 32 bytes (X25519 public key)
-    val signingPub: ByteArray,       // 32 bytes (Ed25519 public key, for verification)
+    val signingPub: ByteArray,       // 32 bytes (Ed25519 public key)
     val nameHash: ByteArray,         // 10 bytes
     val randomHash: ByteArray,       // 10 bytes
     val ratchetId: ByteArray?,       // 10 bytes (optional)
@@ -43,12 +38,12 @@ data class RnsAnnounce(
     /**
      * Serialize the announce data for embedding in RnsPacket.data.
      *
-     * Wire format:
-     *   encryption_pub(32) + name_hash(10) + random_hash(10) +
+     * Wire format (Reticulum-compatible):
+     *   encryption_pub(32) + signing_pub(32) + name_hash(10) + random_hash(10) +
      *   [ratchet_id(10)] + signature(64) + [app_data(N)]
      */
     fun marshal(): ByteArray {
-        var size = RnsConstants.PUB_KEY_LEN + RnsConstants.NAME_HASH_LEN +
+        var size = IDENTITY_LEN + RnsConstants.NAME_HASH_LEN +
             RANDOM_HASH_LEN + RnsConstants.SIG_LEN
         if (ratchetId != null) size += RnsConstants.RATCHET_ID_LEN
         if (appData != null) size += appData.size
@@ -56,6 +51,7 @@ data class RnsAnnounce(
         val buf = ByteBuffer.allocate(size)
         buf.order(ByteOrder.BIG_ENDIAN)
         buf.put(encryptionPub)
+        buf.put(signingPub)
         buf.put(nameHash)
         buf.put(randomHash)
         if (ratchetId != null) buf.put(ratchetId)
@@ -66,13 +62,14 @@ data class RnsAnnounce(
 
     /**
      * Compute the hash material that is signed.
-     * Covers: dest_hash + encryption_pub + name_hash + random_hash [+ ratchet_id] [+ app_data]
+     * Covers: dest_hash + encryption_pub + signing_pub + name_hash + random_hash
+     *         [+ ratchet_id] [+ app_data]
      *
      * The dest_hash is passed separately because it's in the packet header,
      * not in the announce data itself.
      */
     fun hashMaterial(destHash: ByteArray): ByteArray {
-        var size = RnsConstants.DEST_HASH_LEN + RnsConstants.PUB_KEY_LEN +
+        var size = RnsConstants.DEST_HASH_LEN + IDENTITY_LEN +
             RnsConstants.NAME_HASH_LEN + RANDOM_HASH_LEN
         if (ratchetId != null) size += RnsConstants.RATCHET_ID_LEN
         if (appData != null) size += appData.size
@@ -81,6 +78,7 @@ data class RnsAnnounce(
         buf.order(ByteOrder.BIG_ENDIAN)
         buf.put(destHash)
         buf.put(encryptionPub)
+        buf.put(signingPub)
         buf.put(nameHash)
         buf.put(randomHash)
         if (ratchetId != null) buf.put(ratchetId)
@@ -124,9 +122,12 @@ data class RnsAnnounce(
     companion object {
         const val RANDOM_HASH_LEN = 10
 
+        /** Full identity length: encryption key (32) + signing key (32). */
+        const val IDENTITY_LEN = RnsConstants.PUB_KEY_LEN * 2  // 64
+
         /** Minimum announce data size (no ratchet, no app data). */
-        const val MIN_SIZE = RnsConstants.PUB_KEY_LEN + RnsConstants.NAME_HASH_LEN +
-            RANDOM_HASH_LEN + RnsConstants.SIG_LEN  // 32 + 10 + 10 + 64 = 116
+        const val MIN_SIZE = IDENTITY_LEN + RnsConstants.NAME_HASH_LEN +
+            RANDOM_HASH_LEN + RnsConstants.SIG_LEN  // 64 + 10 + 10 + 64 = 148
 
         /**
          * Create a signed announce.
@@ -185,6 +186,9 @@ data class RnsAnnounce(
         /**
          * Parse announce data from a received packet's data field.
          *
+         * Wire format: encryption_pub(32) + signing_pub(32) + name_hash(10) +
+         *              random_hash(10) + [ratchet_id(10)] + signature(64) + [app_data]
+         *
          * @param data The RnsPacket.data payload
          * @param hasRatchet Whether a ratchet ID is present (known from context or flag)
          */
@@ -197,6 +201,9 @@ data class RnsAnnounce(
 
             val encPub = ByteArray(RnsConstants.PUB_KEY_LEN)
             buf.get(encPub)
+
+            val sigPub = ByteArray(RnsConstants.PUB_KEY_LEN)
+            buf.get(sigPub)
 
             val nHash = ByteArray(RnsConstants.NAME_HASH_LEN)
             buf.get(nHash)
@@ -217,12 +224,9 @@ data class RnsAnnounce(
                 ByteArray(buf.remaining()).also { buf.get(it) }
             } else null
 
-            // We need signingPub for verification — for initial announces,
-            // it should be in the appData or known from prior exchange.
-            // Return with empty signingPub; caller must populate from context.
             return RnsAnnounce(
                 encryptionPub = encPub,
-                signingPub = ByteArray(0), // caller must set from appData or identity cache
+                signingPub = sigPub,
                 nameHash = nHash,
                 randomHash = rHash,
                 ratchetId = ratchetId,
@@ -234,17 +238,15 @@ data class RnsAnnounce(
 }
 
 /**
- * MeshSat-specific app_data format for initial announces.
+ * MeshSat-specific app_data format for announces.
  *
- * On first contact, MeshSat embeds both public keys and device metadata
- * in the announce app_data field so the receiver can verify the identity
- * without prior knowledge.
+ * Since Reticulum announces now carry both public keys in the public_key
+ * field (64 bytes), app_data only needs MeshSat-specific device metadata.
  *
  * App data layout:
- *   [0:32]   signing_pub (Ed25519 public key, 32 bytes)
- *   [32:33]  device_type (1 byte: 0x01=bridge, 0x02=android, 0x03=hub)
- *   [33:34]  capabilities flags (1 byte)
- *   [34..]   additional metadata (optional, variable)
+ *   [0]    device_type (1 byte: 0x01=bridge, 0x02=android, 0x03=hub)
+ *   [1]    capabilities flags (1 byte)
+ *   [2..]  additional metadata (optional, variable)
  */
 object MeshSatAppData {
     const val DEVICE_BRIDGE: Byte = 0x01
@@ -258,23 +260,20 @@ object MeshSatAppData {
     const val CAP_APRS: Byte = 0x08        // Has AX.25/APRS
     const val CAP_MQTT: Byte = 0x10        // Has MQTT/internet
 
-    /** Minimum app data size (signing key + device type + capabilities). */
-    const val MIN_SIZE = RnsConstants.PUB_KEY_LEN + 2  // 34
+    /** Minimum app data size (device type + capabilities). */
+    const val MIN_SIZE = 2
 
     fun encode(
-        signingPubRaw: ByteArray,
         deviceType: Byte,
         capabilities: Byte,
     ): ByteArray {
         val buf = ByteBuffer.allocate(MIN_SIZE)
-        buf.put(signingPubRaw)
         buf.put(deviceType)
         buf.put(capabilities)
         return buf.array()
     }
 
     data class Decoded(
-        val signingPub: ByteArray,
         val deviceType: Byte,
         val capabilities: Byte,
     )
@@ -282,10 +281,8 @@ object MeshSatAppData {
     fun decode(data: ByteArray): Decoded? {
         if (data.size < MIN_SIZE) return null
         val buf = ByteBuffer.wrap(data)
-        val sigPub = ByteArray(RnsConstants.PUB_KEY_LEN)
-        buf.get(sigPub)
         val devType = buf.get()
         val caps = buf.get()
-        return Decoded(sigPub, devType, caps)
+        return Decoded(devType, caps)
     }
 }

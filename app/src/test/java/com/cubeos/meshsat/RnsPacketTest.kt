@@ -184,7 +184,7 @@ class RnsPacketTest {
     @Test
     fun `announce packet round-trip`() {
         val destHash = ByteArray(16) { (it * 3).toByte() }
-        val announceData = ByteArray(116) { it.toByte() } // min announce data size
+        val announceData = ByteArray(148) { it.toByte() } // min announce data size (64+10+10+64)
 
         val packet = RnsPacket.announce(destHash, announceData)
         assertEquals(0, packet.hops)
