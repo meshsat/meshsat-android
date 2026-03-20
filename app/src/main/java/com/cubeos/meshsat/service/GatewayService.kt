@@ -1847,19 +1847,29 @@ class GatewayService : Service() {
 
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                startForeground(1, notification,
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE or
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
+                // Dynamically select foreground service types based on granted permissions.
+                // Requesting a type without the matching runtime permission crashes on Android 14+.
+                var types = ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+                val hasLocation = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+                    ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+                if (hasLocation) {
+                    types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+                }
+                startForeground(1, notification, types)
             } else {
                 @Suppress("DEPRECATION")
                 startForeground(1, notification)
             }
         } catch (e: Exception) {
-            // Fallback: start without foreground service type (e.g. missing permission)
-            Log.w("MeshSat", "startForeground with type failed, retrying without: ${e.message}")
+            Log.w("MeshSat", "startForeground with type failed, retrying: ${e.message}")
             try {
-                @Suppress("DEPRECATION")
-                startForeground(1, notification)
+                // Fallback: connectedDevice only (always safe — permission is in manifest)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    startForeground(1, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
+                } else {
+                    @Suppress("DEPRECATION")
+                    startForeground(1, notification)
+                }
             } catch (e2: Exception) {
                 Log.e("MeshSat", "startForeground failed entirely: ${e2.message}")
             }

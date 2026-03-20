@@ -67,9 +67,6 @@ fun MapScreen() {
     // Filter out nodeId=0 (phone GPS stored by GatewayService)
     val meshNodes = nodes.filter { it.nodeId != 0L }
 
-    // Determine if we have any positions at all (phone or mesh nodes)
-    val hasAnyPosition = meshNodes.isNotEmpty() || phoneLocation != null
-
     // Layer toggles
     var showGps by remember { mutableStateOf(true) }
     var showMeshNodes by remember { mutableStateOf(true) }
@@ -96,44 +93,30 @@ fun MapScreen() {
             modifier = Modifier.padding(bottom = 8.dp),
         )
 
-        if (!hasAnyPosition) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = "No positions available yet.\nConnect to a Meshtastic radio or enable GPS.",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MeshSatTextMuted,
-                )
-            }
-        } else {
-            // Map view using Leaflet in WebView
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
-                    .border(1.dp, MeshSatBorder, RoundedCornerShape(8.dp)),
-            ) {
-                val darkModePref by ThemeState.darkMode.collectAsState()
-                val isDark = darkModePref ?: true
-                LeafletMap(
-                    nodes = filteredMeshNodes,
-                    phoneLocation = effectivePhoneLocation,
-                    darkMode = isDark,
-                    trackPositions = filteredTrackPositions,
-                )
-            }
+        // Map view using Leaflet in WebView — always show, even without positions
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .border(1.dp, MeshSatBorder, RoundedCornerShape(8.dp)),
+        ) {
+            val darkModePref by ThemeState.darkMode.collectAsState()
+            val isDark = darkModePref ?: true
+            LeafletMap(
+                nodes = filteredMeshNodes,
+                phoneLocation = effectivePhoneLocation,
+                darkMode = isDark,
+                trackPositions = filteredTrackPositions,
+            )
+        }
 
-            // Layer controls + node list below map (scrollable)
-            Column(
-                modifier = Modifier
-                    .padding(top = 8.dp)
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
+        // Layer controls + node list below map (scrollable)
+        Column(
+            modifier = Modifier
+                .padding(top = 8.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
                 // LAYERS card
                 Column(
                     modifier = Modifier
@@ -286,7 +269,6 @@ fun MapScreen() {
             }
         }
     }
-}
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
