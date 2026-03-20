@@ -144,6 +144,10 @@ class GatewayService : Service() {
         var takIntegration: com.cubeos.meshsat.tak.TakIntegration? = null
             private set
 
+        // APRS beacon (MESHSAT-231)
+        var aprsBeacon: com.cubeos.meshsat.aprs.AprsBeacon? = null
+            private set
+
         private var notificationId = 100
     }
 
@@ -245,6 +249,10 @@ class GatewayService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        aprsBeacon?.stop()
+        aprsBeacon = null
+        aprsIsClient?.disconnect()
+        aprsIsClient = null
         takIntegration = null
         localApiServer?.stop()
         localApiServer = null
@@ -565,10 +573,59 @@ class GatewayService : Service() {
                 } else {
                     initAprsKiss(fullCallsign)
                 }
+
+                // Initialize APRS position beaconing (MESHSAT-231)
+                initAprsBeacon(fullCallsign, mode)
             } catch (e: Exception) {
                 Log.w("MeshSat", "APRS init failed: ${e.message}")
             }
         }
+    }
+
+    /** Initialize APRS position beaconing if enabled (MESHSAT-231). */
+    private suspend fun initAprsBeacon(fullCallsign: String, mode: String) {
+        val beaconEnabled = settings.aprsIsBeaconEnabled.first()
+        if (!beaconEnabled) return
+
+        val intervalMin = settings.aprsIsBeaconInterval.first().toIntOrNull() ?: 10
+        val beacon = com.cubeos.meshsat.aprs.AprsBeacon(scope)
+        beacon.slowRateSec = (intervalMin * 60).coerceAtLeast(60)
+        beacon.fastRateSec = 90
+
+        beacon.onBeacon = { lat, lon, alt, course, speed, comment ->
+            scope.launch {
+                try {
+                    if (mode == "is") {
+                        aprsIsClient?.sendPosition(fullCallsign, lat, lon, comment = comment)
+                    } else {
+                        val client = kissClient ?: return@launch
+                        if (!client.isConnected) return@launch
+                        val ssid = fullCallsign.substringAfter("-", "10").toIntOrNull() ?: 10
+                        val call = fullCallsign.substringBefore("-")
+                        val src = Ax25Address(call, ssid)
+                        val dst = Ax25Address("APMSHT", 0)
+                        val path = listOf(Ax25Address("WIDE1", 1), Ax25Address("WIDE2", 1))
+                        val info = AprsCodec.encodePosition(lat, lon, comment = comment)
+                        val ax25 = Ax25Codec.encode(dst, src, path, info)
+                        client.sendFrame(ax25)
+                    }
+                    db.messageDao().insert(
+                        Message(
+                            transport = "aprs", direction = "tx", sender = "self",
+                            text = "[APRS:$fullCallsign] beacon %.4f,%.4f $comment".format(lat, lon),
+                            timestamp = System.currentTimeMillis(),
+                        )
+                    )
+                    Log.d("MeshSat", "APRS beacon TX via $mode")
+                } catch (e: Exception) {
+                    Log.w("MeshSat", "APRS beacon TX failed: ${e.message}")
+                }
+            }
+        }
+
+        beacon.start()
+        aprsBeacon = beacon
+        Log.i("MeshSat", "APRS beacon started (interval=${intervalMin}min, smart beaconing enabled)")
     }
 
     /** Initialize APRS via KISS TCP (APRSDroid/Direwolf). */
@@ -641,43 +698,7 @@ class GatewayService : Service() {
         }
 
         Log.i("MeshSat", "APRS-IS initialized ($fullCallsign on $server:$port, filter=${filterRange}km)")
-
-        // Start position beaconing if enabled
-        val beaconEnabled = settings.aprsIsBeaconEnabled.first()
-        if (beaconEnabled) {
-            startAprsIsBeacon(client, fullCallsign)
-        }
-    }
-
-    /** Periodic APRS-IS position beacon using phone GPS. */
-    private fun startAprsIsBeacon(client: com.cubeos.meshsat.aprs.AprsIsClient, callsign: String) {
-        scope.launch {
-            val intervalMin = settings.aprsIsBeaconInterval.first().toLongOrNull() ?: 10L
-            val intervalMs = intervalMin * 60_000L
-            Log.i("MeshSat", "APRS-IS beacon started: every ${intervalMin}min")
-
-            while (client.isConnected) {
-                val loc = _phoneLocation.value
-                if (loc != null) {
-                    try {
-                        client.sendPosition(
-                            callsign = callsign,
-                            lat = loc.latitude,
-                            lon = loc.longitude,
-                            symbolTable = '/',
-                            symbolCode = '-',
-                            comment = "MeshSat Android",
-                        )
-                        Log.d("MeshSat", "APRS-IS beacon sent: %.4f,%.4f".format(loc.latitude, loc.longitude))
-                    } catch (e: Exception) {
-                        Log.w("MeshSat", "APRS-IS beacon failed: ${e.message}")
-                    }
-                } else {
-                    Log.d("MeshSat", "APRS-IS beacon skipped: no GPS fix")
-                }
-                kotlinx.coroutines.delay(intervalMs)
-            }
-        }
+        // Position beaconing handled by initAprsBeacon() with smart beaconing (MESHSAT-231)
     }
 
     /** Handle an inbound APRS packet (from either KISS or APRS-IS). */
@@ -1083,6 +1104,8 @@ class GatewayService : Service() {
                 speed = location.speed.toDouble(),
             )
         }
+        // Feed APRS beacon smart beaconing engine (MESHSAT-231)
+        aprsBeacon?.onLocationUpdate(location)
     }
 
     @Suppress("MissingPermission")
