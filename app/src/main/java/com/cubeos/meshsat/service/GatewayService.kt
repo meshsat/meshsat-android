@@ -80,8 +80,10 @@ class GatewayService : Service() {
     companion object {
         const val ACTION_CONNECT_MESH = "com.cubeos.meshsat.CONNECT_MESH"
         const val ACTION_CONNECT_IRIDIUM = "com.cubeos.meshsat.CONNECT_IRIDIUM"
+        const val ACTION_CONNECT_IRIDIUM9704 = "com.cubeos.meshsat.CONNECT_IRIDIUM9704"
         const val ACTION_DISCONNECT_MESH = "com.cubeos.meshsat.DISCONNECT_MESH"
         const val ACTION_DISCONNECT_IRIDIUM = "com.cubeos.meshsat.DISCONNECT_IRIDIUM"
+        const val ACTION_DISCONNECT_IRIDIUM9704 = "com.cubeos.meshsat.DISCONNECT_IRIDIUM9704"
         const val ACTION_SOS_ACTIVATE = "com.cubeos.meshsat.SOS_ACTIVATE"
         const val ACTION_SOS_CANCEL = "com.cubeos.meshsat.SOS_CANCEL"
         const val ACTION_SEND_MESH = "com.cubeos.meshsat.SEND_MESH"
@@ -95,6 +97,8 @@ class GatewayService : Service() {
         var meshtasticBle: MeshtasticBle? = null
             private set
         var iridiumSpp: IridiumSpp? = null
+            private set
+        var iridium9704Spp: com.cubeos.meshsat.bt.Iridium9704Spp? = null
             private set
         val rulesEngine = RulesEngine()
 
@@ -193,6 +197,7 @@ class GatewayService : Service() {
 
         meshtasticBle = MeshtasticBle(this)
         iridiumSpp = IridiumSpp(this)
+        iridium9704Spp = com.cubeos.meshsat.bt.Iridium9704Spp(this)
 
         startForegroundNotification()
 
@@ -229,8 +234,14 @@ class GatewayService : Service() {
                 iridiumSpp?.connect(addr)
                 scope.launch { settings.setIridiumBtAddress(addr) }
             }
+            ACTION_CONNECT_IRIDIUM9704 -> {
+                val addr = intent.getStringExtra(EXTRA_ADDRESS) ?: return START_STICKY
+                iridium9704Spp?.connect(addr)
+                scope.launch { settings.setIridium9704BtAddress(addr) }
+            }
             ACTION_DISCONNECT_MESH -> meshtasticBle?.disconnect()
             ACTION_DISCONNECT_IRIDIUM -> iridiumSpp?.disconnect()
+            ACTION_DISCONNECT_IRIDIUM9704 -> iridium9704Spp?.disconnect()
             ACTION_SOS_ACTIVATE -> activateSos()
             ACTION_SOS_CANCEL -> cancelSos()
             ACTION_SEND_MESH -> {
@@ -284,8 +295,10 @@ class GatewayService : Service() {
         sosJob?.cancel()
         meshtasticBle?.disconnect()
         iridiumSpp?.disconnect()
+        iridium9704Spp?.disconnect()
         meshtasticBle = null
         iridiumSpp = null
+        iridium9704Spp = null
         msvqscEncoder?.close()
         msvqscEncoder = null
         com.cubeos.meshsat.sms.SmsReceiver.relayCallback = null
@@ -876,6 +889,12 @@ class GatewayService : Service() {
             maxBackoff = 120.seconds,
         ))
         mgr.register(InterfaceConfig(
+            id = "iridium9704_0", channelType = "iridium9704",
+            autoReconnect = true,
+            initialBackoff = 10.seconds,
+            maxBackoff = 120.seconds,
+        ))
+        mgr.register(InterfaceConfig(
             id = "aprs_0", channelType = "aprs",
             autoReconnect = true,
             initialBackoff = 10.seconds,
@@ -894,8 +913,13 @@ class GatewayService : Service() {
                     ble.reconnect()
                     null // connection is async — setOnline called from state observer
                 }
-                interfaceId.startsWith("iridium") -> {
+                interfaceId == "iridium_0" -> {
                     val spp = iridiumSpp ?: return@setConnectCallback "iridium transport not available"
+                    spp.reconnect()
+                    null
+                }
+                interfaceId == "iridium9704_0" -> {
+                    val spp = iridium9704Spp ?: return@setConnectCallback "9704 transport not available"
                     spp.reconnect()
                     null
                 }
@@ -931,7 +955,8 @@ class GatewayService : Service() {
         mgr.setDisconnectCallback { interfaceId ->
             when {
                 interfaceId.startsWith("mesh") -> meshtasticBle?.disconnect()
-                interfaceId.startsWith("iridium") -> iridiumSpp?.disconnect()
+                interfaceId == "iridium_0" -> iridiumSpp?.disconnect()
+                interfaceId == "iridium9704_0" -> iridium9704Spp?.disconnect()
                 interfaceId.startsWith("mqtt") -> mqttTransport?.disconnect()
                 interfaceId.startsWith("aprs") -> kissClient?.disconnect()
             }
@@ -983,7 +1008,27 @@ class GatewayService : Service() {
             }
         }
 
-        Log.i("MeshSat", "InterfaceManager initialized with 5 interfaces")
+        // Observe 9704 SPP state → drive InterfaceManager
+        iridium9704Spp?.let { spp ->
+            scope.launch {
+                spp.state.collect { state ->
+                    when (state) {
+                        com.cubeos.meshsat.bt.Iridium9704Spp.State.Ready -> mgr.setOnline("iridium9704_0")
+                        com.cubeos.meshsat.bt.Iridium9704Spp.State.Disconnected -> mgr.setOffline("iridium9704_0")
+                        com.cubeos.meshsat.bt.Iridium9704Spp.State.Connecting,
+                        com.cubeos.meshsat.bt.Iridium9704Spp.State.Connected,
+                        com.cubeos.meshsat.bt.Iridium9704Spp.State.Initializing -> mgr.setConnecting("iridium9704_0")
+                    }
+                }
+            }
+            scope.launch {
+                spp.error.collect { err ->
+                    if (err.isNotBlank()) mgr.setError("iridium9704_0", err)
+                }
+            }
+        }
+
+        Log.i("MeshSat", "InterfaceManager initialized with 6 interfaces")
     }
 
     /**
@@ -1011,8 +1056,10 @@ class GatewayService : Service() {
                     mgr?.isOnline(interfaceId) ?: when {
                         interfaceId.startsWith("mesh") ->
                             meshtasticBle?.state?.value == MeshtasticBle.State.Connected
-                        interfaceId.startsWith("iridium") ->
+                        interfaceId == "iridium_0" ->
                             iridiumSpp?.state?.value == IridiumSpp.State.Connected
+                        interfaceId == "iridium9704_0" ->
+                            iridium9704Spp?.state?.value == com.cubeos.meshsat.bt.Iridium9704Spp.State.Ready
                         interfaceId.startsWith("sms") -> true
                         interfaceId.startsWith("mqtt") ->
                             mqttTransport?.isConnected == true
@@ -1050,6 +1097,7 @@ class GatewayService : Service() {
                 val interfaces = mapOf(
                     "mesh_0" to "mesh",
                     "iridium_0" to "iridium",
+                    "iridium9704_0" to "iridium9704",
                     "sms_0" to "sms",
                     "mqtt_0" to "mqtt",
                     "aprs_0" to "aprs",
@@ -1092,7 +1140,7 @@ class GatewayService : Service() {
                     )
                     null // success
                 }
-                interfaceId.startsWith("iridium") -> {
+                interfaceId == "iridium_0" -> {
                     val spp = iridiumSpp
                         ?: return "iridium not available"
                     if (spp.state.value != IridiumSpp.State.Connected)
@@ -1111,6 +1159,26 @@ class GatewayService : Service() {
                         Message(
                             transport = "iridium", direction = "tx", sender = "self",
                             text = textPreview, forwarded = true, forwardedTo = "iridium:sbd",
+                            timestamp = System.currentTimeMillis(),
+                        )
+                    )
+                    null // success
+                }
+                interfaceId == "iridium9704_0" -> {
+                    val spp = iridium9704Spp
+                        ?: return "9704 not available"
+                    if (spp.state.value != com.cubeos.meshsat.bt.Iridium9704Spp.State.Ready)
+                        return "9704 not ready"
+                    val data = if (payload.isNotEmpty()) payload else textPreview.toByteArray()
+                    // 9704 supports up to 100KB — no app-level fragmentation needed
+                    val status = spp.sendMessageBlocking(data)
+                    if (status != "mo_ack_received") {
+                        return "9704 MO failed: ${status ?: "timeout"}"
+                    }
+                    db.messageDao().insert(
+                        Message(
+                            transport = "iridium9704", direction = "tx", sender = "self",
+                            text = textPreview, forwarded = true, forwardedTo = "iridium9704:imt",
                             timestamp = System.currentTimeMillis(),
                         )
                     )
@@ -1578,11 +1646,39 @@ class GatewayService : Service() {
             }
         }
 
+        // Listen for Iridium 9704 MT (mobile-terminated) messages via SharedFlow
+        iridium9704Spp?.let { spp ->
+            scope.launch {
+                spp.receivedMessages.collect { payload ->
+                    val text = payload.toString(Charsets.UTF_8)
+                    val imei = spp.modemInfo.value.imei.ifBlank { "9704" }
+                    val dedupKey = "iridium9704:${payload.contentHashCode()}"
+                    if (deduplicator.isDuplicateKey(dedupKey)) return@collect
+                    db.messageDao().insert(
+                        Message(
+                            transport = "iridium9704",
+                            direction = "rx",
+                            sender = imei,
+                            text = text,
+                            encrypted = false,
+                            timestamp = System.currentTimeMillis(),
+                        )
+                    )
+                    postMessageNotification("Iridium 9704: $imei", text)
+                    interfaceManager?.recordActivity("iridium9704_0")
+                    evaluateAndForward(ForwardingRule.Transport.IRIDIUM, text, imei)
+                }
+            }
+        }
+
         // Update notification on state changes
         meshtasticBle?.let { ble ->
             scope.launch { ble.state.collect { updateNotification() } }
         }
         iridiumSpp?.let { spp ->
+            scope.launch { spp.state.collect { updateNotification() } }
+        }
+        iridium9704Spp?.let { spp ->
             scope.launch { spp.state.collect { updateNotification() } }
         }
 
@@ -1592,6 +1688,9 @@ class GatewayService : Service() {
         }
         iridiumSpp?.let { spp ->
             scope.launch { spp.error.collect { err -> Log.w("MeshSat", "SPP: $err") } }
+        }
+        iridium9704Spp?.let { spp ->
+            scope.launch { spp.error.collect { err -> Log.w("MeshSat", "9704: $err") } }
         }
     }
 

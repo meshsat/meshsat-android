@@ -26,6 +26,7 @@ class SettingsRepository(private val context: Context) {
         val KEY_MESHSAT_PI_PHONE = stringPreferencesKey("meshsat_pi_phone") // phone number of Pi's modem
         val KEY_MESHTASTIC_BLE_ADDR = stringPreferencesKey("meshtastic_ble_address")
         val KEY_IRIDIUM_BT_ADDR = stringPreferencesKey("iridium_bt_address")
+        val KEY_IRIDIUM9704_BT_ADDR = stringPreferencesKey("iridium9704_bt_address")
         val KEY_MSVQSC_ENABLED = booleanPreferencesKey("msvqsc_enabled")
         val KEY_MSVQSC_STAGES = stringPreferencesKey("msvqsc_stages") // "auto" or "2"-"8"
         val KEY_DEADMAN_ENABLED = booleanPreferencesKey("deadman_enabled")
@@ -140,6 +141,10 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setIridiumBtAddress(address: String) {
         context.dataStore.edit { it[KEY_IRIDIUM_BT_ADDR] = address }
+    }
+
+    suspend fun setIridium9704BtAddress(address: String) {
+        context.dataStore.edit { it[KEY_IRIDIUM9704_BT_ADDR] = address }
     }
 
     val msvqscEnabled: Flow<Boolean> = context.dataStore.data.map {

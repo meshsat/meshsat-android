@@ -138,6 +138,11 @@ fun SettingsScreen(navController: NavController? = null) {
     val iridiumSignal = GatewayService.iridiumSpp?.signal?.collectAsState()
     val modemInfo = GatewayService.iridiumSpp?.modemInfo?.collectAsState()
 
+    // Iridium 9704 state
+    val iridium9704State = GatewayService.iridium9704Spp?.state?.collectAsState()
+    val iridium9704Signal = GatewayService.iridium9704Spp?.signal?.collectAsState()
+    val iridium9704ModemInfo = GatewayService.iridium9704Spp?.modemInfo?.collectAsState()
+
     // QR code scanner for Hub key sync (MESHSAT-205)
     val qrScanLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -459,6 +464,97 @@ fun SettingsScreen(navController: NavController? = null) {
                 } else {
                     Text(
                         text = "No paired HC-05/06 modules found. Pair the HC-05 in Android Bluetooth settings first.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MeshSatTextMuted,
+                    )
+                }
+            }
+        }
+
+        // --- Iridium RockBLOCK 9704 (JSPR/IMT) Section ---
+        SectionCard("Iridium RockBLOCK 9704 (IMT)") {
+            val state9704 = iridium9704State?.value ?: com.cubeos.meshsat.bt.Iridium9704Spp.State.Disconnected
+            ConnectionStatusRow(
+                label = "Status",
+                connected = state9704 == com.cubeos.meshsat.bt.Iridium9704Spp.State.Ready,
+                statusText = when (state9704) {
+                    com.cubeos.meshsat.bt.Iridium9704Spp.State.Ready -> {
+                        val sig = iridium9704Signal?.value ?: 0
+                        "Ready (Signal: $sig/5)"
+                    }
+                    com.cubeos.meshsat.bt.Iridium9704Spp.State.Initializing -> "Initializing JSPR..."
+                    com.cubeos.meshsat.bt.Iridium9704Spp.State.Connected -> "Connected (init pending)"
+                    com.cubeos.meshsat.bt.Iridium9704Spp.State.Connecting -> "Connecting..."
+                    com.cubeos.meshsat.bt.Iridium9704Spp.State.Disconnected -> "Disconnected"
+                },
+                color = ColorIridium,
+            )
+
+            if (state9704 == com.cubeos.meshsat.bt.Iridium9704Spp.State.Ready) {
+                iridium9704ModemInfo?.value?.let { info ->
+                    if (info.imei.isNotBlank()) InfoRow("IMEI", info.imei)
+                    if (info.serial.isNotBlank()) InfoRow("Serial", info.serial)
+                    if (info.firmwareVersion.isNotBlank()) InfoRow("Firmware", info.firmwareVersion)
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                val sig = GatewayService.iridium9704Spp?.pollSignal()
+                                Toast.makeText(context, "9704 Signal: $sig/5", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = MeshSatTeal),
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text("Poll Signal", style = MaterialTheme.typography.bodySmall)
+                    }
+                    Button(
+                        onClick = {
+                            context.startService(
+                                Intent(context, GatewayService::class.java)
+                                    .setAction(GatewayService.ACTION_DISCONNECT_IRIDIUM9704)
+                            )
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = MeshSatRed),
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text("Disconnect", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+
+            if (state9704 == com.cubeos.meshsat.bt.Iridium9704Spp.State.Disconnected) {
+                val paired9704 = remember {
+                    GatewayService.iridium9704Spp?.getPairedDevices() ?: emptyList()
+                }
+                if (paired9704.isNotEmpty()) {
+                    Text(
+                        text = "Paired HC-05/06 devices (9704):",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MeshSatTextMuted,
+                    )
+                    paired9704.forEach { device ->
+                        @Suppress("MissingPermission")
+                        DeviceRow(
+                            name = device.name ?: "HC-05",
+                            address = device.address,
+                            onClick = {
+                                context.startService(
+                                    Intent(context, GatewayService::class.java)
+                                        .setAction(GatewayService.ACTION_CONNECT_IRIDIUM9704)
+                                        .putExtra(GatewayService.EXTRA_ADDRESS, device.address)
+                                )
+                            },
+                        )
+                    }
+                } else {
+                    Text(
+                        text = "No paired HC-05/06 modules found for 9704.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MeshSatTextMuted,
                     )

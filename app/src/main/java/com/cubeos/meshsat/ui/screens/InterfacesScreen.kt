@@ -1044,14 +1044,15 @@ private fun stateColor(state: InterfaceState): Color = when (state) {
 
 private fun interfaceTypeColor(channelType: String): Color = when (channelType) {
     "mesh" -> ColorMesh
-    "iridium" -> ColorIridium
+    "iridium", "iridium9704" -> ColorIridium
     "sms", "cellular" -> ColorCellular
     else -> MeshSatTeal
 }
 
 private fun channelTypeLabel(channelType: String): String = when (channelType) {
     "mesh" -> "Mesh"
-    "iridium" -> "Iridium"
+    "iridium" -> "Iridium 9603"
+    "iridium9704" -> "Iridium 9704"
     "sms" -> "SMS"
     "cellular" -> "Cellular"
     else -> channelType
