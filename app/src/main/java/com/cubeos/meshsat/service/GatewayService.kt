@@ -1412,6 +1412,10 @@ class GatewayService : Service() {
                     // --- Node info ---
                     result.nodeInfo?.let { nodeInfo ->
                         ble.addNodeInfo(nodeInfo)
+                        // If this is our own node, capture owner name
+                        if (nodeInfo.nodeNum == (ble.myInfo.value?.myNodeNum ?: 0L)) {
+                            ble.setOwner(nodeInfo.longName, nodeInfo.shortName)
+                        }
                         Log.d("MeshSat", "NodeInfo: ${nodeInfo.longName} (${nodeInfo.shortName})")
                         return@collect
                     }
@@ -1524,13 +1528,33 @@ class GatewayService : Service() {
 
                     // --- Channel config ---
                     result.channel?.let { ch ->
+                        ble.addChannel(ch)
                         Log.d("MeshSat", "Channel[${ch.index}]: '${ch.name}' role=${ch.role}")
                         return@collect
                     }
 
                     // --- Device metadata ---
                     result.deviceMetadata?.let { md ->
+                        ble.setDeviceMetadata(md)
                         Log.d("MeshSat", "DeviceMetadata: fw=${md.firmwareVersion} hw=${md.hwModel} shutdown=${md.canShutdown}")
+                        return@collect
+                    }
+
+                    // --- Radio config (response to getConfig request) ---
+                    result.config?.let { config ->
+                        ble.setConfig(config)
+                        val section = when {
+                            config.hasDevice() -> "device"
+                            config.hasPosition() -> "position"
+                            config.hasPower() -> "power"
+                            config.hasNetwork() -> "network"
+                            config.hasDisplay() -> "display"
+                            config.hasLora() -> "lora"
+                            config.hasBluetooth() -> "bluetooth"
+                            config.hasSecurity() -> "security"
+                            else -> "unknown"
+                        }
+                        Log.d("MeshSat", "Config received: $section")
                         return@collect
                     }
 

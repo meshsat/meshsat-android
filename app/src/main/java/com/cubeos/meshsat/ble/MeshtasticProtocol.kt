@@ -232,6 +232,7 @@ object MeshtasticProtocol {
         val channel: MeshChannel? = null,
         val deviceMetadata: MeshDeviceMetadata? = null,
         val configCompleteId: Int? = null,
+        val config: ConfigProtos.Config? = null,
     )
 
     /**
@@ -253,6 +254,9 @@ object MeshtasticProtocol {
         }
         MeshtasticProtoAdapter.extractDeviceMetadata(fromRadio)?.let {
             return FromRadioResult(deviceMetadata = it)
+        }
+        if (fromRadio.hasConfig()) {
+            return FromRadioResult(config = fromRadio.config)
         }
         if (fromRadio.hasConfigCompleteId()) {
             return FromRadioResult(configCompleteId = fromRadio.configCompleteId)

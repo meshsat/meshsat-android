@@ -82,6 +82,62 @@ class MeshtasticBle(private val context: Context) {
     private val _nodes = MutableStateFlow<List<MeshtasticProtocol.MeshNodeInfo>>(emptyList())
     val nodes: StateFlow<List<MeshtasticProtocol.MeshNodeInfo>> = _nodes
 
+    // --- Radio config state (populated by FromRadio.config responses) ---
+    private val _ownerName = MutableStateFlow("")
+    val ownerName: StateFlow<String> = _ownerName
+    private val _ownerShortName = MutableStateFlow("")
+    val ownerShortName: StateFlow<String> = _ownerShortName
+
+    private val _loraConfig = MutableStateFlow<com.geeksville.mesh.ConfigProtos.Config.LoRaConfig?>(null)
+    val loraConfig: StateFlow<com.geeksville.mesh.ConfigProtos.Config.LoRaConfig?> = _loraConfig
+    private val _deviceConfig = MutableStateFlow<com.geeksville.mesh.ConfigProtos.Config.DeviceConfig?>(null)
+    val deviceConfig: StateFlow<com.geeksville.mesh.ConfigProtos.Config.DeviceConfig?> = _deviceConfig
+    private val _positionConfig = MutableStateFlow<com.geeksville.mesh.ConfigProtos.Config.PositionConfig?>(null)
+    val positionConfig: StateFlow<com.geeksville.mesh.ConfigProtos.Config.PositionConfig?> = _positionConfig
+    private val _bluetoothConfig = MutableStateFlow<com.geeksville.mesh.ConfigProtos.Config.BluetoothConfig?>(null)
+    val bluetoothConfig: StateFlow<com.geeksville.mesh.ConfigProtos.Config.BluetoothConfig?> = _bluetoothConfig
+    private val _networkConfig = MutableStateFlow<com.geeksville.mesh.ConfigProtos.Config.NetworkConfig?>(null)
+    val networkConfig: StateFlow<com.geeksville.mesh.ConfigProtos.Config.NetworkConfig?> = _networkConfig
+    private val _powerConfig = MutableStateFlow<com.geeksville.mesh.ConfigProtos.Config.PowerConfig?>(null)
+    val powerConfig: StateFlow<com.geeksville.mesh.ConfigProtos.Config.PowerConfig?> = _powerConfig
+    private val _displayConfig = MutableStateFlow<com.geeksville.mesh.ConfigProtos.Config.DisplayConfig?>(null)
+    val displayConfig: StateFlow<com.geeksville.mesh.ConfigProtos.Config.DisplayConfig?> = _displayConfig
+
+    private val _channels = MutableStateFlow<List<MeshtasticProtocol.MeshChannel>>(emptyList())
+    val channels: StateFlow<List<MeshtasticProtocol.MeshChannel>> = _channels
+
+    private val _deviceMetadata = MutableStateFlow<MeshtasticProtocol.MeshDeviceMetadata?>(null)
+    val deviceMetadata: StateFlow<MeshtasticProtocol.MeshDeviceMetadata?> = _deviceMetadata
+
+    fun setOwner(longName: String, shortName: String) {
+        _ownerName.value = longName
+        _ownerShortName.value = shortName
+    }
+
+    fun setConfig(config: com.geeksville.mesh.ConfigProtos.Config) {
+        when {
+            config.hasLora() -> _loraConfig.value = config.lora
+            config.hasDevice() -> _deviceConfig.value = config.device
+            config.hasPosition() -> _positionConfig.value = config.position
+            config.hasBluetooth() -> _bluetoothConfig.value = config.bluetooth
+            config.hasNetwork() -> _networkConfig.value = config.network
+            config.hasPower() -> _powerConfig.value = config.power
+            config.hasDisplay() -> _displayConfig.value = config.display
+        }
+    }
+
+    fun addChannel(channel: MeshtasticProtocol.MeshChannel) {
+        val current = _channels.value.toMutableList()
+        current.removeAll { it.index == channel.index }
+        current.add(channel)
+        current.sortBy { it.index }
+        _channels.value = current
+    }
+
+    fun setDeviceMetadata(metadata: MeshtasticProtocol.MeshDeviceMetadata) {
+        _deviceMetadata.value = metadata
+    }
+
     fun setMyInfo(info: MeshtasticProtocol.MyNodeInfo) { _myInfo.value = info }
     fun addNodeInfo(info: MeshtasticProtocol.MeshNodeInfo) {
         val current = _nodes.value.toMutableList()
