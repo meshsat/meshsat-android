@@ -205,6 +205,11 @@ class RnsAnnounceHandler(
         localHashes[destHash.toHex()] = true
     }
 
+    /** Check if a destination hash is registered as local. */
+    fun isLocal(destHash: ByteArray): Boolean {
+        return localHashes.containsKey(destHash.toHex())
+    }
+
     private fun scheduleRelay(packet: RnsPacket) {
         val delayRange = maxRelayDelay - minRelayDelay
         val delayMs = minRelayDelay.inWholeMilliseconds +
