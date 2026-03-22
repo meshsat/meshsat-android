@@ -156,6 +156,10 @@ class GatewayService : Service() {
         var aprsMessageTracker: com.cubeos.meshsat.aprs.AprsMessageTracker? = null
             private set
 
+        // Reticulum Transport Node (MESHSAT-199/267)
+        var rnsTransportNode: com.cubeos.meshsat.reticulum.RnsTransportNode? = null
+            private set
+
         private var notificationId = 100
     }
 
@@ -217,6 +221,7 @@ class GatewayService : Service() {
             initMqtt()
             initSmsRelay()
             initAprs()
+            initReticulumTransportNode()
         } catch (e: Exception) {
             Log.e("MeshSat", "Service init error (non-fatal): ${e.message}", e)
         }
@@ -293,6 +298,8 @@ class GatewayService : Service() {
         accessEvaluator = null
         accessEval = null
         sosJob?.cancel()
+        rnsTransportNode?.stop()
+        rnsTransportNode = null
         meshtasticBle?.disconnect()
         iridiumSpp?.disconnect()
         iridium9704Spp?.disconnect()
@@ -846,6 +853,88 @@ class GatewayService : Service() {
             Log.d("MeshSat", "APRS ACK sent for msg $msgId to $to")
         } catch (e: Exception) {
             Log.w("MeshSat", "Failed to send APRS ACK for msg $msgId: ${e.message}")
+        }
+    }
+
+    /**
+     * Initialize Reticulum Transport Node (MESHSAT-199/267).
+     * Creates the routing identity, all RnsInterfaces, and starts the transport node.
+     */
+    private fun initReticulumTransportNode() {
+        scope.launch {
+            try {
+                val kvStore = com.cubeos.meshsat.crypto.SecureKeyStore.getInstance(this@GatewayService)
+                val identity = com.cubeos.meshsat.routing.Identity.loadOrGenerate(kvStore)
+
+                val announceHandler = com.cubeos.meshsat.reticulum.RnsAnnounceHandler(
+                    identity = identity,
+                    scope = scope,
+                )
+                announceHandler.startPruner()
+
+                val localDestHash = announceHandler.localDestHash
+
+                val linkManager = com.cubeos.meshsat.reticulum.RnsLinkManager(
+                    identity = identity,
+                    localDestHash = localDestHash,
+                )
+
+                // Build RnsInterface map from available transports
+                val rnsInterfaces: () -> Map<String, com.cubeos.meshsat.reticulum.RnsInterface> = {
+                    val map = mutableMapOf<String, com.cubeos.meshsat.reticulum.RnsInterface>()
+                    meshtasticBle?.let { ble ->
+                        map["mesh_rns_0"] = com.cubeos.meshsat.reticulum.RnsMeshtasticBleInterface(ble, scope)
+                    }
+                    iridiumSpp?.let { spp ->
+                        map["iridium_rns_0"] = com.cubeos.meshsat.reticulum.RnsIridiumInterface(spp)
+                    }
+                    iridium9704Spp?.let { spp ->
+                        map["iridium9704_rns_0"] = com.cubeos.meshsat.reticulum.RnsIridium9704Interface(spp, scope)
+                    }
+                    // SMS, MQTT, APRS interfaces can be added here as they become available
+                    map
+                }
+
+                val pathTable = com.cubeos.meshsat.reticulum.RnsPathTable(
+                    interfaces = { rnsInterfaces().values.toList() },
+                )
+
+                val forwardingTable = com.cubeos.meshsat.reticulum.RnsForwardingTable()
+
+                val node = com.cubeos.meshsat.reticulum.RnsTransportNode(
+                    localDestHash = localDestHash,
+                    announceHandler = announceHandler,
+                    linkManager = linkManager,
+                    pathTable = pathTable,
+                    forwardingTable = forwardingTable,
+                    interfaces = rnsInterfaces,
+                    scope = scope,
+                )
+
+                // Deliver locally-addressed Reticulum packets to the message pipeline
+                node.localDeliveryCallback = com.cubeos.meshsat.reticulum.RnsTransportNode.LocalDeliveryCallback { packet, sourceInterface ->
+                    val text = packet.data.toString(Charsets.UTF_8)
+                    scope.launch {
+                        db.messageDao().insert(
+                            Message(
+                                transport = "reticulum",
+                                direction = "rx",
+                                sender = packet.destHash.joinToString("") { "%02x".format(it) }.take(8),
+                                text = text,
+                                encrypted = false,
+                                timestamp = System.currentTimeMillis(),
+                            )
+                        )
+                    }
+                }
+
+                node.start()
+                rnsTransportNode = node
+
+                Log.i("MeshSat", "Reticulum Transport Node started: ${identity.destHashHex} (${rnsInterfaces().size} interfaces)")
+            } catch (e: Exception) {
+                Log.w("MeshSat", "Reticulum init failed (non-fatal): ${e.message}", e)
+            }
         }
     }
 
