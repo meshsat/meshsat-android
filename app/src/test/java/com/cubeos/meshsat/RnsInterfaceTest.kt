@@ -1,6 +1,7 @@
 package com.cubeos.meshsat
 
 import com.cubeos.meshsat.reticulum.RnsConstants
+import com.cubeos.meshsat.reticulum.RnsIridium9704Interface
 import com.cubeos.meshsat.reticulum.RnsIridiumInterface
 import com.cubeos.meshsat.reticulum.RnsMeshInterface
 import com.cubeos.meshsat.reticulum.RnsMqttInterface
@@ -103,6 +104,19 @@ class RnsInterfaceTest {
     @Test
     fun `Iridium RNS magic byte is 0x52`() {
         assertEquals(0x52.toByte(), RnsIridiumInterface.SBD_RNS_MAGIC)
+    }
+
+    // --- Iridium 9704 (IMT) interface ---
+
+    @Test
+    fun `Iridium 9704 RNS magic byte is 0x52`() {
+        assertEquals(0x52.toByte(), RnsIridium9704Interface.RNS_MAGIC)
+    }
+
+    @Test
+    fun `Iridium 9704 magic byte matches SBD magic byte`() {
+        // Both use 0x52 ('R') for protocol consistency
+        assertEquals(RnsIridiumInterface.SBD_RNS_MAGIC, RnsIridium9704Interface.RNS_MAGIC)
     }
 
     // --- APRS interface ---
