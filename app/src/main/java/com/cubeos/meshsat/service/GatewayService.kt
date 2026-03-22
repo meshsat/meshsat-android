@@ -84,6 +84,8 @@ class GatewayService : Service() {
         const val ACTION_DISCONNECT_MESH = "com.cubeos.meshsat.DISCONNECT_MESH"
         const val ACTION_DISCONNECT_IRIDIUM = "com.cubeos.meshsat.DISCONNECT_IRIDIUM"
         const val ACTION_DISCONNECT_IRIDIUM9704 = "com.cubeos.meshsat.DISCONNECT_IRIDIUM9704"
+        const val ACTION_CONNECT_ASTROCAST = "com.cubeos.meshsat.CONNECT_ASTROCAST"
+        const val ACTION_DISCONNECT_ASTROCAST = "com.cubeos.meshsat.DISCONNECT_ASTROCAST"
         const val ACTION_SOS_ACTIVATE = "com.cubeos.meshsat.SOS_ACTIVATE"
         const val ACTION_SOS_CANCEL = "com.cubeos.meshsat.SOS_CANCEL"
         const val ACTION_SEND_MESH = "com.cubeos.meshsat.SEND_MESH"
@@ -99,6 +101,8 @@ class GatewayService : Service() {
         var iridiumSpp: IridiumSpp? = null
             private set
         var iridium9704Spp: com.cubeos.meshsat.bt.Iridium9704Spp? = null
+            private set
+        var astrocastSpp: com.cubeos.meshsat.astrocast.AstrocastSpp? = null
             private set
         val rulesEngine = RulesEngine()
 
@@ -206,6 +210,7 @@ class GatewayService : Service() {
         meshtasticBle = MeshtasticBle(this)
         iridiumSpp = IridiumSpp(this)
         iridium9704Spp = com.cubeos.meshsat.bt.Iridium9704Spp(this)
+        astrocastSpp = com.cubeos.meshsat.astrocast.AstrocastSpp(this)
 
         startForegroundNotification()
 
@@ -252,6 +257,11 @@ class GatewayService : Service() {
             ACTION_DISCONNECT_MESH -> meshtasticBle?.disconnect()
             ACTION_DISCONNECT_IRIDIUM -> iridiumSpp?.disconnect()
             ACTION_DISCONNECT_IRIDIUM9704 -> iridium9704Spp?.disconnect()
+            ACTION_CONNECT_ASTROCAST -> {
+                val addr = intent.getStringExtra(EXTRA_ADDRESS) ?: return START_STICKY
+                astrocastSpp?.connect(addr)
+            }
+            ACTION_DISCONNECT_ASTROCAST -> astrocastSpp?.disconnect()
             ACTION_SOS_ACTIVATE -> activateSos()
             ACTION_SOS_CANCEL -> cancelSos()
             ACTION_SEND_MESH -> {
@@ -308,9 +318,11 @@ class GatewayService : Service() {
         meshtasticBle?.disconnect()
         iridiumSpp?.disconnect()
         iridium9704Spp?.disconnect()
+        astrocastSpp?.disconnect()
         meshtasticBle = null
         iridiumSpp = null
         iridium9704Spp = null
+        astrocastSpp = null
         msvqscEncoder?.close()
         msvqscEncoder = null
         com.cubeos.meshsat.sms.SmsReceiver.relayCallback = null
@@ -943,6 +955,9 @@ class GatewayService : Service() {
                     rnsTcpInterface?.let { tcp ->
                         map["tcp_rns_0"] = tcp
                     }
+                    astrocastSpp?.let { spp ->
+                        map["astrocast_rns_0"] = com.cubeos.meshsat.reticulum.RnsAstrocastInterface(spp, scope)
+                    }
                     // SMS, MQTT, APRS interfaces can be added here as they become available
                     map
                 }
@@ -1036,6 +1051,12 @@ class GatewayService : Service() {
             maxBackoff = 120.seconds,
         ))
         mgr.register(InterfaceConfig(
+            id = "astrocast_0", channelType = "astrocast",
+            autoReconnect = true,
+            initialBackoff = 30.seconds,
+            maxBackoff = 300.seconds,
+        ))
+        mgr.register(InterfaceConfig(
             id = "aprs_0", channelType = "aprs",
             autoReconnect = true,
             initialBackoff = 10.seconds,
@@ -1069,6 +1090,10 @@ class GatewayService : Service() {
                     val spp = iridium9704Spp ?: return@setConnectCallback "9704 transport not available"
                     spp.reconnect()
                     null
+                }
+                interfaceId == "astrocast_0" -> {
+                    // Astrocast reconnect not implemented — requires explicit BT address
+                    "astrocast requires explicit connect"
                 }
                 interfaceId.startsWith("mqtt") -> {
                     // MQTT reconnect — re-read settings and connect
@@ -1116,6 +1141,7 @@ class GatewayService : Service() {
                 interfaceId.startsWith("mesh") -> meshtasticBle?.disconnect()
                 interfaceId == "iridium_0" -> iridiumSpp?.disconnect()
                 interfaceId == "iridium9704_0" -> iridium9704Spp?.disconnect()
+                interfaceId == "astrocast_0" -> astrocastSpp?.disconnect()
                 interfaceId.startsWith("mqtt") -> mqttTransport?.disconnect()
                 interfaceId.startsWith("aprs") -> kissClient?.disconnect()
                 interfaceId.startsWith("tcp_rns") -> rnsTcpInterface?.disconnect()
@@ -1188,7 +1214,21 @@ class GatewayService : Service() {
             }
         }
 
-        Log.i("MeshSat", "InterfaceManager initialized with 7 interfaces")
+        // Observe Astrocast SPP state → drive InterfaceManager
+        astrocastSpp?.let { spp ->
+            scope.launch {
+                spp.state.collect { state ->
+                    when (state) {
+                        com.cubeos.meshsat.astrocast.AstrocastSpp.State.Connected -> mgr.setOnline("astrocast_0")
+                        com.cubeos.meshsat.astrocast.AstrocastSpp.State.Disconnected -> mgr.setOffline("astrocast_0")
+                        com.cubeos.meshsat.astrocast.AstrocastSpp.State.Connecting -> mgr.setConnecting("astrocast_0")
+                        com.cubeos.meshsat.astrocast.AstrocastSpp.State.Error -> mgr.setError("astrocast_0", "connection error")
+                    }
+                }
+            }
+        }
+
+        Log.i("MeshSat", "InterfaceManager initialized with 8 interfaces")
     }
 
     /**
@@ -1220,6 +1260,8 @@ class GatewayService : Service() {
                             iridiumSpp?.state?.value == IridiumSpp.State.Connected
                         interfaceId == "iridium9704_0" ->
                             iridium9704Spp?.state?.value == com.cubeos.meshsat.bt.Iridium9704Spp.State.Ready
+                        interfaceId == "astrocast_0" ->
+                            astrocastSpp?.state?.value == com.cubeos.meshsat.astrocast.AstrocastSpp.State.Connected
                         interfaceId.startsWith("sms") -> true
                         interfaceId.startsWith("mqtt") ->
                             mqttTransport?.isConnected == true
@@ -1258,6 +1300,7 @@ class GatewayService : Service() {
                     "mesh_0" to "mesh",
                     "iridium_0" to "iridium",
                     "iridium9704_0" to "iridium9704",
+                    "astrocast_0" to "astrocast",
                     "sms_0" to "sms",
                     "mqtt_0" to "mqtt",
                     "aprs_0" to "aprs",
@@ -1339,6 +1382,23 @@ class GatewayService : Service() {
                         Message(
                             transport = "iridium9704", direction = "tx", sender = "self",
                             text = textPreview, forwarded = true, forwardedTo = "iridium9704:imt",
+                            timestamp = System.currentTimeMillis(),
+                        )
+                    )
+                    null // success
+                }
+                interfaceId == "astrocast_0" -> {
+                    val spp = astrocastSpp
+                        ?: return "astrocast not available"
+                    if (spp.state.value != com.cubeos.meshsat.astrocast.AstrocastSpp.State.Connected)
+                        return "astrocast not connected"
+                    val data = if (payload.isNotEmpty()) payload else textPreview.toByteArray()
+                    val result = spp.sendPayload(0, data)
+                    if (result < 0) return "astrocast payload queue failed"
+                    db.messageDao().insert(
+                        Message(
+                            transport = "astrocast", direction = "tx", sender = "self",
+                            text = textPreview, forwarded = true, forwardedTo = "astrocast:leo",
                             timestamp = System.currentTimeMillis(),
                         )
                     )
