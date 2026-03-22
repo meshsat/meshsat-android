@@ -1,27 +1,47 @@
 package com.cubeos.meshsat.ble
 
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
+import com.geeksville.mesh.ConfigProtos
+import com.geeksville.mesh.MeshProtos
+import com.geeksville.mesh.ModuleConfigProtos
+import com.geeksville.mesh.Portnums
 
 /**
- * Lightweight Meshtastic protobuf decoder/encoder.
+ * Meshtastic protocol facade — delegates to official generated protobuf
+ * bindings via [MeshtasticProtoAdapter].
  *
- * Handles the subset of Meshtastic protobufs needed for text messaging
- * and position tracking:
- * - FromRadio (field 2 = MeshPacket)
- * - MeshPacket (from, to, channel, decoded.portnum, decoded.payload)
- * - ToRadio (field 1 = MeshPacket for sending)
- *
- * This avoids pulling in the full Meshtastic protobuf dependency.
- * Wire format: varint field tags + varint/length-delimited values.
+ * All public data classes and method signatures are preserved for backward
+ * compatibility. Internal hand-rolled protobuf parsing has been replaced
+ * with official generated classes (MESHSAT-241).
  */
 object MeshtasticProtocol {
 
+    // ═══════════════════════════════════════════════════════════════
+    // Port numbers — mirrored from PortNum enum for convenience
+    // ═══════════════════════════════════════════════════════════════
+
     const val PORTNUM_TEXT_MESSAGE = 1
+    const val PORTNUM_REMOTE_HARDWARE = 2
     const val PORTNUM_POSITION = 3
     const val PORTNUM_NODEINFO = 4
+    const val PORTNUM_ROUTING = 5
+    const val PORTNUM_ADMIN_APP = 6
+    const val PORTNUM_TEXT_COMPRESSED = 7
+    const val PORTNUM_WAYPOINT = 8
+    const val PORTNUM_AUDIO = 9
+    const val PORTNUM_DETECTION_SENSOR = 10
+    const val PORTNUM_REPLY = 32
+    const val PORTNUM_PAXCOUNTER = 34
+    const val PORTNUM_SERIAL = 64
+    const val PORTNUM_STORE_FORWARD = 65
+    const val PORTNUM_RANGE_TEST = 66
     const val PORTNUM_TELEMETRY = 67
+    const val PORTNUM_TRACEROUTE = 70
+    const val PORTNUM_NEIGHBORINFO = 71
     const val PORTNUM_PRIVATE_APP = 256
+
+    // ═══════════════════════════════════════════════════════════════
+    // Data classes — existing (backward-compatible) + new portnums
+    // ═══════════════════════════════════════════════════════════════
 
     /** A decoded mesh text message. */
     data class MeshTextMessage(
@@ -36,17 +56,26 @@ object MeshtasticProtocol {
     /** A decoded mesh position update. */
     data class MeshPosition(
         val from: Long,
-        val latitude: Double,   // degrees
-        val longitude: Double,  // degrees
-        val altitude: Int,      // meters
-        val time: Long,         // epoch ms
+        val latitude: Double,
+        val longitude: Double,
+        val altitude: Int,
+        val time: Long,
     )
 
-    /** Telemetry from mesh (battery level). */
+    /** Telemetry from mesh (device metrics — battery level). */
     data class MeshTelemetry(
         val from: Long,
-        val batteryLevel: Int = -1,  // 0-100 or -1 = unknown
+        val batteryLevel: Int = -1,
         val voltage: Float = 0f,
+    )
+
+    /** Environment telemetry from mesh (temperature, humidity, pressure). */
+    data class MeshEnvironmentTelemetry(
+        val from: Long,
+        val temperature: Float = 0f,
+        val relativeHumidity: Float = 0f,
+        val barometricPressure: Float = 0f,
+        val gasResistance: Float = 0f,
     )
 
     /** Node info from mesh. */
@@ -56,8 +85,8 @@ object MeshtasticProtocol {
         val shortName: String = "",
         val macaddr: String = "",
         val hwModel: Int = 0,
-        val batteryLevel: Int = -1,  // 0-100 or -1 = unknown
-        val lastHeard: Long = 0,     // epoch millis when last packet received
+        val batteryLevel: Int = -1,
+        val lastHeard: Long = 0,
     )
 
     /** My node info (this radio's device info). */
@@ -68,171 +97,294 @@ object MeshtasticProtocol {
         val minAppVersion: Int = 0,
     )
 
-    /** Parse a fromRadio protobuf response, extracting text messages. Returns null if not a text message. */
-    fun parseFromRadio(data: ByteArray): MeshTextMessage? {
-        // FromRadio: field 2 (LEN) = MeshPacket
-        val meshPacketBytes = extractField(data, fieldNumber = 2, wireType = 2) ?: return null
-        return parseMeshPacket(meshPacketBytes)
+    /** Device metadata (firmware version, capabilities). */
+    data class MeshDeviceMetadata(
+        val firmwareVersion: String = "",
+        val canShutdown: Boolean = false,
+        val hasWifi: Boolean = false,
+        val hasBluetooth: Boolean = false,
+        val hasEthernet: Boolean = false,
+        val hwModel: Int = 0,
+    )
+
+    /** Routing info — ACK/NAK status for sent messages. */
+    data class MeshRouting(
+        val from: Long,
+        val requestId: Long,
+        val errorReason: Int,
+        val errorName: String,
+    ) {
+        val isAck: Boolean get() = errorReason == 0
+        val isNak: Boolean get() = errorReason != 0
     }
 
-    /** Parse a fromRadio protobuf response, extracting position. Returns null if not a position packet. */
-    fun parsePositionFromRadio(data: ByteArray): MeshPosition? {
-        val meshPacketBytes = extractField(data, fieldNumber = 2, wireType = 2) ?: return null
-        return parsePositionPacket(meshPacketBytes)
+    /** Waypoint shared on the mesh. */
+    data class MeshWaypoint(
+        val id: Long,
+        val from: Long,
+        val name: String,
+        val description: String,
+        val latitude: Double,
+        val longitude: Double,
+        val expire: Long = 0,
+        val icon: Int = 0,
+    )
+
+    /** Neighbor info — mesh topology data. */
+    data class MeshNeighborInfo(
+        val nodeId: Long,
+        val neighbors: List<MeshNeighbor>,
+    )
+
+    data class MeshNeighbor(
+        val nodeId: Long,
+        val snr: Float,
+    )
+
+    /** Traceroute result. */
+    data class MeshTraceroute(
+        val from: Long,
+        val requestId: Long,
+        val route: List<Long>,
+        val snrTowards: List<Int>,
+        val snrBack: List<Int>,
+    )
+
+    /** Store-and-forward message from relay node. */
+    data class MeshStoreForward(
+        val from: Long,
+        val requestResponse: Int,
+        val requestResponseName: String,
+        val text: String? = null,
+        val messagesTotal: Int = 0,
+        val messagesSaved: Int = 0,
+    )
+
+    /** Range test data. */
+    data class MeshRangeTest(
+        val from: Long,
+        val payload: String,
+        val rxSnr: Float = 0f,
+        val rxRssi: Int = 0,
+    )
+
+    /** Detection sensor alert. */
+    data class MeshDetectionSensor(
+        val from: Long,
+        val name: String,
+    )
+
+    /** Paxcounter data. */
+    data class MeshPaxcounter(
+        val from: Long,
+    )
+
+    /** Reply/emoji reaction. */
+    data class MeshReply(
+        val from: Long,
+        val to: Long,
+        val payload: String,
+        val emoji: Int = 0,
+    )
+
+    /** Channel configuration from radio. */
+    data class MeshChannel(
+        val index: Int,
+        val name: String,
+        val role: Int,
+        val psk: ByteArray,
+        val uplinkEnabled: Boolean = false,
+        val downlinkEnabled: Boolean = false,
+    ) {
+        override fun equals(other: Any?): Boolean {
+            if (this === other) return true
+            if (other !is MeshChannel) return false
+            return index == other.index && name == other.name && role == other.role
+        }
+        override fun hashCode(): Int = index * 31 + name.hashCode()
     }
 
-    /** Parse my_info from FromRadio (field 3). */
-    fun parseMyInfo(data: ByteArray): MyNodeInfo? {
-        val myInfoBytes = extractField(data, fieldNumber = 3, wireType = 2) ?: return null
-        val nodeNum = extractVarint(myInfoBytes, fieldNumber = 1) ?: 0L
-        val fwVersion = extractField(myInfoBytes, fieldNumber = 6, wireType = 2)
-            ?.let { String(it, Charsets.UTF_8) } ?: ""
-        val rebootCount = extractVarint(myInfoBytes, fieldNumber = 8)?.toInt() ?: 0
-        val minApp = extractVarint(myInfoBytes, fieldNumber = 11)?.toInt() ?: 0
-        return MyNodeInfo(nodeNum, fwVersion, rebootCount, minApp)
-    }
-
-    /** Parse node_info from FromRadio (field 4). */
-    fun parseNodeInfo(data: ByteArray): MeshNodeInfo? {
-        val nodeInfoBytes = extractField(data, fieldNumber = 4, wireType = 2) ?: return null
-        val nodeNum = extractVarint(nodeInfoBytes, fieldNumber = 1) ?: return null
-        // field 2 = User sub-message
-        val userBytes = extractField(nodeInfoBytes, fieldNumber = 2, wireType = 2)
-        val longName = userBytes?.let { extractField(it, fieldNumber = 2, wireType = 2) }
-            ?.let { String(it, Charsets.UTF_8) } ?: ""
-        val shortName = userBytes?.let { extractField(it, fieldNumber = 3, wireType = 2) }
-            ?.let { String(it, Charsets.UTF_8) } ?: ""
-        val hwModel = userBytes?.let { extractVarint(it, fieldNumber = 5)?.toInt() } ?: 0
-        return MeshNodeInfo(nodeNum, longName, shortName, hwModel = hwModel)
-    }
-
-    /** Parse NodeInfo with position from FromRadio. */
-    fun parseNodeInfoFromRadio(data: ByteArray): MeshNodeInfo? {
-        return parseNodeInfo(data)
-    }
-
-    /** Parse a MeshPacket protobuf for text messages. */
-    private fun parseMeshPacket(data: ByteArray): MeshTextMessage? {
-        val from = extractVarint(data, fieldNumber = 1) ?: 0L
-        val to = extractVarint(data, fieldNumber = 2) ?: 0L
-        val channel = extractVarint(data, fieldNumber = 3)?.toInt() ?: 0
-        val id = extractVarint(data, fieldNumber = 6) ?: 0L
-
-        // field 4 = decoded (SubPacket/Data)
-        val decodedBytes = extractField(data, fieldNumber = 4, wireType = 2) ?: return null
-
-        // SubPacket: field 1 = portnum (varint), field 2 = payload (bytes)
-        val portnum = extractVarint(decodedBytes, fieldNumber = 1)?.toInt() ?: return null
-        val payload = extractField(decodedBytes, fieldNumber = 2, wireType = 2) ?: return null
-
-        if (portnum != PORTNUM_TEXT_MESSAGE) return null
-
-        return MeshTextMessage(
-            from = from,
-            to = to,
-            channel = channel,
-            portnum = portnum,
-            text = String(payload, Charsets.UTF_8),
-            id = id,
-        )
-    }
-
-    /** Parse a MeshPacket protobuf for position data. */
-    private fun parsePositionPacket(data: ByteArray): MeshPosition? {
-        val from = extractVarint(data, fieldNumber = 1) ?: 0L
-
-        val decodedBytes = extractField(data, fieldNumber = 4, wireType = 2) ?: return null
-        val portnum = extractVarint(decodedBytes, fieldNumber = 1)?.toInt() ?: return null
-        val payload = extractField(decodedBytes, fieldNumber = 2, wireType = 2) ?: return null
-
-        if (portnum != PORTNUM_POSITION) return null
-
-        // Position protobuf:
-        // field 1: sfixed32 latitude_i (wire type 5 = 32-bit, ×1e-7 degrees)
-        // field 2: sfixed32 longitude_i (wire type 5 = 32-bit, ×1e-7 degrees)
-        // field 3: int32 altitude (wire type 0 = varint)
-        val latI = extractFixed32(payload, fieldNumber = 1) ?: return null
-        val lonI = extractFixed32(payload, fieldNumber = 2) ?: return null
-        val alt = extractVarint(payload, fieldNumber = 3)?.toInt() ?: 0
-
-        // Skip zero positions (node has no GPS fix)
-        if (latI == 0 && lonI == 0) return null
-
-        return MeshPosition(
-            from = from,
-            latitude = latI.toDouble() / 1e7,
-            longitude = lonI.toDouble() / 1e7,
-            altitude = alt,
-            time = System.currentTimeMillis(),
-        )
-    }
+    // ═══════════════════════════════════════════════════════════════
+    // Unified FromRadio parser — single parse, dispatch by type
+    // ═══════════════════════════════════════════════════════════════
 
     /**
-     * Parse a fromRadio protobuf response for telemetry (battery level).
-     * Telemetry: portnum=67, payload contains Telemetry message.
-     * Telemetry field 2 = DeviceMetrics, DeviceMetrics field 1 = battery_level (uint32).
+     * Result of parsing a FromRadio message. Exactly one field is non-null.
+     * Use this for efficient single-parse dispatch instead of calling each
+     * parse method separately.
      */
+    data class FromRadioResult(
+        val textMessage: MeshTextMessage? = null,
+        val position: MeshPosition? = null,
+        val telemetry: MeshTelemetry? = null,
+        val environmentTelemetry: MeshEnvironmentTelemetry? = null,
+        val myInfo: MyNodeInfo? = null,
+        val nodeInfo: MeshNodeInfo? = null,
+        val routing: MeshRouting? = null,
+        val waypoint: MeshWaypoint? = null,
+        val neighborInfo: MeshNeighborInfo? = null,
+        val traceroute: MeshTraceroute? = null,
+        val storeForward: MeshStoreForward? = null,
+        val rangeTest: MeshRangeTest? = null,
+        val detectionSensor: MeshDetectionSensor? = null,
+        val paxcounter: MeshPaxcounter? = null,
+        val reply: MeshReply? = null,
+        val channel: MeshChannel? = null,
+        val deviceMetadata: MeshDeviceMetadata? = null,
+        val configCompleteId: Int? = null,
+    )
+
+    /**
+     * Parse raw FromRadio bytes into a [FromRadioResult].
+     * Parses only once and dispatches by portnum/variant.
+     */
+    fun parseFromRadioFull(data: ByteArray): FromRadioResult? {
+        val fromRadio = MeshtasticProtoAdapter.parseFromRadio(data) ?: return null
+
+        // Non-packet variants
+        MeshtasticProtoAdapter.extractMyInfo(fromRadio)?.let {
+            return FromRadioResult(myInfo = it)
+        }
+        MeshtasticProtoAdapter.extractNodeInfo(fromRadio)?.let {
+            return FromRadioResult(nodeInfo = it)
+        }
+        MeshtasticProtoAdapter.extractChannel(fromRadio)?.let {
+            return FromRadioResult(channel = it)
+        }
+        MeshtasticProtoAdapter.extractDeviceMetadata(fromRadio)?.let {
+            return FromRadioResult(deviceMetadata = it)
+        }
+        if (fromRadio.hasConfigCompleteId()) {
+            return FromRadioResult(configCompleteId = fromRadio.configCompleteId)
+        }
+
+        // Packet variants — dispatch by portnum
+        val portnum = MeshtasticProtoAdapter.getPortnum(fromRadio) ?: return FromRadioResult()
+        return when (portnum) {
+            Portnums.PortNum.TEXT_MESSAGE_APP ->
+                FromRadioResult(textMessage = MeshtasticProtoAdapter.extractTextMessage(fromRadio))
+            Portnums.PortNum.POSITION_APP ->
+                FromRadioResult(position = MeshtasticProtoAdapter.extractPosition(fromRadio))
+            Portnums.PortNum.TELEMETRY_APP -> {
+                val env = MeshtasticProtoAdapter.extractEnvironmentTelemetry(fromRadio)
+                if (env != null) FromRadioResult(environmentTelemetry = env)
+                else FromRadioResult(telemetry = MeshtasticProtoAdapter.extractTelemetry(fromRadio))
+            }
+            Portnums.PortNum.ROUTING_APP ->
+                FromRadioResult(routing = MeshtasticProtoAdapter.extractRouting(fromRadio))
+            Portnums.PortNum.WAYPOINT_APP ->
+                FromRadioResult(waypoint = MeshtasticProtoAdapter.extractWaypoint(fromRadio))
+            Portnums.PortNum.NEIGHBORINFO_APP ->
+                FromRadioResult(neighborInfo = MeshtasticProtoAdapter.extractNeighborInfo(fromRadio))
+            Portnums.PortNum.TRACEROUTE_APP ->
+                FromRadioResult(traceroute = MeshtasticProtoAdapter.extractTraceroute(fromRadio))
+            Portnums.PortNum.STORE_FORWARD_APP ->
+                FromRadioResult(storeForward = MeshtasticProtoAdapter.extractStoreForward(fromRadio))
+            Portnums.PortNum.RANGE_TEST_APP ->
+                FromRadioResult(rangeTest = MeshtasticProtoAdapter.extractRangeTest(fromRadio))
+            Portnums.PortNum.DETECTION_SENSOR_APP ->
+                FromRadioResult(detectionSensor = MeshtasticProtoAdapter.extractDetectionSensor(fromRadio))
+            Portnums.PortNum.PAXCOUNTER_APP ->
+                FromRadioResult(paxcounter = MeshtasticProtoAdapter.extractPaxcounter(fromRadio))
+            Portnums.PortNum.REPLY_APP ->
+                FromRadioResult(reply = MeshtasticProtoAdapter.extractReply(fromRadio))
+            Portnums.PortNum.NODEINFO_APP -> {
+                // NodeInfo can also come as a mesh packet (not just FromRadio.node_info)
+                FromRadioResult(nodeInfo = MeshtasticProtoAdapter.extractNodeInfo(fromRadio))
+            }
+            else -> FromRadioResult() // Unhandled portnum
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Legacy parse methods — delegates to adapter for compatibility
+    // ═══════════════════════════════════════════════════════════════
+
+    /** Parse a fromRadio protobuf, extracting text messages. Returns null if not a text message. */
+    fun parseFromRadio(data: ByteArray): MeshTextMessage? {
+        val fromRadio = MeshtasticProtoAdapter.parseFromRadio(data) ?: return null
+        return MeshtasticProtoAdapter.extractTextMessage(fromRadio)
+    }
+
+    /** Parse a fromRadio protobuf, extracting position. Returns null if not a position packet. */
+    fun parsePositionFromRadio(data: ByteArray): MeshPosition? {
+        val fromRadio = MeshtasticProtoAdapter.parseFromRadio(data) ?: return null
+        return MeshtasticProtoAdapter.extractPosition(fromRadio)
+    }
+
+    /** Parse my_info from FromRadio. */
+    fun parseMyInfo(data: ByteArray): MyNodeInfo? {
+        val fromRadio = MeshtasticProtoAdapter.parseFromRadio(data) ?: return null
+        return MeshtasticProtoAdapter.extractMyInfo(fromRadio)
+    }
+
+    /** Parse node_info from FromRadio. */
+    fun parseNodeInfo(data: ByteArray): MeshNodeInfo? {
+        val fromRadio = MeshtasticProtoAdapter.parseFromRadio(data) ?: return null
+        return MeshtasticProtoAdapter.extractNodeInfo(fromRadio)
+    }
+
+    /** Parse NodeInfo from FromRadio. */
+    fun parseNodeInfoFromRadio(data: ByteArray): MeshNodeInfo? = parseNodeInfo(data)
+
+    /** Parse telemetry (battery level) from FromRadio. */
     fun parseTelemetryFromRadio(data: ByteArray): MeshTelemetry? {
-        val meshPacketBytes = extractField(data, fieldNumber = 2, wireType = 2) ?: return null
-        return parseTelemetryPacket(meshPacketBytes)
+        val fromRadio = MeshtasticProtoAdapter.parseFromRadio(data) ?: return null
+        return MeshtasticProtoAdapter.extractTelemetry(fromRadio)
     }
 
-    private fun parseTelemetryPacket(data: ByteArray): MeshTelemetry? {
-        val from = extractVarint(data, fieldNumber = 1) ?: 0L
-
-        val decodedBytes = extractField(data, fieldNumber = 4, wireType = 2) ?: return null
-        val portnum = extractVarint(decodedBytes, fieldNumber = 1)?.toInt() ?: return null
-        val payload = extractField(decodedBytes, fieldNumber = 2, wireType = 2) ?: return null
-
-        if (portnum != PORTNUM_TELEMETRY) return null
-
-        // Telemetry proto: field 2 (LEN) = device_metrics submessage
-        val deviceMetrics = extractField(payload, fieldNumber = 2, wireType = 2)
-            ?: return MeshTelemetry(from = from)
-
-        // DeviceMetrics: field 1 = battery_level (uint32), field 2 = voltage (float, fixed32)
-        val batteryLevel = extractVarint(deviceMetrics, fieldNumber = 1)?.toInt() ?: -1
-        val voltageBits = extractFixed32(deviceMetrics, fieldNumber = 2)
-        val voltage = if (voltageBits != null) Float.fromBits(voltageBits) else 0f
-
-        return MeshTelemetry(from = from, batteryLevel = batteryLevel, voltage = voltage)
+    /** Parse routing (ACK/NAK) from FromRadio. */
+    fun parseRoutingFromRadio(data: ByteArray): MeshRouting? {
+        val fromRadio = MeshtasticProtoAdapter.parseFromRadio(data) ?: return null
+        return MeshtasticProtoAdapter.extractRouting(fromRadio)
     }
+
+    /** Parse waypoint from FromRadio. */
+    fun parseWaypointFromRadio(data: ByteArray): MeshWaypoint? {
+        val fromRadio = MeshtasticProtoAdapter.parseFromRadio(data) ?: return null
+        return MeshtasticProtoAdapter.extractWaypoint(fromRadio)
+    }
+
+    /** Parse neighbor info from FromRadio. */
+    fun parseNeighborInfoFromRadio(data: ByteArray): MeshNeighborInfo? {
+        val fromRadio = MeshtasticProtoAdapter.parseFromRadio(data) ?: return null
+        return MeshtasticProtoAdapter.extractNeighborInfo(fromRadio)
+    }
+
+    /** Parse traceroute from FromRadio. */
+    fun parseTracerouteFromRadio(data: ByteArray): MeshTraceroute? {
+        val fromRadio = MeshtasticProtoAdapter.parseFromRadio(data) ?: return null
+        return MeshtasticProtoAdapter.extractTraceroute(fromRadio)
+    }
+
+    /** Parse store-and-forward from FromRadio. */
+    fun parseStoreForwardFromRadio(data: ByteArray): MeshStoreForward? {
+        val fromRadio = MeshtasticProtoAdapter.parseFromRadio(data) ?: return null
+        return MeshtasticProtoAdapter.extractStoreForward(fromRadio)
+    }
+
+    /** Parse environment telemetry from FromRadio. */
+    fun parseEnvironmentTelemetryFromRadio(data: ByteArray): MeshEnvironmentTelemetry? {
+        val fromRadio = MeshtasticProtoAdapter.parseFromRadio(data) ?: return null
+        return MeshtasticProtoAdapter.extractEnvironmentTelemetry(fromRadio)
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Encoding — delegates to adapter
+    // ═══════════════════════════════════════════════════════════════
 
     /** Encode a text message as a ToRadio protobuf. */
-    fun encodeTextMessage(text: String, to: Long = 0xFFFFFFFFL, channel: Int = 0): ByteArray {
-        // Data: portnum=1, payload=text
-        val payloadBytes = text.toByteArray(Charsets.UTF_8)
-        val dataProto = encodeVarintField(1, PORTNUM_TEXT_MESSAGE.toLong()) +
-                encodeBytesField(2, payloadBytes)
-
-        // MeshPacket: to, channel, decoded
-        val meshPacket = encodeVarintField(2, to) +
-                encodeVarintField(3, channel.toLong()) +
-                encodeBytesField(4, dataProto)
-
-        // ToRadio: field 1 = MeshPacket
-        return encodeBytesField(1, meshPacket)
-    }
+    fun encodeTextMessage(text: String, to: Long = 0xFFFFFFFFL, channel: Int = 0): ByteArray =
+        MeshtasticProtoAdapter.encodeTextMessage(text, to, channel)
 
     /** Format a node number as hex string (e.g., !27ca8f1c). */
     fun formatNodeId(num: Long): String = "!%08x".format(num)
 
-    // ═══════════════════════════════════════════════════════════════════
-    // Admin message encoding — radio config + device admin commands
-    // ═══════════════════════════════════════════════════════════════════
+    // ═══════════════════════════════════════════════════════════════
+    // Admin message encoding — delegates to adapter
+    // ═══════════════════════════════════════════════════════════════
 
-    const val PORTNUM_ADMIN_APP = 6
-
-    // Admin message field numbers
-    private const val ADMIN_GET_CONFIG_REQUEST = 5
-    private const val ADMIN_GET_MODULE_CONFIG_REQ = 7
-    private const val ADMIN_SET_CONFIG = 34
-    private const val ADMIN_SET_MODULE_CONFIG = 35
-    private const val ADMIN_FACTORY_RESET = 94
-    private const val ADMIN_REBOOT_SECONDS = 97
-    private const val ADMIN_SET_TIME_UNIX_SEC = 99
-
-    // Config section enum values
+    // Config section enum values (backward-compatible constants)
     const val CONFIG_DEVICE = 0
     const val CONFIG_POSITION = 1
     const val CONFIG_POWER = 2
@@ -295,239 +447,100 @@ object MeshtasticProtocol {
         }
     }
 
-    /**
-     * Build a ToRadio admin message requesting a config section.
-     * configType: CONFIG_DEVICE..CONFIG_SECURITY
-     */
-    fun buildAdminGetConfig(myNodeNum: Long, configType: Int): ByteArray {
-        val admin = encodeVarintField(ADMIN_GET_CONFIG_REQUEST, configType.toLong())
-        return buildAdminToRadio(myNodeNum, myNodeNum, admin)
-    }
+    /** Build a ToRadio admin message requesting a config section. */
+    fun buildAdminGetConfig(myNodeNum: Long, configType: Int): ByteArray =
+        MeshtasticProtoAdapter.buildAdminGetConfig(myNodeNum, configType)
 
-    /**
-     * Build a ToRadio admin message requesting a module config section.
-     * moduleType: MODULE_MQTT..MODULE_CANNED_MESSAGE
-     */
-    fun buildAdminGetModuleConfig(myNodeNum: Long, moduleType: Int): ByteArray {
-        val admin = encodeVarintField(ADMIN_GET_MODULE_CONFIG_REQ, moduleType.toLong())
-        return buildAdminToRadio(myNodeNum, myNodeNum, admin)
-    }
+    /** Build a ToRadio admin message requesting a module config section. */
+    fun buildAdminGetModuleConfig(myNodeNum: Long, moduleType: Int): ByteArray =
+        MeshtasticProtoAdapter.buildAdminGetModuleConfig(myNodeNum, moduleType)
 
-    /**
-     * Build a ToRadio admin message to set a config section.
-     * configData is the raw protobuf of the Config message.
-     */
+    /** Build a ToRadio admin message to set a config section (raw bytes — legacy). */
     fun buildAdminSetConfig(myNodeNum: Long, configData: ByteArray): ByteArray {
-        val admin = encodeBytesField(ADMIN_SET_CONFIG, configData)
-        return buildAdminToRadio(myNodeNum, myNodeNum, admin)
+        val config = ConfigProtos.Config.parseFrom(configData)
+        return MeshtasticProtoAdapter.buildAdminSetConfig(myNodeNum, config)
     }
 
-    /**
-     * Build a ToRadio admin message to set a module config section.
-     * configData is the raw protobuf of the ModuleConfig message.
-     */
+    /** Build a ToRadio admin message to set a module config section (raw bytes — legacy). */
     fun buildAdminSetModuleConfig(myNodeNum: Long, configData: ByteArray): ByteArray {
-        val admin = encodeBytesField(ADMIN_SET_MODULE_CONFIG, configData)
-        return buildAdminToRadio(myNodeNum, myNodeNum, admin)
+        val moduleConfig = ModuleConfigProtos.ModuleConfig.parseFrom(configData)
+        return MeshtasticProtoAdapter.buildAdminSetModuleConfig(myNodeNum, moduleConfig)
     }
 
     /** Build a ToRadio admin message to reboot the radio after delaySecs. */
-    fun buildAdminReboot(myNodeNum: Long, delaySecs: Int): ByteArray {
-        val admin = encodeVarintField(ADMIN_REBOOT_SECONDS, delaySecs.toLong())
-        return buildAdminToRadio(myNodeNum, myNodeNum, admin)
-    }
+    fun buildAdminReboot(myNodeNum: Long, delaySecs: Int): ByteArray =
+        MeshtasticProtoAdapter.buildAdminReboot(myNodeNum, delaySecs)
+
+    /** Build a ToRadio admin message to shutdown the radio after delaySecs. */
+    fun buildAdminShutdown(myNodeNum: Long, delaySecs: Int): ByteArray =
+        MeshtasticProtoAdapter.buildAdminShutdown(myNodeNum, delaySecs)
 
     /** Build a ToRadio admin message to factory reset the radio. */
-    fun buildAdminFactoryReset(myNodeNum: Long): ByteArray {
-        val admin = encodeVarintField(ADMIN_FACTORY_RESET, 1L)
-        return buildAdminToRadio(myNodeNum, myNodeNum, admin)
-    }
+    fun buildAdminFactoryReset(myNodeNum: Long): ByteArray =
+        MeshtasticProtoAdapter.buildAdminFactoryReset(myNodeNum)
+
+    /** Build a ToRadio admin message to reset the node database. */
+    fun buildAdminNodeDbReset(myNodeNum: Long): ByteArray =
+        MeshtasticProtoAdapter.buildAdminNodeDbReset(myNodeNum)
+
+    /** Build a ToRadio admin message to request device metadata. */
+    fun buildAdminGetDeviceMetadata(myNodeNum: Long): ByteArray =
+        MeshtasticProtoAdapter.buildAdminGetDeviceMetadata(myNodeNum)
 
     /** Build a ToRadio admin message to set the radio's time. */
-    fun buildAdminSetTime(myNodeNum: Long, unixSec: Long): ByteArray {
-        // field 99, wire type 5 (fixed32)
-        val tag = (ADMIN_SET_TIME_UNIX_SEC shl 3) or 5
-        val admin = encodeVarint(tag.toLong()) + encodeFixed32(unixSec.toInt())
-        return buildAdminToRadio(myNodeNum, myNodeNum, admin)
-    }
+    fun buildAdminSetTime(myNodeNum: Long, unixSec: Long): ByteArray =
+        MeshtasticProtoAdapter.buildAdminSetTime(myNodeNum, unixSec)
 
-    /**
-     * Encode a LoRa config as Config protobuf (field 6 = lora sub-message).
-     * Config { lora: LoraConfig { region, modem_preset, tx_power, hop_limit, tx_enabled } }
-     */
+    /** Build a ToRadio admin message to set the device owner/user info. */
+    fun buildAdminSetOwner(myNodeNum: Long, longName: String, shortName: String, isLicensed: Boolean = false): ByteArray =
+        MeshtasticProtoAdapter.buildAdminSetOwner(myNodeNum, longName, shortName, isLicensed)
+
+    /** Build a ToRadio admin message to set a channel. */
+    fun buildAdminSetChannel(myNodeNum: Long, channel: com.geeksville.mesh.ChannelProtos.Channel): ByteArray =
+        MeshtasticProtoAdapter.buildAdminSetChannel(myNodeNum, channel)
+
+    /** Build a ToRadio admin message to get a channel by index. */
+    fun buildAdminGetChannel(myNodeNum: Long, channelIndex: Int): ByteArray =
+        MeshtasticProtoAdapter.buildAdminGetChannel(myNodeNum, channelIndex)
+
+    /** Build a ToRadio admin message to remove a node by number. */
+    fun buildAdminRemoveNode(myNodeNum: Long, nodeNum: Long): ByteArray =
+        MeshtasticProtoAdapter.buildAdminRemoveNode(myNodeNum, nodeNum)
+
+    /** Build a ToRadio admin message to begin editing settings. */
+    fun buildAdminBeginEditSettings(myNodeNum: Long): ByteArray =
+        MeshtasticProtoAdapter.buildAdminBeginEditSettings(myNodeNum)
+
+    /** Build a ToRadio admin message to commit edited settings. */
+    fun buildAdminCommitEditSettings(myNodeNum: Long): ByteArray =
+        MeshtasticProtoAdapter.buildAdminCommitEditSettings(myNodeNum)
+
+    /** Encode a LoRa config as Config protobuf bytes (backward-compatible). */
     fun encodeLoRaConfig(
         region: Int,
         modemPreset: Int,
         txPower: Int,
         hopLimit: Int,
         txEnabled: Boolean,
-    ): ByteArray {
-        // LoraConfig sub-message fields (per Meshtastic Config.LoRaConfig protobuf):
-        // field 2: modem_preset (varint)
-        // field 4: region (varint)
-        // field 5: hop_limit (varint)
-        // field 6: tx_enabled (varint bool)
-        // field 7: tx_power (varint)
-        var lora = ByteArray(0)
-        if (modemPreset != 0) lora += encodeVarintField(2, modemPreset.toLong())
-        if (region != 0) lora += encodeVarintField(4, region.toLong())
-        if (hopLimit > 0) lora += encodeVarintField(5, hopLimit.toLong())
-        lora += encodeVarintField(6, if (txEnabled) 1L else 0L)
-        if (txPower > 0) lora += encodeVarintField(7, txPower.toLong())
+    ): ByteArray = MeshtasticProtoAdapter.encodeLoRaConfig(region, modemPreset, txPower, hopLimit, txEnabled).toByteArray()
 
-        // Config: field 6 = lora (length-delimited)
-        return encodeBytesField(6, lora)
-    }
+    /** Encode a waypoint as a ToRadio protobuf. */
+    fun encodeWaypoint(
+        name: String,
+        description: String,
+        latitudeI: Int,
+        longitudeI: Int,
+        expire: Long = 0,
+        icon: Int = 0,
+        to: Long = 0xFFFFFFFFL,
+        channel: Int = 0,
+    ): ByteArray = MeshtasticProtoAdapter.encodeWaypoint(name, description, latitudeI, longitudeI, expire, icon, to, channel)
 
-    // --- Internal: admin ToRadio wrapper ---
+    /** Encode a traceroute request as a ToRadio protobuf. */
+    fun encodeTracerouteRequest(myNodeNum: Long, destNode: Long): ByteArray =
+        MeshtasticProtoAdapter.encodeTracerouteRequest(myNodeNum, destNode)
 
-    /**
-     * Wrap an admin payload in Data(portnum=ADMIN_APP, want_response=true)
-     * → MeshPacket(from, to, decoded, hop_limit=3, want_ack=true) → ToRadio.
-     */
-    private fun buildAdminToRadio(myNodeNum: Long, destNode: Long, adminPayload: ByteArray): ByteArray {
-        // Data: portnum=6 (admin), payload, want_response=true
-        val data = encodeVarintField(1, PORTNUM_ADMIN_APP.toLong()) +
-            encodeBytesField(2, adminPayload) +
-            encodeVarintField(3, 1L) // want_response
-
-        // MeshPacket: from (fixed32 field 1), to (fixed32 field 2), decoded (field 4), hop_limit (field 9), want_ack (field 10)
-        val pkt = encodeFixed32Field(1, myNodeNum.toInt()) +
-            encodeFixed32Field(2, destNode.toInt()) +
-            encodeBytesField(4, data) +
-            encodeVarintField(9, 3L) +  // hop_limit
-            encodeVarintField(10, 1L)   // want_ack
-
-        // ToRadio: field 1 = MeshPacket
-        return encodeBytesField(1, pkt)
-    }
-
-    private fun encodeFixed32(value: Int): ByteArray {
-        return byteArrayOf(
-            (value and 0xFF).toByte(),
-            ((value shr 8) and 0xFF).toByte(),
-            ((value shr 16) and 0xFF).toByte(),
-            ((value shr 24) and 0xFF).toByte(),
-        )
-    }
-
-    private fun encodeFixed32Field(fieldNumber: Int, value: Int): ByteArray {
-        val tag = (fieldNumber shl 3) or 5 // wire type 5 = 32-bit
-        return encodeVarint(tag.toLong()) + encodeFixed32(value)
-    }
-
-    // --- Protobuf primitives ---
-
-    private fun extractVarint(data: ByteArray, fieldNumber: Int): Long? {
-        var i = 0
-        while (i < data.size) {
-            val (currentTag, tagLen) = readVarint(data, i)
-            i += tagLen
-            val wireType = (currentTag and 0x07).toInt()
-            val field = (currentTag shr 3).toInt()
-
-            if (field == fieldNumber && wireType == 0) {
-                val (value, _) = readVarint(data, i)
-                return value
-            }
-
-            // Skip this field
-            i = skipField(data, i, wireType) ?: return null
-        }
-        return null
-    }
-
-    private fun extractField(data: ByteArray, fieldNumber: Int, wireType: Int): ByteArray? {
-        var i = 0
-        while (i < data.size) {
-            val (currentTag, tagLen) = readVarint(data, i)
-            i += tagLen
-            val wt = (currentTag and 0x07).toInt()
-            val field = (currentTag shr 3).toInt()
-
-            if (field == fieldNumber && wt == wireType) {
-                if (wt == 2) { // length-delimited
-                    val (len, lenBytes) = readVarint(data, i)
-                    i += lenBytes
-                    val end = i + len.toInt()
-                    if (end > data.size) return null
-                    return data.copyOfRange(i, end)
-                }
-            }
-
-            i = skipField(data, i, wt) ?: return null
-        }
-        return null
-    }
-
-    /** Extract a fixed32/sfixed32 field (wire type 5). Returns signed int. */
-    private fun extractFixed32(data: ByteArray, fieldNumber: Int): Int? {
-        var i = 0
-        while (i < data.size) {
-            val (currentTag, tagLen) = readVarint(data, i)
-            i += tagLen
-            val wireType = (currentTag and 0x07).toInt()
-            val field = (currentTag shr 3).toInt()
-
-            if (field == fieldNumber && wireType == 5) {
-                if (i + 4 > data.size) return null
-                return ByteBuffer.wrap(data, i, 4).order(ByteOrder.LITTLE_ENDIAN).int
-            }
-
-            i = skipField(data, i, wireType) ?: return null
-        }
-        return null
-    }
-
-    private fun readVarint(data: ByteArray, offset: Int): Pair<Long, Int> {
-        var result = 0L
-        var shift = 0
-        var i = offset
-        while (i < data.size) {
-            val b = data[i].toInt() and 0xFF
-            result = result or ((b and 0x7F).toLong() shl shift)
-            i++
-            if (b and 0x80 == 0) break
-            shift += 7
-        }
-        return result to (i - offset)
-    }
-
-    private fun skipField(data: ByteArray, offset: Int, wireType: Int): Int? {
-        return when (wireType) {
-            0 -> { // varint
-                val (_, len) = readVarint(data, offset)
-                offset + len
-            }
-            1 -> offset + 8 // 64-bit
-            2 -> { // length-delimited
-                val (len, lenBytes) = readVarint(data, offset)
-                offset + lenBytes + len.toInt()
-            }
-            5 -> offset + 4 // 32-bit
-            else -> null
-        }
-    }
-
-    private fun encodeVarint(value: Long): ByteArray {
-        val result = mutableListOf<Byte>()
-        var v = value
-        do {
-            var b = (v and 0x7F).toInt()
-            v = v ushr 7
-            if (v != 0L) b = b or 0x80
-            result.add(b.toByte())
-        } while (v != 0L)
-        return result.toByteArray()
-    }
-
-    private fun encodeVarintField(fieldNumber: Int, value: Long): ByteArray {
-        val tag = (fieldNumber shl 3) or 0
-        return encodeVarint(tag.toLong()) + encodeVarint(value)
-    }
-
-    private fun encodeBytesField(fieldNumber: Int, data: ByteArray): ByteArray {
-        val tag = (fieldNumber shl 3) or 2
-        return encodeVarint(tag.toLong()) + encodeVarint(data.size.toLong()) + data
-    }
+    /** Request config from radio. */
+    fun encodeWantConfig(configId: Int = 0): ByteArray =
+        MeshtasticProtoAdapter.encodeWantConfig(configId)
 }

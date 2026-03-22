@@ -1,0 +1,150 @@
+syntax = "proto3";
+
+package meshtastic;
+
+option java_package = "com.geeksville.mesh";
+option java_outer_classname = "ModuleConfigProtos";
+
+message ModuleConfig {
+  message MQTTConfig {
+    bool enabled = 1;
+    string address = 2;
+    string username = 3;
+    string password = 4;
+    bool encryption_enabled = 5;
+    bool json_enabled = 6;
+    bool tls_enabled = 7;
+    string root = 8;
+    bool proxy_to_client_enabled = 9;
+    bool map_reporting_enabled = 10;
+    MapReportSettings map_report_settings = 11;
+  }
+
+  message MapReportSettings {
+    uint32 publish_interval_secs = 1;
+  }
+
+  message SerialConfig {
+    bool enabled = 1;
+    bool echo = 2;
+    uint32 rxd = 3;
+    uint32 txd = 4;
+
+    enum Serial_Baud {
+      BAUD_DEFAULT = 0;
+      BAUD_110 = 1;
+      BAUD_300 = 2;
+      BAUD_600 = 3;
+      BAUD_1200 = 4;
+      BAUD_2400 = 5;
+      BAUD_4800 = 6;
+      BAUD_9600 = 7;
+      BAUD_19200 = 8;
+      BAUD_38400 = 9;
+      BAUD_57600 = 10;
+      BAUD_115200 = 11;
+      BAUD_230400 = 12;
+      BAUD_460800 = 13;
+      BAUD_576000 = 14;
+      BAUD_921600 = 15;
+    }
+
+    Serial_Baud baud = 5;
+    uint32 timeout = 6;
+
+    enum Serial_Mode {
+      DEFAULT = 0;
+      SIMPLE = 1;
+      PROTO = 2;
+      TEXTMSG = 3;
+      NMEA = 4;
+      CALTOPO = 5;
+    }
+
+    Serial_Mode mode = 7;
+    bool override_console_serial_port = 8;
+  }
+
+  message ExternalNotificationConfig {
+    bool enabled = 1;
+    uint32 output_ms = 2;
+    uint32 output = 3;
+    bool active = 4;
+    bool alert_message = 5;
+    bool alert_message_buzzer = 6;
+    bool alert_message_vibra = 7;
+    bool alert_bell = 8;
+    bool alert_bell_buzzer = 9;
+    bool alert_bell_vibra = 10;
+    bool use_pwm = 11;
+    uint32 output_vibra = 12;
+    uint32 output_buzzer = 13;
+    uint32 nag_timeout = 14;
+    bool use_i2s_as_buzzer = 15;
+  }
+
+  message StoreForwardConfig {
+    bool enabled = 1;
+    bool heartbeat = 2;
+    uint32 records = 3;
+    uint32 history_return_max = 4;
+    uint32 history_return_window = 5;
+    bool is_server = 6;
+  }
+
+  message RangeTestConfig {
+    bool enabled = 1;
+    uint32 sender = 2;
+    bool save = 3;
+  }
+
+  message TelemetryConfig {
+    uint32 device_update_interval = 1;
+    uint32 environment_update_interval = 2;
+    bool environment_measurement_enabled = 3;
+    bool environment_screen_enabled = 4;
+    uint32 environment_display_fahrenheit = 5;
+    bool air_quality_enabled = 6;
+    uint32 air_quality_interval = 7;
+    bool power_measurement_enabled = 8;
+    uint32 power_update_interval = 9;
+    bool health_measurement_enabled = 10;
+    uint32 health_update_interval = 11;
+  }
+
+  message CannedMessageConfig {
+    bool rotary1_enabled = 1;
+    uint32 inputbroker_pin_a = 2;
+    uint32 inputbroker_pin_b = 3;
+    uint32 inputbroker_pin_press = 4;
+
+    enum InputEventChar {
+      NONE = 0;
+      UP = 17;
+      DOWN = 18;
+      LEFT = 19;
+      RIGHT = 20;
+      SELECT = 10;
+      BACK = 27;
+      CANCEL = 24;
+    }
+
+    InputEventChar inputbroker_event_cw = 5;
+    InputEventChar inputbroker_event_ccw = 6;
+    InputEventChar inputbroker_event_press = 7;
+    bool updown1_enabled = 8;
+    bool enabled = 9;
+    string allow_input_source = 10;
+    bool send_bell = 11;
+  }
+
+  oneof payload_variant {
+    MQTTConfig mqtt = 1;
+    SerialConfig serial = 2;
+    ExternalNotificationConfig external_notification = 3;
+    StoreForwardConfig store_forward = 4;
+    RangeTestConfig range_test = 5;
+    TelemetryConfig telemetry = 6;
+    CannedMessageConfig canned_message = 7;
+  }
+}

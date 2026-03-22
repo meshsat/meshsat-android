@@ -1,0 +1,144 @@
+syntax = "proto3";
+
+package meshtastic;
+
+option java_package = "com.geeksville.mesh";
+option java_outer_classname = "AdminProtos";
+
+import "meshtastic/channel.proto";
+import "meshtastic/config.proto";
+import "meshtastic/module_config.proto";
+import "meshtastic/mesh.proto";
+
+message AdminMessage {
+  enum ConfigType {
+    DEVICE_CONFIG = 0;
+    POSITION_CONFIG = 1;
+    POWER_CONFIG = 2;
+    NETWORK_CONFIG = 3;
+    DISPLAY_CONFIG = 4;
+    LORA_CONFIG = 5;
+    BLUETOOTH_CONFIG = 6;
+    SECURITY_CONFIG = 7;
+    SESSIONKEY_CONFIG = 8;
+    DEVICEUI_CONFIG = 9;
+  }
+
+  enum ModuleConfigType {
+    MQTT_CONFIG = 0;
+    SERIAL_CONFIG = 1;
+    EXTNOTIF_CONFIG = 2;
+    STOREFORWARD_CONFIG = 3;
+    RANGETEST_CONFIG = 4;
+    TELEMETRY_CONFIG = 5;
+    CANNEDMSG_CONFIG = 6;
+    AUDIO_CONFIG = 7;
+    REMOTEHARDWARE_CONFIG = 8;
+    NEIGHBORINFO_CONFIG = 9;
+    AMBIENTLIGHTING_CONFIG = 10;
+    DETECTIONSENSOR_CONFIG = 11;
+    PAXCOUNTER_CONFIG = 12;
+  }
+
+  oneof payload_variant {
+    // Get operations
+    uint32 get_channel_request = 1;
+    Channel get_channel_response = 2;
+    uint32 get_owner_request = 3;
+    User get_owner_response = 4;
+    ConfigType get_config_request = 5;
+    Config get_config_response = 6;
+    ModuleConfigType get_module_config_request = 7;
+    ModuleConfig get_module_config_response = 8;
+    uint32 get_canned_message_module_messages_request = 10;
+    string get_canned_message_module_messages_response = 11;
+    bool get_device_metadata_request = 12;
+    DeviceMetadata get_device_metadata_response = 13;
+    bool get_ringtone_request = 14;
+    string get_ringtone_response = 15;
+    bool get_device_connection_status_request = 16;
+    bool get_node_remote_hardware_pins_request = 19;
+
+    // Set operations
+    User set_owner = 32;
+    Channel set_channel = 33;
+    Config set_config = 34;
+    ModuleConfig set_module_config = 35;
+    string set_canned_message_module_messages = 36;
+    string set_ringtone_message = 37;
+    uint32 remove_by_nodenum = 38;
+    uint32 set_favorite_node = 39;
+    uint32 remove_favorite_node = 40;
+    Position set_fixed_position = 41;
+    bool remove_fixed_position = 42;
+    fixed32 set_time_only = 43;
+    uint32 set_ignored_node = 47;
+    uint32 remove_ignored_node = 48;
+    uint32 toggle_muted_node = 49;
+
+    // System operations
+    bool begin_edit_settings = 64;
+    bool commit_edit_settings = 65;
+    int32 factory_reset_device = 94;
+    int32 reboot_ota_seconds = 95;
+    int32 exit_simulator = 96;
+    int32 reboot_seconds = 97;
+    int32 shutdown_seconds = 98;
+    int32 factory_reset_config = 99;
+    int32 nodedb_reset = 100;
+  }
+
+  bytes session_passkey = 101;
+}
+
+message StoreAndForward {
+  enum RequestResponse {
+    UNSET = 0;
+    ROUTER_ERROR = 1;
+    ROUTER_HEARTBEAT = 2;
+    ROUTER_PING = 3;
+    ROUTER_PONG = 4;
+    ROUTER_BUSY = 5;
+    ROUTER_HISTORY = 6;
+    ROUTER_STATS = 7;
+    ROUTER_TEXT_DIRECT = 8;
+    CLIENT_ERROR = 64;
+    CLIENT_HISTORY = 65;
+    CLIENT_STATS = 66;
+    CLIENT_PING = 67;
+    CLIENT_PONG = 68;
+    CLIENT_ABORT = 106;
+  }
+
+  RequestResponse rr = 1;
+
+  message Statistics {
+    uint32 messages_total = 1;
+    uint32 messages_saved = 2;
+    uint32 messages_max = 3;
+    uint32 up_time = 4;
+    uint32 requests = 5;
+    uint32 requests_history = 6;
+    bool heartbeat = 7;
+    uint32 return_max = 8;
+    uint32 return_window = 9;
+  }
+
+  message History {
+    uint32 history_messages = 1;
+    uint32 window = 2;
+    uint32 last_request = 3;
+  }
+
+  message Heartbeat {
+    uint32 period = 1;
+    uint32 secondary = 2;
+  }
+
+  oneof variant {
+    Statistics stats = 2;
+    History history = 3;
+    Heartbeat heartbeat = 4;
+    bytes text = 5;
+  }
+}

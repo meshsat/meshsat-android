@@ -1,0 +1,89 @@
+syntax = "proto3";
+
+package meshtastic;
+
+option java_package = "com.geeksville.mesh";
+option java_outer_classname = "TelemetryProtos";
+
+message DeviceMetrics {
+  uint32 battery_level = 1;
+  float voltage = 2;
+  float channel_utilization = 3;
+  float air_util_tx = 4;
+  uint32 uptime_seconds = 5;
+}
+
+message EnvironmentMetrics {
+  float temperature = 1;
+  float relative_humidity = 2;
+  float barometric_pressure = 3;
+  float gas_resistance = 4;
+  float voltage = 5;
+  float current = 6;
+  float iaq = 7;
+  uint32 distance = 8;
+  float lux = 9;
+  float white_lux = 10;
+  uint32 ir_lux = 11;
+  uint32 uv_lux = 12;
+  float wind_direction = 13;
+  float wind_speed = 14;
+  float weight = 15;
+  float wind_gust = 16;
+  float wind_lull = 17;
+  float radiation = 18;
+  float rainfall_1h = 19;
+  float rainfall_24h = 20;
+  float soil_temperature = 21;
+  float soil_moisture = 22;
+}
+
+message AirQualityMetrics {
+  uint32 pm10_standard = 1;
+  uint32 pm25_standard = 2;
+  uint32 pm100_standard = 3;
+  uint32 pm10_environmental = 4;
+  uint32 pm25_environmental = 5;
+  uint32 pm100_environmental = 6;
+  uint32 particles_03um = 7;
+  uint32 particles_05um = 8;
+  uint32 particles_10um = 9;
+  uint32 particles_25um = 10;
+  uint32 particles_50um = 11;
+  uint32 particles_100um = 12;
+}
+
+message PowerMetrics {
+  float ch1_voltage = 1;
+  float ch1_current = 2;
+  float ch2_voltage = 3;
+  float ch2_current = 4;
+  float ch3_voltage = 5;
+  float ch3_current = 6;
+}
+
+message LocalStats {
+  uint32 num_packets_tx = 1;
+  uint32 num_packets_rx = 2;
+  uint32 num_packets_rx_bad = 3;
+  uint32 num_online_nodes = 4;
+  uint32 num_total_nodes = 5;
+}
+
+message HealthMetrics {
+  float heart_bpm = 1;
+  float spO2 = 2;
+  float temperature = 3;
+}
+
+message Telemetry {
+  fixed32 time = 1;
+  oneof variant {
+    DeviceMetrics device_metrics = 2;
+    EnvironmentMetrics environment_metrics = 3;
+    AirQualityMetrics air_quality_metrics = 4;
+    PowerMetrics power_metrics = 5;
+    LocalStats local_stats = 6;
+    HealthMetrics health_metrics = 7;
+  }
+}

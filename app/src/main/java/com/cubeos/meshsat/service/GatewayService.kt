@@ -1336,16 +1336,16 @@ class GatewayService : Service() {
     }
 
     private fun observeTransports() {
-        // Listen for incoming Meshtastic messages (text + position + nodeinfo)
+        // Listen for incoming Meshtastic messages — unified single-parse dispatch (MESHSAT-241)
         meshtasticBle?.let { ble ->
             scope.launch {
                 ble.receivedData.collect { data ->
-                    // Try text message first
-                    val msg = MeshtasticProtocol.parseFromRadio(data)
-                    if (msg != null) {
+                    val result = MeshtasticProtocol.parseFromRadioFull(data) ?: return@collect
+
+                    // --- Text message ---
+                    result.textMessage?.let { msg ->
                         val nodeId = MeshtasticProtocol.formatNodeId(msg.from)
                         ble.touchNode(msg.from)
-                        // Dedup: skip if we've already seen this message
                         val dedupKey = "mesh:${msg.from}:${msg.id}"
                         if (deduplicator.isDuplicateKey(dedupKey)) {
                             Log.d("MeshSat", "Dedup: skipping duplicate mesh msg $dedupKey")
@@ -1367,9 +1367,8 @@ class GatewayService : Service() {
                         return@collect
                     }
 
-                    // Try position
-                    val pos = MeshtasticProtocol.parsePositionFromRadio(data)
-                    if (pos != null) {
+                    // --- Position ---
+                    result.position?.let { pos ->
                         val nodeId = MeshtasticProtocol.formatNodeId(pos.from)
                         ble.touchNode(pos.from)
                         db.nodePositionDao().insert(
@@ -1381,15 +1380,13 @@ class GatewayService : Service() {
                                 altitude = pos.altitude,
                             )
                         )
-                        // Check geofence zones for this position update
                         geofenceMonitor?.checkPosition(nodeId, pos.latitude, pos.longitude)
                         Log.d("MeshSat", "Position from $nodeId: ${pos.latitude},${pos.longitude}")
                         return@collect
                     }
 
-                    // Try telemetry (battery level extraction)
-                    val telemetry = MeshtasticProtocol.parseTelemetryFromRadio(data)
-                    if (telemetry != null) {
+                    // --- Device telemetry (battery level) ---
+                    result.telemetry?.let { telemetry ->
                         ble.touchNode(telemetry.from)
                         if (telemetry.batteryLevel in 0..100) {
                             ble.updateNodeBattery(telemetry.from, telemetry.batteryLevel)
@@ -1397,19 +1394,150 @@ class GatewayService : Service() {
                         return@collect
                     }
 
-                    // Try my_info (device info on connect)
-                    val myInfo = MeshtasticProtocol.parseMyInfo(data)
-                    if (myInfo != null) {
+                    // --- Environment telemetry (temperature, humidity, pressure) ---
+                    result.environmentTelemetry?.let { env ->
+                        ble.touchNode(env.from)
+                        Log.d("MeshSat", "EnvTelemetry from ${MeshtasticProtocol.formatNodeId(env.from)}: " +
+                            "temp=${env.temperature}°C humidity=${env.relativeHumidity}% pressure=${env.barometricPressure}hPa")
+                        return@collect
+                    }
+
+                    // --- My node info (device info on connect) ---
+                    result.myInfo?.let { myInfo ->
                         ble.setMyInfo(myInfo)
                         Log.d("MeshSat", "MyInfo: node=${myInfo.myNodeNum}, fw=${myInfo.firmwareVersion}")
                         return@collect
                     }
 
-                    // Try node_info
-                    val nodeInfo = MeshtasticProtocol.parseNodeInfoFromRadio(data)
-                    if (nodeInfo != null) {
+                    // --- Node info ---
+                    result.nodeInfo?.let { nodeInfo ->
                         ble.addNodeInfo(nodeInfo)
                         Log.d("MeshSat", "NodeInfo: ${nodeInfo.longName} (${nodeInfo.shortName})")
+                        return@collect
+                    }
+
+                    // --- Routing (ACK/NAK) ---
+                    result.routing?.let { routing ->
+                        val nodeId = MeshtasticProtocol.formatNodeId(routing.from)
+                        if (routing.isAck) {
+                            Log.d("MeshSat", "ACK from $nodeId for request ${routing.requestId}")
+                        } else {
+                            Log.w("MeshSat", "NAK from $nodeId: ${routing.errorName} (request ${routing.requestId})")
+                        }
+                        scope.launch {
+                            ackTracker?.processAck("mesh", routing.requestId, routing.isAck)
+                        }
+                        return@collect
+                    }
+
+                    // --- Waypoint ---
+                    result.waypoint?.let { wp ->
+                        val nodeId = MeshtasticProtocol.formatNodeId(wp.from)
+                        Log.d("MeshSat", "Waypoint from $nodeId: '${wp.name}' at ${wp.latitude},${wp.longitude}")
+                        db.messageDao().insert(
+                            Message(
+                                transport = "mesh",
+                                direction = "rx",
+                                sender = nodeId,
+                                text = "\uD83D\uDCCD Waypoint: ${wp.name} — ${wp.description}",
+                                encrypted = false,
+                                timestamp = System.currentTimeMillis(),
+                            )
+                        )
+                        return@collect
+                    }
+
+                    // --- Neighbor info (mesh topology) ---
+                    result.neighborInfo?.let { ni ->
+                        val nodeId = MeshtasticProtocol.formatNodeId(ni.nodeId)
+                        val neighborList = ni.neighbors.joinToString { "${MeshtasticProtocol.formatNodeId(it.nodeId)}(${it.snr}dB)" }
+                        Log.d("MeshSat", "NeighborInfo from $nodeId: [$neighborList]")
+                        return@collect
+                    }
+
+                    // --- Traceroute ---
+                    result.traceroute?.let { tr ->
+                        val nodeId = MeshtasticProtocol.formatNodeId(tr.from)
+                        val hops = tr.route.joinToString(" → ") { MeshtasticProtocol.formatNodeId(it) }
+                        Log.d("MeshSat", "Traceroute from $nodeId: $hops")
+                        return@collect
+                    }
+
+                    // --- Store-and-forward ---
+                    result.storeForward?.let { sf ->
+                        val nodeId = MeshtasticProtocol.formatNodeId(sf.from)
+                        if (sf.text != null) {
+                            Log.d("MeshSat", "StoreForward text from $nodeId: ${sf.text}")
+                            db.messageDao().insert(
+                                Message(
+                                    transport = "mesh",
+                                    direction = "rx",
+                                    sender = nodeId,
+                                    text = sf.text,
+                                    encrypted = false,
+                                    timestamp = System.currentTimeMillis(),
+                                )
+                            )
+                            interfaceManager?.recordActivity("mesh_0")
+                        } else {
+                            Log.d("MeshSat", "StoreForward ${sf.requestResponseName} from $nodeId (${sf.messagesSaved}/${sf.messagesTotal} msgs)")
+                        }
+                        return@collect
+                    }
+
+                    // --- Range test ---
+                    result.rangeTest?.let { rt ->
+                        val nodeId = MeshtasticProtocol.formatNodeId(rt.from)
+                        Log.d("MeshSat", "RangeTest from $nodeId: '${rt.payload}' SNR=${rt.rxSnr} RSSI=${rt.rxRssi}")
+                        return@collect
+                    }
+
+                    // --- Detection sensor ---
+                    result.detectionSensor?.let { ds ->
+                        val nodeId = MeshtasticProtocol.formatNodeId(ds.from)
+                        Log.d("MeshSat", "DetectionSensor from $nodeId: ${ds.name}")
+                        db.messageDao().insert(
+                            Message(
+                                transport = "mesh",
+                                direction = "rx",
+                                sender = nodeId,
+                                text = "\u26A0\uFE0F Sensor alert: ${ds.name}",
+                                encrypted = false,
+                                timestamp = System.currentTimeMillis(),
+                            )
+                        )
+                        return@collect
+                    }
+
+                    // --- Paxcounter ---
+                    result.paxcounter?.let { pc ->
+                        Log.d("MeshSat", "Paxcounter from ${MeshtasticProtocol.formatNodeId(pc.from)}")
+                        return@collect
+                    }
+
+                    // --- Reply (emoji reaction) ---
+                    result.reply?.let { reply ->
+                        val nodeId = MeshtasticProtocol.formatNodeId(reply.from)
+                        Log.d("MeshSat", "Reply from $nodeId: '${reply.payload}' emoji=${reply.emoji}")
+                        return@collect
+                    }
+
+                    // --- Channel config ---
+                    result.channel?.let { ch ->
+                        Log.d("MeshSat", "Channel[${ch.index}]: '${ch.name}' role=${ch.role}")
+                        return@collect
+                    }
+
+                    // --- Device metadata ---
+                    result.deviceMetadata?.let { md ->
+                        Log.d("MeshSat", "DeviceMetadata: fw=${md.firmwareVersion} hw=${md.hwModel} shutdown=${md.canShutdown}")
+                        return@collect
+                    }
+
+                    // --- Config complete ---
+                    result.configCompleteId?.let { id ->
+                        Log.d("MeshSat", "Config complete: id=$id")
+                        return@collect
                     }
                 }
             }

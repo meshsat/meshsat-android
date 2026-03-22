@@ -3,6 +3,7 @@ plugins {
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
     id("com.google.devtools.ksp")
+    id("com.google.protobuf")
 }
 
 android {
@@ -50,6 +51,21 @@ android {
     }
 }
 
+protobuf {
+    protoc {
+        artifact = "com.google.protobuf:protoc:3.25.5"
+    }
+    generateProtoTasks {
+        all().forEach { task ->
+            task.builtins {
+                create("java") {
+                    option("lite")
+                }
+            }
+        }
+    }
+}
+
 dependencies {
     // Compose BOM
     val composeBom = platform("androidx.compose:compose-bom:2024.12.01")
@@ -79,6 +95,9 @@ dependencies {
 
     // Security — EncryptedSharedPreferences backed by Android Keystore (MESHSAT-194)
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
+
+    // Protobuf (Meshtastic official bindings — MESHSAT-241)
+    implementation("com.google.protobuf:protobuf-javalite:3.25.5")
 
     // BLE
     implementation("no.nordicsemi.android:ble:2.8.0")

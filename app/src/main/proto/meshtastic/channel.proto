@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package meshtastic;
+
+option java_package = "com.geeksville.mesh";
+option java_outer_classname = "ChannelProtos";
+
+message ChannelSettings {
+  uint32 channel_num = 1;
+  bytes psk = 2;
+  string name = 3;
+  fixed32 id = 4;
+  bool uplink_enabled = 5;
+  bool downlink_enabled = 6;
+  ModuleSettings module_settings = 7;
+}
+
+message ModuleSettings {
+  uint32 position_precision = 1;
+  bool is_client_muted = 2;
+}
+
+message Channel {
+  enum Role {
+    DISABLED = 0;
+    PRIMARY = 1;
+    SECONDARY = 2;
+  }
+
+  int32 index = 1;
+  ChannelSettings settings = 2;
+  Role role = 3;
+}
