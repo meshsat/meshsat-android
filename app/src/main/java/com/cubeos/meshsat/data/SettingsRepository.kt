@@ -53,6 +53,11 @@ class SettingsRepository(private val context: Context) {
         val KEY_APRS_KISS_PORT = stringPreferencesKey("aprs_kiss_port")
         val KEY_APRS_FREQUENCY = stringPreferencesKey("aprs_frequency_mhz")
 
+        // Reticulum TCP settings (MESHSAT-268)
+        val KEY_RNS_TCP_ENABLED = booleanPreferencesKey("rns_tcp_enabled")
+        val KEY_RNS_TCP_HOST = stringPreferencesKey("rns_tcp_host")
+        val KEY_RNS_TCP_PORT = stringPreferencesKey("rns_tcp_port")
+
         // APRS-IS settings (MESHSAT-230)
         val KEY_APRS_MODE = stringPreferencesKey("aprs_mode") // "kiss" or "is"
         val KEY_APRS_IS_SERVER = stringPreferencesKey("aprs_is_server")
@@ -394,5 +399,31 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setAprsIsBeaconInterval(interval: String) {
         context.dataStore.edit { it[KEY_APRS_IS_BEACON_INTERVAL] = interval }
+    }
+
+    // --- Reticulum TCP settings (MESHSAT-268) ---
+
+    val rnsTcpEnabled: Flow<Boolean> = context.dataStore.data.map {
+        it[KEY_RNS_TCP_ENABLED] ?: false
+    }
+
+    val rnsTcpHost: Flow<String> = context.dataStore.data.map {
+        it[KEY_RNS_TCP_HOST] ?: ""
+    }
+
+    val rnsTcpPort: Flow<String> = context.dataStore.data.map {
+        it[KEY_RNS_TCP_PORT] ?: "4242"
+    }
+
+    suspend fun setRnsTcpEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[KEY_RNS_TCP_ENABLED] = enabled }
+    }
+
+    suspend fun setRnsTcpHost(host: String) {
+        context.dataStore.edit { it[KEY_RNS_TCP_HOST] = host }
+    }
+
+    suspend fun setRnsTcpPort(port: String) {
+        context.dataStore.edit { it[KEY_RNS_TCP_PORT] = port }
     }
 }

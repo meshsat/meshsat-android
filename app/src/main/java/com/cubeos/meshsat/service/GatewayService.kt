@@ -156,6 +156,10 @@ class GatewayService : Service() {
         var aprsMessageTracker: com.cubeos.meshsat.aprs.AprsMessageTracker? = null
             private set
 
+        // Reticulum TCP interface (MESHSAT-268)
+        var rnsTcpInterface: com.cubeos.meshsat.reticulum.RnsTcpInterface? = null
+            private set
+
         // Reticulum Transport Node (MESHSAT-199/267)
         var rnsTransportNode: com.cubeos.meshsat.reticulum.RnsTransportNode? = null
             private set
@@ -221,6 +225,7 @@ class GatewayService : Service() {
             initMqtt()
             initSmsRelay()
             initAprs()
+            initRnsTcp()
             initReticulumTransportNode()
         } catch (e: Exception) {
             Log.e("MeshSat", "Service init error (non-fatal): ${e.message}", e)
@@ -857,6 +862,50 @@ class GatewayService : Service() {
     }
 
     /**
+     * Initialize Reticulum TCP interface (MESHSAT-268).
+     * Connects to a stock RNS node over TCP with HDLC framing.
+     */
+    private fun initRnsTcp() {
+        scope.launch {
+            try {
+                val enabled = settings.rnsTcpEnabled.first()
+                if (!enabled) {
+                    Log.d("MeshSat", "RNS TCP disabled in settings")
+                    return@launch
+                }
+                val host = settings.rnsTcpHost.first()
+                if (host.isBlank()) {
+                    Log.w("MeshSat", "RNS TCP: host not configured")
+                    return@launch
+                }
+                val port = settings.rnsTcpPort.first().toIntOrNull()
+                    ?: com.cubeos.meshsat.reticulum.RnsTcpInterface.DEFAULT_PORT
+
+                val tcp = com.cubeos.meshsat.reticulum.RnsTcpInterface(scope)
+                tcp.connect(host, port)
+                rnsTcpInterface = tcp
+                scope.launch {
+                    tcp.state.collect { state ->
+                        when (state) {
+                            com.cubeos.meshsat.reticulum.RnsTcpInterface.State.Connected ->
+                                interfaceManager?.setOnline("tcp_rns_0")
+                            com.cubeos.meshsat.reticulum.RnsTcpInterface.State.Disconnected ->
+                                interfaceManager?.setOffline("tcp_rns_0")
+                            com.cubeos.meshsat.reticulum.RnsTcpInterface.State.Error ->
+                                interfaceManager?.setError("tcp_rns_0", tcp.error.value)
+                            com.cubeos.meshsat.reticulum.RnsTcpInterface.State.Connecting ->
+                                interfaceManager?.setConnecting("tcp_rns_0")
+                        }
+                    }
+                }
+                Log.i("MeshSat", "RNS TCP interface initialized: $host:$port")
+            } catch (e: Exception) {
+                Log.w("MeshSat", "RNS TCP init failed (non-fatal): ${e.message}")
+            }
+        }
+    }
+
+    /**
      * Initialize Reticulum Transport Node (MESHSAT-199/267).
      * Creates the routing identity, all RnsInterfaces, and starts the transport node.
      */
@@ -890,6 +939,9 @@ class GatewayService : Service() {
                     }
                     iridium9704Spp?.let { spp ->
                         map["iridium9704_rns_0"] = com.cubeos.meshsat.reticulum.RnsIridium9704Interface(spp, scope)
+                    }
+                    rnsTcpInterface?.let { tcp ->
+                        map["tcp_rns_0"] = tcp
                     }
                     // SMS, MQTT, APRS interfaces can be added here as they become available
                     map
@@ -989,6 +1041,12 @@ class GatewayService : Service() {
             initialBackoff = 10.seconds,
             maxBackoff = 120.seconds,
         ))
+        mgr.register(InterfaceConfig(
+            id = "tcp_rns_0", channelType = "tcp",
+            autoReconnect = true,
+            initialBackoff = 5.seconds,
+            maxBackoff = 60.seconds,
+        ))
 
         // Connect callback — triggers actual BLE/SPP connection
         // Uses the saved BLE/SPP addresses from settings to reconnect.
@@ -1036,6 +1094,18 @@ class GatewayService : Service() {
                     client.connect(host, port)
                     null // connection is async — setOnline called from state observer
                 }
+                interfaceId.startsWith("tcp_rns") -> {
+                    val host = settings.rnsTcpHost.first()
+                    if (host.isBlank()) {
+                        return@setConnectCallback "RNS TCP host not configured"
+                    }
+                    val port = settings.rnsTcpPort.first().toIntOrNull()
+                        ?: com.cubeos.meshsat.reticulum.RnsTcpInterface.DEFAULT_PORT
+                    val tcp = rnsTcpInterface
+                        ?: com.cubeos.meshsat.reticulum.RnsTcpInterface(scope).also { rnsTcpInterface = it }
+                    tcp.connect(host, port)
+                    null
+                }
                 else -> null
             }
         }
@@ -1048,6 +1118,7 @@ class GatewayService : Service() {
                 interfaceId == "iridium9704_0" -> iridium9704Spp?.disconnect()
                 interfaceId.startsWith("mqtt") -> mqttTransport?.disconnect()
                 interfaceId.startsWith("aprs") -> kissClient?.disconnect()
+                interfaceId.startsWith("tcp_rns") -> rnsTcpInterface?.disconnect()
             }
         }
 
@@ -1117,7 +1188,7 @@ class GatewayService : Service() {
             }
         }
 
-        Log.i("MeshSat", "InterfaceManager initialized with 6 interfaces")
+        Log.i("MeshSat", "InterfaceManager initialized with 7 interfaces")
     }
 
     /**

@@ -113,6 +113,11 @@ fun SettingsScreen(navController: NavController? = null) {
     val aprsIsBeaconEnabled by settings.aprsIsBeaconEnabled.collectAsState(initial = false)
     val aprsIsBeaconInterval by settings.aprsIsBeaconInterval.collectAsState(initial = "10")
 
+    // RNS TCP settings (MESHSAT-268)
+    val rnsTcpEnabled by settings.rnsTcpEnabled.collectAsState(initial = false)
+    val rnsTcpHost by settings.rnsTcpHost.collectAsState(initial = "")
+    val rnsTcpPort by settings.rnsTcpPort.collectAsState(initial = "4242")
+
     var keyInput by remember(encryptionKey) { mutableStateOf(encryptionKey) }
     var phoneInput by remember(piPhone) { mutableStateOf(piPhone) }
     var showKey by remember { mutableStateOf(false) }
@@ -131,6 +136,11 @@ fun SettingsScreen(navController: NavController? = null) {
     var aprsIsFilterRangeInput by remember(aprsIsFilterRange) { mutableStateOf(aprsIsFilterRange) }
     var aprsIsBeaconIntervalInput by remember(aprsIsBeaconInterval) { mutableStateOf(aprsIsBeaconInterval) }
     val aprsIsState = GatewayService.aprsIsClient?.state?.collectAsState()
+
+    // RNS TCP state (MESHSAT-268)
+    var rnsTcpHostInput by remember(rnsTcpHost) { mutableStateOf(rnsTcpHost) }
+    var rnsTcpPortInput by remember(rnsTcpPort) { mutableStateOf(rnsTcpPort) }
+    val rnsTcpState = GatewayService.rnsTcpInterface?.state?.collectAsState()
 
     // BLE state
     val meshState = GatewayService.meshtasticBle?.state?.collectAsState()
@@ -1307,6 +1317,82 @@ fun SettingsScreen(navController: NavController? = null) {
                         "No APRSDroid or radio needed. Use passcode -1 for receive-only, or Auto to calculate from callsign. " +
                         "Position beacon sends GPS location at the configured interval."
                 },
+                style = MaterialTheme.typography.bodySmall,
+                color = MeshSatTextMuted,
+            )
+        }
+
+        // --- Reticulum TCP Section (MESHSAT-268) ---
+        SectionCard("Reticulum TCP") {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Enable RNS TCP", style = MaterialTheme.typography.bodyMedium)
+                Switch(
+                    checked = rnsTcpEnabled,
+                    onCheckedChange = { scope.launch { settings.setRnsTcpEnabled(it) } },
+                    colors = SwitchDefaults.colors(checkedTrackColor = MeshSatTeal),
+                )
+            }
+
+            // Connection status
+            rnsTcpState?.let { state ->
+                val statusText = when (state.value) {
+                    com.cubeos.meshsat.reticulum.RnsTcpInterface.State.Connected -> "Connected"
+                    com.cubeos.meshsat.reticulum.RnsTcpInterface.State.Connecting -> "Connecting..."
+                    com.cubeos.meshsat.reticulum.RnsTcpInterface.State.Error -> "Error"
+                    com.cubeos.meshsat.reticulum.RnsTcpInterface.State.Disconnected -> "Disconnected"
+                }
+                val isOnline = state.value == com.cubeos.meshsat.reticulum.RnsTcpInterface.State.Connected
+                ConnectionStatusRow("RNS TCP", isOnline, statusText, MeshSatTeal)
+            }
+
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = rnsTcpHostInput,
+                    onValueChange = { rnsTcpHostInput = it },
+                    label = { Text("Host", style = MaterialTheme.typography.bodySmall) },
+                    singleLine = true,
+                    modifier = Modifier.weight(2f),
+                    textStyle = MaterialTheme.typography.bodyMedium,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = MeshSatTeal,
+                        unfocusedBorderColor = MeshSatBorder,
+                    ),
+                )
+                OutlinedTextField(
+                    value = rnsTcpPortInput,
+                    onValueChange = { rnsTcpPortInput = it.filter { c -> c.isDigit() }.take(5) },
+                    label = { Text("Port", style = MaterialTheme.typography.bodySmall) },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.weight(1f),
+                    textStyle = MaterialTheme.typography.bodyMedium,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = MeshSatTeal,
+                        unfocusedBorderColor = MeshSatBorder,
+                    ),
+                )
+            }
+
+            Button(
+                onClick = {
+                    scope.launch {
+                        settings.setRnsTcpHost(rnsTcpHostInput)
+                        settings.setRnsTcpPort(rnsTcpPortInput)
+                    }
+                    Toast.makeText(context, "RNS TCP settings saved", Toast.LENGTH_SHORT).show()
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = MeshSatTeal),
+            ) {
+                Text("Save", style = MaterialTheme.typography.bodySmall)
+            }
+
+            Text(
+                text = "Connect to a stock Reticulum (Python RNS) node over TCP/IP. " +
+                    "Default port 4242. Uses HDLC framing for wire compatibility.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MeshSatTextMuted,
             )
