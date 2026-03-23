@@ -95,4 +95,7 @@ enum class RnsEncapsulation {
 
     /** MQTT topic with binary payload. */
     MQTT_BINARY,
+
+    /** HDLC-framed TCP (stock RNS wire format). */
+    TCP_HDLC,
 }
