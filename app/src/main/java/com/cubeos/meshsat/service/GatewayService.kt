@@ -168,6 +168,10 @@ class GatewayService : Service() {
         var rnsTransportNode: com.cubeos.meshsat.reticulum.RnsTransportNode? = null
             private set
 
+        // Hub Reporter — bridge-to-hub uplink protocol (MESHSAT-292)
+        var hubReporter: com.cubeos.meshsat.hub.HubReporter? = null
+            private set
+
         private var notificationId = 100
     }
 
@@ -232,6 +236,7 @@ class GatewayService : Service() {
             initAprs()
             initRnsTcp()
             initReticulumTransportNode()
+            initHubReporter()
         } catch (e: Exception) {
             Log.e("MeshSat", "Service init error (non-fatal): ${e.message}", e)
         }
@@ -284,6 +289,8 @@ class GatewayService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        hubReporter?.stop()
+        hubReporter = null
         aprsMessageTracker?.cancelAll()
         aprsMessageTracker = null
         aprsBeacon?.stop()
@@ -494,6 +501,109 @@ class GatewayService : Service() {
                 Log.i("MeshSat", "MQTT Hub transport initialized")
             } catch (e: Exception) {
                 Log.w("MeshSat", "MQTT init failed: ${e.message}")
+            }
+        }
+    }
+
+    /** Initialize Hub Reporter — bridge-to-hub uplink protocol (MESHSAT-292). */
+    private fun initHubReporter() {
+        scope.launch {
+            try {
+                val enabled = settings.hubEnabled.first()
+                if (!enabled) {
+                    Log.d("MeshSat", "Hub Reporter disabled in settings")
+                    return@launch
+                }
+                val hubUrl = settings.hubUrl.first()
+                val bridgeId = settings.hubBridgeId.first().ifEmpty {
+                    android.provider.Settings.Secure.getString(
+                        contentResolver,
+                        android.provider.Settings.Secure.ANDROID_ID,
+                    ) ?: "android-unknown"
+                }
+                if (hubUrl.isBlank()) {
+                    Log.w("MeshSat", "Hub Reporter: URL not configured")
+                    return@launch
+                }
+                val callsign = settings.hubCallsign.first()
+                val username = settings.hubUsername.first()
+                val password = settings.hubPassword.first()
+                val healthInterval = settings.hubHealthInterval.first().toIntOrNull() ?: 30
+                val certPin = settings.mqttCertPin.first()
+                val certPinBackup = settings.mqttCertPinBackup.first()
+
+                val config = com.cubeos.meshsat.hub.HubReporterConfig(
+                    hubUrl = hubUrl,
+                    bridgeId = bridgeId,
+                    callsign = callsign,
+                    username = username,
+                    password = password,
+                    certPin = certPin,
+                    certPinBackup = certPinBackup,
+                    healthIntervalSec = healthInterval,
+                )
+
+                val reporter = com.cubeos.meshsat.hub.HubReporter(
+                    context = this@GatewayService,
+                    scope = scope,
+                    config = config,
+                )
+                reporter.setCommandCallback { cmd ->
+                    handleHubCommand(cmd)
+                }
+                reporter.start()
+                hubReporter = reporter
+                Log.i("MeshSat", "Hub Reporter initialized: bridge=$bridgeId")
+            } catch (e: Exception) {
+                Log.w("MeshSat", "Hub Reporter init failed: ${e.message}")
+            }
+        }
+    }
+
+    /** Handle inbound commands from the Hub via HubReporter. */
+    private fun handleHubCommand(cmd: com.cubeos.meshsat.hub.HubCommand) {
+        scope.launch {
+            try {
+                when (cmd.cmd) {
+                    "send_text" -> {
+                        val json = org.json.JSONObject(cmd.payload)
+                        val text = json.optString("text", "")
+                        if (text.isNotBlank()) {
+                            val msg = com.cubeos.meshsat.rules.RouteMessage(
+                                text = text, from = "hub", channel = 0, portNum = 1,
+                                visited = listOf("hub_reporter"),
+                            )
+                            dispatcher?.dispatchAccess("hub_reporter", msg, text.toByteArray())
+                        }
+                        hubReporter?.publishCommandResponse(
+                            com.cubeos.meshsat.hub.CommandResponse(
+                                requestId = cmd.requestId,
+                                cmd = cmd.cmd,
+                                status = "ok",
+                            )
+                        )
+                    }
+                    else -> {
+                        hubReporter?.publishCommandResponse(
+                            com.cubeos.meshsat.hub.CommandResponse(
+                                requestId = cmd.requestId,
+                                cmd = cmd.cmd,
+                                status = "error",
+                                error = "unsupported command: ${cmd.cmd}",
+                            )
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w("MeshSat", "Hub command handling failed: ${e.message}")
+                hubReporter?.publishCommandResponse(
+                    com.cubeos.meshsat.hub.CommandResponse(
+                        requestId = cmd.requestId,
+                        cmd = cmd.cmd,
+                        status = "error",
+                        error = e.message ?: "unknown error",
+                    )
+                )
             }
         }
     }
@@ -1532,6 +1642,24 @@ class GatewayService : Service() {
                 course = location.bearing.toDouble(),
                 speed = location.speed.toDouble(),
             )
+        }
+        // Publish position to Hub via HubReporter (MESHSAT-292)
+        hubReporter?.let { reporter ->
+            if (reporter.isConnected) {
+                val pos = com.cubeos.meshsat.hub.DevicePosition(
+                    lat = location.latitude,
+                    lon = location.longitude,
+                    alt = location.altitude,
+                    speed = location.speed.toDouble(),
+                    course = location.bearing.toDouble(),
+                    source = "gps",
+                )
+                val deviceId = try {
+                    kotlinx.coroutines.runBlocking { settings.hubBridgeId.first() }
+                        .ifEmpty { "android-phone" }
+                } catch (_: Exception) { "android-phone" }
+                reporter.publishDevicePosition(deviceId, pos)
+            }
         }
         // Feed APRS beacon smart beaconing engine (MESHSAT-231)
         aprsBeacon?.onLocationUpdate(location)

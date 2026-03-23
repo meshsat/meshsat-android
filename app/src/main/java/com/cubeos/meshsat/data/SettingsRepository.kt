@@ -58,6 +58,14 @@ class SettingsRepository(private val context: Context) {
         val KEY_RNS_TCP_HOST = stringPreferencesKey("rns_tcp_host")
         val KEY_RNS_TCP_PORT = stringPreferencesKey("rns_tcp_port")
 
+        // Hub Reporter settings (MESHSAT-292)
+        val KEY_HUB_ENABLED = booleanPreferencesKey("hub_enabled")
+        val KEY_HUB_URL = stringPreferencesKey("hub_url")
+        val KEY_HUB_BRIDGE_ID = stringPreferencesKey("hub_bridge_id")
+        val KEY_HUB_CALLSIGN = stringPreferencesKey("hub_callsign")
+        val KEY_HUB_USERNAME = stringPreferencesKey("hub_username")
+        val KEY_HUB_HEALTH_INTERVAL = stringPreferencesKey("hub_health_interval") // seconds as string
+
         // APRS-IS settings (MESHSAT-230)
         val KEY_APRS_MODE = stringPreferencesKey("aprs_mode") // "kiss" or "is"
         val KEY_APRS_IS_SERVER = stringPreferencesKey("aprs_is_server")
@@ -425,5 +433,68 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setRnsTcpPort(port: String) {
         context.dataStore.edit { it[KEY_RNS_TCP_PORT] = port }
+    }
+
+    // --- Hub Reporter settings (MESHSAT-292) ---
+
+    val hubEnabled: Flow<Boolean> = context.dataStore.data.map {
+        it[KEY_HUB_ENABLED] ?: false
+    }
+
+    val hubUrl: Flow<String> = context.dataStore.data.map {
+        it[KEY_HUB_URL] ?: ""
+    }
+
+    val hubBridgeId: Flow<String> = context.dataStore.data.map {
+        it[KEY_HUB_BRIDGE_ID] ?: ""
+    }
+
+    val hubCallsign: Flow<String> = context.dataStore.data.map {
+        it[KEY_HUB_CALLSIGN] ?: ""
+    }
+
+    val hubUsername: Flow<String> = context.dataStore.data.map {
+        it[KEY_HUB_USERNAME] ?: ""
+    }
+
+    val hubPassword: Flow<String> = context.dataStore.data.map {
+        val secure = secureStore.get("hub_password")
+        if (secure != null) {
+            secure
+        } else {
+            "" // No migration needed — Hub reporter is new
+        }
+    }
+
+    val hubHealthInterval: Flow<String> = context.dataStore.data.map {
+        it[KEY_HUB_HEALTH_INTERVAL] ?: "30"
+    }
+
+    suspend fun setHubEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[KEY_HUB_ENABLED] = enabled }
+    }
+
+    suspend fun setHubUrl(url: String) {
+        context.dataStore.edit { it[KEY_HUB_URL] = url }
+    }
+
+    suspend fun setHubBridgeId(id: String) {
+        context.dataStore.edit { it[KEY_HUB_BRIDGE_ID] = id }
+    }
+
+    suspend fun setHubCallsign(callsign: String) {
+        context.dataStore.edit { it[KEY_HUB_CALLSIGN] = callsign }
+    }
+
+    suspend fun setHubUsername(username: String) {
+        context.dataStore.edit { it[KEY_HUB_USERNAME] = username }
+    }
+
+    suspend fun setHubPassword(password: String) {
+        secureStore.set("hub_password", password)
+    }
+
+    suspend fun setHubHealthInterval(interval: String) {
+        context.dataStore.edit { it[KEY_HUB_HEALTH_INTERVAL] = interval }
     }
 }

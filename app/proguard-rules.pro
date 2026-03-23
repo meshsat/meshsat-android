@@ -35,6 +35,18 @@
 -keepnames class com.cubeos.meshsat.config.DiffResult { *; }
 -keepnames class com.cubeos.meshsat.config.DiffCounts { *; }
 
+# Hub Reporter protocol types (MESHSAT-292)
+-keepnames class com.cubeos.meshsat.hub.HubProtocol { *; }
+-keepnames class com.cubeos.meshsat.hub.HubReporter { *; }
+-keepnames class com.cubeos.meshsat.hub.HubReporterConfig { *; }
+-keepnames class com.cubeos.meshsat.hub.BridgeBirth { *; }
+-keepnames class com.cubeos.meshsat.hub.BridgeDeath { *; }
+-keepnames class com.cubeos.meshsat.hub.BridgeHealth { *; }
+-keepnames class com.cubeos.meshsat.hub.DeviceBirth { *; }
+-keepnames class com.cubeos.meshsat.hub.DeviceDeath { *; }
+-keepnames class com.cubeos.meshsat.hub.DevicePosition { *; }
+-keepnames class com.cubeos.meshsat.hub.DeviceTelemetry { *; }
+
 # Data classes used in rules/transports
 -keepnames class com.cubeos.meshsat.rules.ForwardingRule { *; }
 -keepnames class com.cubeos.meshsat.bt.IridiumSpp$SbdixResult { *; }

@@ -118,6 +118,15 @@ fun SettingsScreen(navController: NavController? = null) {
     val rnsTcpHost by settings.rnsTcpHost.collectAsState(initial = "")
     val rnsTcpPort by settings.rnsTcpPort.collectAsState(initial = "4242")
 
+    // Hub Reporter settings (MESHSAT-292)
+    val hubEnabled by settings.hubEnabled.collectAsState(initial = false)
+    val hubUrl by settings.hubUrl.collectAsState(initial = "")
+    val hubBridgeId by settings.hubBridgeId.collectAsState(initial = "")
+    val hubCallsign by settings.hubCallsign.collectAsState(initial = "")
+    val hubUsername by settings.hubUsername.collectAsState(initial = "")
+    val hubPassword by settings.hubPassword.collectAsState(initial = "")
+    val hubHealthInterval by settings.hubHealthInterval.collectAsState(initial = "30")
+
     var keyInput by remember(encryptionKey) { mutableStateOf(encryptionKey) }
     var phoneInput by remember(piPhone) { mutableStateOf(piPhone) }
     var showKey by remember { mutableStateOf(false) }
@@ -141,6 +150,16 @@ fun SettingsScreen(navController: NavController? = null) {
     var rnsTcpHostInput by remember(rnsTcpHost) { mutableStateOf(rnsTcpHost) }
     var rnsTcpPortInput by remember(rnsTcpPort) { mutableStateOf(rnsTcpPort) }
     val rnsTcpState = GatewayService.rnsTcpInterface?.state?.collectAsState()
+
+    // Hub Reporter state (MESHSAT-292)
+    var hubUrlInput by remember(hubUrl) { mutableStateOf(hubUrl) }
+    var hubBridgeIdInput by remember(hubBridgeId) { mutableStateOf(hubBridgeId) }
+    var hubCallsignInput by remember(hubCallsign) { mutableStateOf(hubCallsign) }
+    var hubUsernameInput by remember(hubUsername) { mutableStateOf(hubUsername) }
+    var hubPasswordInput by remember(hubPassword) { mutableStateOf(hubPassword) }
+    var hubHealthIntervalInput by remember(hubHealthInterval) { mutableStateOf(hubHealthInterval) }
+    var showHubPassword by remember { mutableStateOf(false) }
+    val hubReporterState = GatewayService.hubReporter?.state?.collectAsState()
 
     // BLE state
     val meshState = GatewayService.meshtasticBle?.state?.collectAsState()
@@ -1393,6 +1412,143 @@ fun SettingsScreen(navController: NavController? = null) {
             Text(
                 text = "Connect to a stock Reticulum (Python RNS) node over TCP/IP. " +
                     "Default port 4242. Uses HDLC framing for wire compatibility.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MeshSatTextMuted,
+            )
+        }
+
+        SectionCard("Hub Reporter") {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Enable Hub Reporting", style = MaterialTheme.typography.bodyMedium)
+                Switch(
+                    checked = hubEnabled,
+                    onCheckedChange = { scope.launch { settings.setHubEnabled(it) } },
+                    colors = SwitchDefaults.colors(checkedTrackColor = MeshSatTeal),
+                )
+            }
+
+            // Connection status
+            hubReporterState?.let { state ->
+                val statusText = when (state.value) {
+                    com.cubeos.meshsat.hub.HubReporter.State.Connected -> "Connected"
+                    com.cubeos.meshsat.hub.HubReporter.State.Connecting -> "Connecting..."
+                    com.cubeos.meshsat.hub.HubReporter.State.Error -> "Error"
+                    com.cubeos.meshsat.hub.HubReporter.State.Disconnected -> "Disconnected"
+                }
+                val isOnline = state.value == com.cubeos.meshsat.hub.HubReporter.State.Connected
+                ConnectionStatusRow("Hub", isOnline, statusText, MeshSatTeal)
+            }
+
+            OutlinedTextField(
+                value = hubUrlInput,
+                onValueChange = { hubUrlInput = it },
+                label = { Text("Hub MQTT URL", style = MaterialTheme.typography.bodySmall) },
+                placeholder = { Text("tcp://hub.meshsat.net:1883", style = MaterialTheme.typography.bodySmall, color = MeshSatTextMuted) },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+                textStyle = MaterialTheme.typography.bodyMedium,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = MeshSatTeal,
+                    unfocusedBorderColor = MeshSatBorder,
+                ),
+            )
+
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = hubBridgeIdInput,
+                    onValueChange = { hubBridgeIdInput = it },
+                    label = { Text("Bridge ID", style = MaterialTheme.typography.bodySmall) },
+                    placeholder = { Text("auto (Android ID)", style = MaterialTheme.typography.bodySmall, color = MeshSatTextMuted) },
+                    singleLine = true,
+                    modifier = Modifier.weight(1f),
+                    textStyle = MaterialTheme.typography.bodyMedium,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = MeshSatTeal,
+                        unfocusedBorderColor = MeshSatBorder,
+                    ),
+                )
+                OutlinedTextField(
+                    value = hubCallsignInput,
+                    onValueChange = { hubCallsignInput = it },
+                    label = { Text("Callsign", style = MaterialTheme.typography.bodySmall) },
+                    placeholder = { Text("TAK callsign", style = MaterialTheme.typography.bodySmall, color = MeshSatTextMuted) },
+                    singleLine = true,
+                    modifier = Modifier.weight(1f),
+                    textStyle = MaterialTheme.typography.bodyMedium,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = MeshSatTeal,
+                        unfocusedBorderColor = MeshSatBorder,
+                    ),
+                )
+            }
+
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = hubUsernameInput,
+                    onValueChange = { hubUsernameInput = it },
+                    label = { Text("Username", style = MaterialTheme.typography.bodySmall) },
+                    singleLine = true,
+                    modifier = Modifier.weight(1f),
+                    textStyle = MaterialTheme.typography.bodyMedium,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = MeshSatTeal,
+                        unfocusedBorderColor = MeshSatBorder,
+                    ),
+                )
+                OutlinedTextField(
+                    value = hubPasswordInput,
+                    onValueChange = { hubPasswordInput = it },
+                    label = { Text("Password", style = MaterialTheme.typography.bodySmall) },
+                    singleLine = true,
+                    modifier = Modifier.weight(1f),
+                    textStyle = MaterialTheme.typography.bodyMedium,
+                    visualTransformation = if (showHubPassword) VisualTransformation.None else PasswordVisualTransformation(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = MeshSatTeal,
+                        unfocusedBorderColor = MeshSatBorder,
+                    ),
+                )
+            }
+
+            OutlinedTextField(
+                value = hubHealthIntervalInput,
+                onValueChange = { hubHealthIntervalInput = it.filter { c -> c.isDigit() }.take(4) },
+                label = { Text("Health interval (seconds)", style = MaterialTheme.typography.bodySmall) },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                modifier = Modifier.fillMaxWidth(),
+                textStyle = MaterialTheme.typography.bodyMedium,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = MeshSatTeal,
+                    unfocusedBorderColor = MeshSatBorder,
+                ),
+            )
+
+            Button(
+                onClick = {
+                    scope.launch {
+                        settings.setHubUrl(hubUrlInput)
+                        settings.setHubBridgeId(hubBridgeIdInput)
+                        settings.setHubCallsign(hubCallsignInput)
+                        settings.setHubUsername(hubUsernameInput)
+                        settings.setHubPassword(hubPasswordInput)
+                        settings.setHubHealthInterval(hubHealthIntervalInput)
+                    }
+                    Toast.makeText(context, "Hub Reporter settings saved (restart to apply)", Toast.LENGTH_SHORT).show()
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = MeshSatTeal),
+            ) {
+                Text("Save", style = MaterialTheme.typography.bodySmall)
+            }
+
+            Text(
+                text = "Connect to MeshSat Hub as a mobile field node. " +
+                    "Publishes birth/health/position to the fleet dashboard and TAK map. " +
+                    "Leave Bridge ID blank to use Android device ID.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MeshSatTextMuted,
             )
