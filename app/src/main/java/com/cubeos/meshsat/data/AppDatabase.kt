@@ -21,8 +21,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         MessageDeliveryEntity::class,
         AuditLogEntity::class,
         TleCacheEntity::class,
+        ProviderCredential::class,
     ],
-    version = 8,
+    version = 9,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -38,6 +39,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun messageDeliveryDao(): MessageDeliveryDao
     abstract fun auditLogDao(): AuditLogDao
     abstract fun tleCacheDao(): TleCacheDao
+    abstract fun providerCredentialDao(): ProviderCredentialDao
 
     companion object {
         @Volatile
@@ -91,6 +93,27 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /** Migration 8→9: Provider credentials table [MESHSAT-369]. */
+        val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS provider_credentials (
+                        id TEXT NOT NULL PRIMARY KEY,
+                        provider TEXT NOT NULL,
+                        name TEXT NOT NULL,
+                        cred_type TEXT NOT NULL,
+                        encrypted_data BLOB NOT NULL,
+                        cert_not_after TEXT,
+                        cert_subject TEXT NOT NULL DEFAULT '',
+                        cert_fingerprint TEXT NOT NULL DEFAULT '',
+                        version INTEGER NOT NULL DEFAULT 1,
+                        source TEXT NOT NULL DEFAULT 'local',
+                        received_at INTEGER NOT NULL DEFAULT 0
+                    )
+                """.trimIndent())
+            }
+        }
+
         fun getInstance(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
@@ -98,7 +121,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "meshsat.db"
                 )
-                    .addMigrations(MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
+                    .addMigrations(MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
                     .fallbackToDestructiveMigration()
                     .build()
                     .also { INSTANCE = it }

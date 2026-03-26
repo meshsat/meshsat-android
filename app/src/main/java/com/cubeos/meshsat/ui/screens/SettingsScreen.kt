@@ -172,22 +172,43 @@ fun SettingsScreen(navController: NavController? = null) {
     val iridium9704Signal = GatewayService.iridium9704Spp?.signal?.collectAsState()
     val iridium9704ModemInfo = GatewayService.iridium9704Spp?.modemInfo?.collectAsState()
 
-    // QR code scanner for Hub key sync (MESHSAT-205)
+    // QR code scanner for key sync — handles both raw hex keys and meshsat://key/ URL bundles
     val qrScanLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
         val scanResult = com.journeyapps.barcodescanner.ScanIntentResult.parseActivityResult(
             result.resultCode, result.data
         )
-        val scannedKey = scanResult.contents
-        if (scannedKey != null && scannedKey.length == 64 &&
-            scannedKey.all { it in "0123456789abcdefABCDEF" }
+        val scanned = scanResult.contents
+        if (scanned != null && scanned.startsWith("meshsat://key/")) {
+            // MeshSat key bundle URL — contains signed multi-channel key bundle
+            scope.launch {
+                try {
+                    val imported = com.cubeos.meshsat.crypto.KeyBundleImporter.importFromURL(
+                        scanned, context
+                    )
+                    Toast.makeText(
+                        context,
+                        "Imported $imported key(s) from bridge bundle",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                } catch (e: Exception) {
+                    Toast.makeText(
+                        context,
+                        "Bundle import failed: ${e.message}",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+        } else if (scanned != null && scanned.length == 64 &&
+            scanned.all { it in "0123456789abcdefABCDEF" }
         ) {
-            keyInput = scannedKey
-            scope.launch { settings.setEncryptionKey(scannedKey) }
-            Toast.makeText(context, "Hub key imported via QR", Toast.LENGTH_SHORT).show()
-        } else if (scannedKey != null) {
-            Toast.makeText(context, "QR code doesn't contain a valid 64-char hex key", Toast.LENGTH_LONG).show()
+            // Legacy: raw 64-char hex key
+            keyInput = scanned
+            scope.launch { settings.setEncryptionKey(scanned) }
+            Toast.makeText(context, "Key imported via QR", Toast.LENGTH_SHORT).show()
+        } else if (scanned != null) {
+            Toast.makeText(context, "QR code doesn't contain a valid key or bundle", Toast.LENGTH_LONG).show()
         }
     }
 

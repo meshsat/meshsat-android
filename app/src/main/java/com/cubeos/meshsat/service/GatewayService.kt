@@ -583,6 +583,46 @@ class GatewayService : Service() {
                             )
                         )
                     }
+                    "credential_push" -> {
+                        val json = org.json.JSONObject(cmd.payload)
+                        val credId = json.optString("credential_id", "")
+                        val provider = json.optString("provider", "")
+                        val name = json.optString("name", "")
+                        val credType = json.optString("cred_type", "")
+                        val version = json.optInt("version", 1)
+                        val dataB64 = json.optString("data", "")
+                        val certNotAfter = json.optString("cert_not_after", "")
+                        val certFingerprint = json.optString("cert_fingerprint", "")
+                        val data = android.util.Base64.decode(dataB64, android.util.Base64.DEFAULT)
+                        val db = com.cubeos.meshsat.data.AppDatabase.getInstance(this@GatewayService)
+                        db.providerCredentialDao().upsert(
+                            com.cubeos.meshsat.data.ProviderCredential(
+                                id = credId, provider = provider, name = name,
+                                credType = credType, encryptedData = data,
+                                certNotAfter = certNotAfter.ifBlank { null },
+                                certFingerprint = certFingerprint, version = version,
+                                source = "hub",
+                            )
+                        )
+                        Log.i("MeshSat", "Credential received from Hub: $credId ($provider)")
+                        hubReporter?.publishCommandResponse(
+                            com.cubeos.meshsat.hub.CommandResponse(
+                                requestId = cmd.requestId, cmd = cmd.cmd, status = "ok",
+                            )
+                        )
+                    }
+                    "credential_revoke" -> {
+                        val json = org.json.JSONObject(cmd.payload)
+                        val credId = json.optString("credential_id", "")
+                        val db = com.cubeos.meshsat.data.AppDatabase.getInstance(this@GatewayService)
+                        db.providerCredentialDao().deleteById(credId)
+                        Log.i("MeshSat", "Credential revoked by Hub: $credId")
+                        hubReporter?.publishCommandResponse(
+                            com.cubeos.meshsat.hub.CommandResponse(
+                                requestId = cmd.requestId, cmd = cmd.cmd, status = "ok",
+                            )
+                        )
+                    }
                     else -> {
                         hubReporter?.publishCommandResponse(
                             com.cubeos.meshsat.hub.CommandResponse(
