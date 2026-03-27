@@ -30,6 +30,7 @@ class RnsTransportNode(
     private val forwardingTable: RnsForwardingTable,
     private val interfaces: () -> Map<String, RnsInterface>,
     private val scope: CoroutineScope,
+    private val announceIntervalMs: Long = ANNOUNCE_INTERVAL_MS,
 ) {
     companion object {
         private const val TAG = "RnsTransportNode"
@@ -56,6 +57,13 @@ class RnsTransportNode(
     }
 
     var localDeliveryCallback: LocalDeliveryCallback? = null
+
+    // Public accessors for dashboard/settings widgets (MESHSAT-394/396)
+    val destHashHex: String get() = localDestHash.joinToString("") { "%02x".format(it) }
+    fun interfaceCount(): Int = interfaces().size
+    fun onlineInterfaceCount(): Int = interfaces().count { (_, iface) -> iface.isOnline }
+    fun destCount(): Int = pathTable.destCount()
+    fun pathCount(): Int = pathTable.pathCount()
 
     // Packet dedup cache: packetHash → timestamp
     private val seenPackets = ConcurrentHashMap<String, Long>()
@@ -448,7 +456,7 @@ class RnsTransportNode(
         if (running) broadcastAnnounce()
 
         while (running && scope.isActive) {
-            delay(ANNOUNCE_INTERVAL_MS)
+            delay(announceIntervalMs)
             if (running) broadcastAnnounce()
         }
     }

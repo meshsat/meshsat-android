@@ -58,6 +58,11 @@ class SettingsRepository(private val context: Context) {
         val KEY_RNS_TCP_HOST = stringPreferencesKey("rns_tcp_host")
         val KEY_RNS_TCP_PORT = stringPreferencesKey("rns_tcp_port")
 
+        // Reticulum Routing settings (MESHSAT-394)
+        val KEY_RNS_ANNOUNCE_INTERVAL = stringPreferencesKey("rns_announce_interval_min")
+        val KEY_RNS_TCP_LISTEN_PORT = stringPreferencesKey("rns_tcp_listen_port")
+        val KEY_RNS_TRANSPORT_ENABLED = booleanPreferencesKey("rns_transport_enabled")
+
         // Hub Reporter settings (MESHSAT-292)
         val KEY_HUB_ENABLED = booleanPreferencesKey("hub_enabled")
         val KEY_HUB_URL = stringPreferencesKey("hub_url")
@@ -65,6 +70,11 @@ class SettingsRepository(private val context: Context) {
         val KEY_HUB_CALLSIGN = stringPreferencesKey("hub_callsign")
         val KEY_HUB_USERNAME = stringPreferencesKey("hub_username")
         val KEY_HUB_HEALTH_INTERVAL = stringPreferencesKey("hub_health_interval") // seconds as string
+
+        // mTLS settings (MESHSAT-387)
+        val KEY_HUB_CLIENT_CERT = stringPreferencesKey("hub_client_cert_pem")
+        val KEY_HUB_CLIENT_KEY = stringPreferencesKey("hub_client_key_pem")
+        val KEY_HUB_CA_CERT = stringPreferencesKey("hub_ca_cert_pem")
 
         // APRS-IS settings (MESHSAT-230)
         val KEY_APRS_MODE = stringPreferencesKey("aprs_mode") // "kiss" or "is"
@@ -435,6 +445,32 @@ class SettingsRepository(private val context: Context) {
         context.dataStore.edit { it[KEY_RNS_TCP_PORT] = port }
     }
 
+    // --- Reticulum Routing settings (MESHSAT-394) ---
+
+    val rnsAnnounceInterval: Flow<String> = context.dataStore.data.map {
+        it[KEY_RNS_ANNOUNCE_INTERVAL] ?: "10"
+    }
+
+    val rnsTcpListenPort: Flow<String> = context.dataStore.data.map {
+        it[KEY_RNS_TCP_LISTEN_PORT] ?: "4242"
+    }
+
+    val rnsTransportEnabled: Flow<Boolean> = context.dataStore.data.map {
+        it[KEY_RNS_TRANSPORT_ENABLED] ?: true
+    }
+
+    suspend fun setRnsAnnounceInterval(interval: String) {
+        context.dataStore.edit { it[KEY_RNS_ANNOUNCE_INTERVAL] = interval }
+    }
+
+    suspend fun setRnsTcpListenPort(port: String) {
+        context.dataStore.edit { it[KEY_RNS_TCP_LISTEN_PORT] = port }
+    }
+
+    suspend fun setRnsTransportEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[KEY_RNS_TRANSPORT_ENABLED] = enabled }
+    }
+
     // --- Hub Reporter settings (MESHSAT-292) ---
 
     val hubEnabled: Flow<Boolean> = context.dataStore.data.map {
@@ -497,4 +533,14 @@ class SettingsRepository(private val context: Context) {
     suspend fun setHubHealthInterval(interval: String) {
         context.dataStore.edit { it[KEY_HUB_HEALTH_INTERVAL] = interval }
     }
+
+    // --- mTLS settings (MESHSAT-387) ---
+
+    val hubClientCertPem: Flow<String> = context.dataStore.data.map { it[KEY_HUB_CLIENT_CERT] ?: "" }
+    val hubClientKeyPem: Flow<String> = context.dataStore.data.map { secureStore.get("hub_client_key_pem") ?: "" }
+    val hubCaCertPem: Flow<String> = context.dataStore.data.map { it[KEY_HUB_CA_CERT] ?: "" }
+
+    suspend fun setHubClientCertPem(pem: String) { context.dataStore.edit { it[KEY_HUB_CLIENT_CERT] = pem } }
+    suspend fun setHubClientKeyPem(pem: String) { secureStore.set("hub_client_key_pem", pem) }
+    suspend fun setHubCaCertPem(pem: String) { context.dataStore.edit { it[KEY_HUB_CA_CERT] = pem } }
 }
