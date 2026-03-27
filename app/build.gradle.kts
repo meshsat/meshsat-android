@@ -14,8 +14,8 @@ android {
         applicationId = "com.cubeos.meshsat"
         minSdk = 26
         targetSdk = 35
-        versionCode = 22
-        versionName = "1.7.1"
+        versionCode = 23
+        versionName = "1.8.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -108,8 +108,8 @@ dependencies {
     // ONNX Runtime (MSVQ-SC sentence encoder for lossy semantic compression)
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.21.1")
 
-    // WebView asset loader (serve local assets via https:// so tile requests work)
-    implementation("androidx.webkit:webkit:1.12.1")
+    // osmdroid (native OpenStreetMap map rendering with offline MBTiles support)
+    implementation("org.osmdroid:osmdroid-android:6.1.20")
 
     // NanoHTTPD (lightweight local REST API server)
     implementation("org.nanohttpd:nanohttpd:2.3.1")

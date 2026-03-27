@@ -130,6 +130,12 @@ object MBTilesManager {
         }
     }
 
+    /** Get the File path for an MBTiles file (for osmdroid tile provider). */
+    fun getMBTilesFile(context: Context, filename: String): File? {
+        val file = File(mbtilesDir(context), filename)
+        return if (file.exists()) file else null
+    }
+
     /** Close all open readers. */
     fun closeAll() {
         readers.values.forEach { it.close() }
