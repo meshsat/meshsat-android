@@ -88,12 +88,17 @@ private val TRACK_COLORS = intArrayOf(
 private object MapViewHolder {
     var mapView: MapView? = null
     var configuredFile: String? = null
+    var lastTileProvider: org.osmdroid.tileprovider.MapTileProviderBase? = null
 
     fun getOrCreate(context: android.content.Context): MapView {
-        mapView?.let {
+        mapView?.let { mv ->
             // Detach from any previous parent before reusing
-            (it.parent as? ViewGroup)?.removeView(it)
-            return it
+            (mv.parent as? ViewGroup)?.removeView(mv)
+            // CRITICAL: onDetachedFromWindow killed the tile provider threads.
+            // Reassign the same provider to restart them.
+            lastTileProvider?.let { mv.tileProvider = it }
+            mv.onResume()
+            return mv
         }
 
         Configuration.getInstance().apply {
@@ -114,6 +119,7 @@ private object MapViewHolder {
                 android.graphics.Color.parseColor("#111827")
             overlayManager.tilesOverlay.loadingLineColor =
                 android.graphics.Color.parseColor("#1F2937")
+            lastTileProvider = tileProvider
             mapView = this
         }
     }
@@ -322,11 +328,13 @@ private fun OsmdroidMap(
             mv
         },
         update = { mv ->
-            // Configure offline tile provider (only when file changes)
-            val newFile = if (offlineEnabled && mbtilesFile != null) mbtilesFile.absolutePath else null
-            if (newFile != MapViewHolder.configuredFile) {
-                MapViewHolder.configuredFile = newFile
-                if (newFile != null && mbtilesFile != null) {
+            // Configure offline tile provider ONLY when file actually changes.
+            // Skip if mbtilesFile is null but we already have a configured provider
+            // (this happens during recomposition before DataStore flows emit).
+            if (offlineEnabled && mbtilesFile != null) {
+                val newFile = mbtilesFile.absolutePath
+                if (newFile != MapViewHolder.configuredFile) {
+                    MapViewHolder.configuredFile = newFile
                     try {
                         val archives = org.osmdroid.tileprovider.modules.ArchiveFileFactory
                             .getArchiveFile(mbtilesFile)
@@ -334,15 +342,22 @@ private fun OsmdroidMap(
                             val tileSource = XYTileSource("MBTiles", 0, 19, 256, ".png", arrayOf())
                             val receiver = SimpleRegisterReceiver(mv.context)
                             val archiveProvider = MapTileFileArchiveProvider(receiver, tileSource, arrayOf(archives))
-                            mv.tileProvider = MapTileProviderArray(tileSource, receiver, arrayOf(archiveProvider))
+                            val provider = MapTileProviderArray(tileSource, receiver, arrayOf(archiveProvider))
+                            mv.tileProvider = provider
+                            MapViewHolder.lastTileProvider = provider
                         }
                     } catch (_: Exception) {
                         mv.setTileSource(TileSourceFactory.MAPNIK)
+                        MapViewHolder.lastTileProvider = mv.tileProvider
                     }
-                } else {
-                    mv.setTileSource(TileSourceFactory.MAPNIK)
                 }
+            } else if (!offlineEnabled && MapViewHolder.configuredFile != null) {
+                // User explicitly disabled offline maps
+                MapViewHolder.configuredFile = null
+                mv.setTileSource(TileSourceFactory.MAPNIK)
+                MapViewHolder.lastTileProvider = mv.tileProvider
             }
+            // else: offlineEnabled=true but mbtilesFile=null (still loading) — do nothing, keep current tiles
 
             // Dark mode
             mv.overlayManager.tilesOverlay.setColorFilter(if (darkMode) DARK_INVERT else null)
