@@ -143,8 +143,13 @@ class MeshtasticBle(private val context: Context) {
         val current = _nodes.value.toMutableList()
         val existing = current.find { it.nodeNum == info.nodeNum }
         current.removeAll { it.nodeNum == info.nodeNum }
-        // Merge: preserve battery/lastHeard from existing if new data doesn't have them
+        // Merge: preserve identity fields from existing when new values are empty/zero.
+        // Config downloads often send partial NodeInfo — only overwrite with non-empty data.
         val merged = info.copy(
+            longName = info.longName.ifEmpty { existing?.longName ?: "" },
+            shortName = info.shortName.ifEmpty { existing?.shortName ?: "" },
+            macaddr = info.macaddr.ifEmpty { existing?.macaddr ?: "" },
+            hwModel = if (info.hwModel != 0) info.hwModel else (existing?.hwModel ?: 0),
             batteryLevel = if (info.batteryLevel >= 0) info.batteryLevel else (existing?.batteryLevel ?: -1),
             lastHeard = if (info.lastHeard > 0) info.lastHeard else System.currentTimeMillis(),
         )
