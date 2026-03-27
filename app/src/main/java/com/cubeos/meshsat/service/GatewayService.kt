@@ -173,6 +173,24 @@ class GatewayService : Service() {
             private set
 
         private var notificationId = 100
+
+        /**
+         * Schedule a service restart via AlarmManager.
+         * Sends the response before stopping, then the alarm re-starts the service.
+         */
+        fun scheduleRestart(context: android.content.Context, delayMs: Long = 2000L) {
+            val am = context.getSystemService(android.content.Context.ALARM_SERVICE) as android.app.AlarmManager
+            val intent = android.content.Intent(context, GatewayService::class.java)
+            val pi = android.app.PendingIntent.getService(
+                context, 0, intent, android.app.PendingIntent.FLAG_IMMUTABLE,
+            )
+            am.set(
+                android.app.AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                android.os.SystemClock.elapsedRealtime() + delayMs,
+                pi,
+            )
+            (context as? android.app.Service)?.stopSelf()
+        }
     }
 
     private val scope = CoroutineScope(kotlinx.coroutines.Dispatchers.IO + SupervisorJob())
@@ -418,6 +436,12 @@ class GatewayService : Service() {
                     deadManSwitch = deadManSwitch,
                     signingService = signing,
                     configManager = cfgMgr,
+                    restartCallback = {
+                        scope.launch {
+                            delay(500)
+                            scheduleRestart(this@GatewayService)
+                        }
+                    },
                 )
                 server.start()
                 localApiServer = server
@@ -622,6 +646,102 @@ class GatewayService : Service() {
                                 requestId = cmd.requestId, cmd = cmd.cmd, status = "ok",
                             )
                         )
+                    }
+                    "send_mt" -> {
+                        val json = org.json.JSONObject(cmd.payload)
+                        val text = json.optString("text", "")
+                        val dataB64 = json.optString("data", "")
+                        val targetDevice = json.optString("target_device", "iridium_spp_0")
+                        val result: String? = when {
+                            targetDevice.contains("9704") || targetDevice.contains("imt") -> {
+                                val spp = iridium9704Spp
+                                if (spp == null || spp.state.value != com.cubeos.meshsat.bt.Iridium9704Spp.State.Ready) {
+                                    "iridium 9704 not connected"
+                                } else {
+                                    val payload = if (dataB64.isNotBlank()) {
+                                        android.util.Base64.decode(dataB64, android.util.Base64.DEFAULT)
+                                    } else text.toByteArray()
+                                    val status = spp.sendMessageBlocking(payload)
+                                    if (status != null) null else "send timed out"
+                                }
+                            }
+                            else -> {
+                                val spp = iridiumSpp
+                                if (spp == null || spp.state.value != com.cubeos.meshsat.bt.IridiumSpp.State.Connected) {
+                                    "iridium spp not connected"
+                                } else {
+                                    val payload = if (dataB64.isNotBlank()) {
+                                        android.util.Base64.decode(dataB64, android.util.Base64.DEFAULT)
+                                    } else text.toByteArray()
+                                    val writeOk = spp.writeMoBuffer(payload)
+                                    if (!writeOk) "failed to write MO buffer"
+                                    else {
+                                        val sbdResult = spp.sbdix()
+                                        if (sbdResult != null && sbdResult.moStatus in 0..4) null
+                                        else "SBDIX failed: moStatus=${sbdResult?.moStatus}"
+                                    }
+                                }
+                            }
+                        }
+                        hubReporter?.publishCommandResponse(
+                            com.cubeos.meshsat.hub.CommandResponse(
+                                requestId = cmd.requestId, cmd = cmd.cmd,
+                                status = if (result == null) "ok" else "error",
+                                error = result ?: "",
+                            )
+                        )
+                    }
+                    "flush_burst" -> {
+                        val (payload, count) = burstQueue?.flush() ?: (null to 0)
+                        if (payload != null && count > 0) {
+                            // Route the flushed burst to iridium
+                            iridiumSpp?.let { spp ->
+                                if (spp.state.value == com.cubeos.meshsat.bt.IridiumSpp.State.Connected) {
+                                    spp.writeMoBuffer(payload)
+                                    spp.sbdix()
+                                }
+                            }
+                        }
+                        hubReporter?.publishCommandResponse(
+                            com.cubeos.meshsat.hub.CommandResponse(
+                                requestId = cmd.requestId, cmd = cmd.cmd, status = "ok",
+                                error = "",
+                            )
+                        )
+                        Log.i("MeshSat", "Hub flush_burst: flushed $count messages")
+                    }
+                    "config_update" -> {
+                        val json = org.json.JSONObject(cmd.payload)
+                        var updated = 0
+                        if (json.has("health_interval")) {
+                            settings.setHubHealthInterval(json.getInt("health_interval").toString())
+                            updated++
+                        }
+                        if (json.has("deadman_enabled")) {
+                            settings.setDeadmanEnabled(json.getBoolean("deadman_enabled"))
+                            updated++
+                        }
+                        if (json.has("deadman_timeout_min")) {
+                            settings.setDeadmanTimeoutMin(json.getInt("deadman_timeout_min").toString())
+                            updated++
+                        }
+                        hubReporter?.publishCommandResponse(
+                            com.cubeos.meshsat.hub.CommandResponse(
+                                requestId = cmd.requestId, cmd = cmd.cmd, status = "ok",
+                                error = "",
+                            )
+                        )
+                        Log.i("MeshSat", "Hub config_update: updated $updated keys")
+                    }
+                    "reboot" -> {
+                        hubReporter?.publishCommandResponse(
+                            com.cubeos.meshsat.hub.CommandResponse(
+                                requestId = cmd.requestId, cmd = cmd.cmd, status = "ok",
+                                error = "",
+                            )
+                        )
+                        Log.i("MeshSat", "Hub reboot command received, scheduling restart")
+                        scheduleRestart(this@GatewayService)
                     }
                     else -> {
                         hubReporter?.publishCommandResponse(
