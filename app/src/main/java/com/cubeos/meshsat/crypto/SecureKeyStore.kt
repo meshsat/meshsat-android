@@ -68,14 +68,29 @@ class SecureKeyStore private constructor(
         }
 
         private fun create(context: Context): SecureKeyStore {
-            val masterKey = buildMasterKey(context)
-            val prefs = EncryptedSharedPreferences.create(
-                context,
-                PREFS_NAME,
-                masterKey,
-                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
-            )
+            val prefs = try {
+                openEncryptedPrefs(context)
+            } catch (e: Exception) {
+                // AEADBadTagException / InvalidProtocolBufferException: the Keystore master
+                // key was invalidated (OS update, app reinstall over existing data, Keystore
+                // corruption). Delete the corrupted file and recreate from scratch.
+                Log.w(TAG, "EncryptedSharedPreferences corrupted, resetting: ${e.message}")
+                deleteEncryptedPrefsFile(context)
+                try {
+                    openEncryptedPrefs(context)
+                } catch (e2: Exception) {
+                    // Keystore itself may be in a bad state — nuke the master key and retry once.
+                    Log.w(TAG, "Retry after file delete failed, clearing master key: ${e2.message}")
+                    try {
+                        val ks = java.security.KeyStore.getInstance("AndroidKeyStore")
+                        ks.load(null)
+                        ks.deleteEntry(MasterKey.DEFAULT_MASTER_KEY_ALIAS)
+                    } catch (ksErr: Exception) {
+                        Log.w(TAG, "Could not remove master key: ${ksErr.message}")
+                    }
+                    openEncryptedPrefs(context)
+                }
+            }
 
             val store = SecureKeyStore(prefs)
 
@@ -87,6 +102,26 @@ class SecureKeyStore private constructor(
 
             Log.i(TAG, "Secure key store initialized (Keystore-backed)")
             return store
+        }
+
+        private fun openEncryptedPrefs(context: Context): SharedPreferences {
+            val masterKey = buildMasterKey(context)
+            return EncryptedSharedPreferences.create(
+                context,
+                PREFS_NAME,
+                masterKey,
+                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
+            )
+        }
+
+        private fun deleteEncryptedPrefsFile(context: Context) {
+            val prefsDir = java.io.File(context.applicationInfo.dataDir, "shared_prefs")
+            val prefsFile = java.io.File(prefsDir, "$PREFS_NAME.xml")
+            if (prefsFile.exists()) {
+                prefsFile.delete()
+                Log.i(TAG, "Deleted corrupted encrypted prefs file")
+            }
         }
 
         private fun buildMasterKey(context: Context): MasterKey {
