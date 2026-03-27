@@ -14,8 +14,8 @@ android {
         applicationId = "com.cubeos.meshsat"
         minSdk = 26
         targetSdk = 35
-        versionCode = 21
-        versionName = "1.7.0"
+        versionCode = 22
+        versionName = "1.7.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
