@@ -260,9 +260,187 @@ class ConfigManager(
         return fmt.format(Date())
     }
 
+    /**
+     * Export the current configuration as YAML matching the Bridge format.
+     */
+    suspend fun exportYaml(): String {
+        val rules = accessRuleDao.getAllSync()
+        val groups = objectGroupDao.getAll()
+        val fgroups = failoverGroupDao.getAllGroups()
+
+        val sb = StringBuilder()
+        sb.appendLine("version: \"$CONFIG_VERSION\"")
+        sb.appendLine("exported_at: \"${utcNow()}\"")
+
+        // Access rules
+        sb.appendLine("access_rules:")
+        if (rules.isEmpty()) sb.appendLine("  []")
+        for (r in rules) {
+            sb.appendLine("  - interface_id: \"${yamlEsc(r.interfaceId)}\"")
+            sb.appendLine("    direction: \"${yamlEsc(r.direction)}\"")
+            sb.appendLine("    priority: ${r.priority}")
+            sb.appendLine("    name: \"${yamlEsc(r.name)}\"")
+            sb.appendLine("    enabled: ${r.enabled}")
+            sb.appendLine("    action: \"${yamlEsc(r.action)}\"")
+            sb.appendLine("    forward_to: \"${yamlEsc(r.forwardTo)}\"")
+            sb.appendLine("    filters: \"${yamlEsc(r.filters)}\"")
+            if (r.filterNodeGroup != null) sb.appendLine("    filter_node_group: \"${yamlEsc(r.filterNodeGroup)}\"")
+            if (r.filterSenderGroup != null) sb.appendLine("    filter_sender_group: \"${yamlEsc(r.filterSenderGroup)}\"")
+            if (r.filterPortnumGroup != null) sb.appendLine("    filter_portnum_group: \"${yamlEsc(r.filterPortnumGroup)}\"")
+            sb.appendLine("    forward_options: \"${yamlEsc(r.forwardOptions)}\"")
+            sb.appendLine("    qos_level: ${r.qosLevel}")
+            sb.appendLine("    rate_limit_per_min: ${r.rateLimitPerMin}")
+            sb.appendLine("    rate_limit_window: ${r.rateLimitWindow}")
+        }
+
+        // Object groups
+        sb.appendLine("object_groups:")
+        if (groups.isEmpty()) sb.appendLine("  []")
+        for (g in groups) {
+            sb.appendLine("  - id: \"${yamlEsc(g.id)}\"")
+            sb.appendLine("    type: \"${yamlEsc(g.type)}\"")
+            sb.appendLine("    label: \"${yamlEsc(g.label)}\"")
+            sb.appendLine("    members: \"${yamlEsc(g.members)}\"")
+        }
+
+        // Failover groups
+        sb.appendLine("failover_groups:")
+        if (fgroups.isEmpty()) sb.appendLine("  []")
+        for (fg in fgroups) {
+            sb.appendLine("  - id: \"${yamlEsc(fg.id)}\"")
+            sb.appendLine("    label: \"${yamlEsc(fg.label)}\"")
+            sb.appendLine("    mode: \"${yamlEsc(fg.mode)}\"")
+            val members = failoverGroupDao.getMembers(fg.id)
+            sb.appendLine("    members:")
+            if (members.isEmpty()) sb.appendLine("      []")
+            for (m in members) {
+                sb.appendLine("      - interface_id: \"${yamlEsc(m.interfaceId)}\"")
+                sb.appendLine("        priority: ${m.priority}")
+            }
+        }
+
+        return sb.toString()
+    }
+
+    /**
+     * Import config from YAML or JSON string. Auto-detects format.
+     */
+    suspend fun importAuto(input: String): Map<String, Int> {
+        val trimmed = input.trim()
+        return if (trimmed.startsWith("{")) {
+            import(trimmed) // JSON
+        } else {
+            importYaml(trimmed)
+        }
+    }
+
+    /**
+     * Import config from YAML string by converting to JSON first.
+     */
+    suspend fun importYaml(yaml: String): Map<String, Int> {
+        val json = yamlToJson(yaml)
+        return import(json)
+    }
+
+    /** Simple YAML → JSON converter for the flat config format. */
+    private fun yamlToJson(yaml: String): String {
+        val root = JSONObject()
+        var currentArray: JSONArray? = null
+        var currentArrayName = ""
+        var currentObj: JSONObject? = null
+        var currentMembers: JSONArray? = null
+
+        for (rawLine in yaml.lines()) {
+            val line = rawLine.trimEnd()
+            if (line.isBlank() || line.startsWith("#")) continue
+
+            when {
+                // Top-level scalar: version: "0.3.0"
+                !line.startsWith(" ") && line.contains(": ") && !line.endsWith(":") -> {
+                    val (key, value) = line.split(": ", limit = 2)
+                    root.put(key.trim(), yamlParseValue(value.trim()))
+                }
+                // Top-level array header: access_rules:
+                !line.startsWith(" ") && line.endsWith(":") -> {
+                    if (currentObj != null && currentArray != null) {
+                        if (currentMembers != null) currentObj.put("members", currentMembers)
+                        currentArray.put(currentObj)
+                    }
+                    currentArrayName = line.removeSuffix(":").trim()
+                    currentArray = JSONArray()
+                    currentObj = null
+                    currentMembers = null
+                    root.put(currentArrayName, currentArray)
+                }
+                // Array item start: "  - key: value"
+                line.trimStart().startsWith("- ") && !line.trimStart().startsWith("- interface_id:") ||
+                (line.trimStart().startsWith("- ") && currentMembers == null) -> {
+                    if (currentObj != null && currentArray != null) {
+                        if (currentMembers != null) currentObj.put("members", currentMembers)
+                        currentArray.put(currentObj)
+                        currentMembers = null
+                    }
+                    currentObj = JSONObject()
+                    val content = line.trimStart().removePrefix("- ")
+                    if (content.contains(": ")) {
+                        val (k, v) = content.split(": ", limit = 2)
+                        currentObj.put(k.trim(), yamlParseValue(v.trim()))
+                    }
+                }
+                // Nested members array
+                line.trim() == "members:" -> {
+                    currentMembers = JSONArray()
+                }
+                // Nested member item
+                line.trim().startsWith("- ") && currentMembers != null -> {
+                    val memberObj = JSONObject()
+                    val content = line.trim().removePrefix("- ")
+                    if (content.contains(": ")) {
+                        val (k, v) = content.split(": ", limit = 2)
+                        memberObj.put(k.trim(), yamlParseValue(v.trim()))
+                    }
+                    currentMembers.put(memberObj)
+                }
+                // Nested member continuation
+                line.trim().contains(": ") && currentMembers != null && currentMembers.length() > 0 &&
+                    line.startsWith("        ") -> {
+                    val lastMember = currentMembers.getJSONObject(currentMembers.length() - 1)
+                    val (k, v) = line.trim().split(": ", limit = 2)
+                    lastMember.put(k.trim(), yamlParseValue(v.trim()))
+                }
+                // Array continuation: "    key: value"
+                line.trim().contains(": ") && currentObj != null -> {
+                    val (k, v) = line.trim().split(": ", limit = 2)
+                    currentObj.put(k.trim(), yamlParseValue(v.trim()))
+                }
+                // Empty array: "  []"
+                line.trim() == "[]" -> { /* empty, array already created */ }
+            }
+        }
+        // Flush last object
+        if (currentObj != null && currentArray != null) {
+            if (currentMembers != null) currentObj.put("members", currentMembers)
+            currentArray.put(currentObj)
+        }
+
+        return root.toString(2)
+    }
+
+    private fun yamlParseValue(s: String): Any {
+        val unquoted = if (s.startsWith("\"") && s.endsWith("\"")) s.substring(1, s.length - 1) else s
+        return when {
+            unquoted == "true" -> true
+            unquoted == "false" -> false
+            unquoted.toIntOrNull() != null -> unquoted.toInt()
+            else -> unquoted
+        }
+    }
+
+    private fun yamlEsc(s: String): String = s.replace("\\", "\\\\").replace("\"", "\\\"")
+
     companion object {
         private const val TAG = "ConfigManager"
-        const val CONFIG_VERSION = "0.3.0"
+        const val CONFIG_VERSION = "0.4.0"
     }
 }
 
