@@ -35,6 +35,7 @@ class LocalApiServer(
     private val deadManSwitch: DeadManSwitch?,
     private val signingService: SigningService?,
     private val configManager: ConfigManager?,
+    private val restartCallback: (() -> Unit)? = null,
 ) : NanoHTTPD("127.0.0.1", port) {
 
     override fun serve(session: IHTTPSession): Response {
@@ -77,6 +78,9 @@ class LocalApiServer(
             method == Method.GET && uri == "/api/config/export" -> handleConfigExport()
             method == Method.POST && uri == "/api/config/import" -> handleConfigImport(session)
             method == Method.POST && uri == "/api/config/diff" -> handleConfigDiff(session)
+
+            // System
+            method == Method.POST && uri == "/api/system/restart" -> handleRestart()
 
             else -> jsonError(Response.Status.NOT_FOUND, "not found: $uri")
         }
@@ -286,6 +290,14 @@ class LocalApiServer(
         val body = readBody(session)
         val diff = runBlocking { mgr.diff(body) }
         return jsonOk(diff.toJson())
+    }
+
+    // --- System ---
+
+    private fun handleRestart(): Response {
+        restartCallback?.invoke()
+            ?: return jsonError(Response.Status.SERVICE_UNAVAILABLE, "restart not available")
+        return jsonOk(JSONObject().apply { put("status", "restarting") })
     }
 
     // --- Helpers ---

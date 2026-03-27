@@ -28,8 +28,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.MaterialTheme
@@ -1673,6 +1675,62 @@ fun SettingsScreen(navController: NavController? = null) {
             modifier = Modifier.fillMaxWidth(),
         ) {
             Text("Audit Log", style = MaterialTheme.typography.bodyMedium)
+        }
+
+        // --- Service ---
+        SectionCard("Service") {
+            var showRestartDialog by remember { mutableStateOf(false) }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Restart Gateway Service", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        "Stop and restart all transports",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MeshSatTextMuted,
+                    )
+                }
+                OutlinedButton(
+                    onClick = { showRestartDialog = true },
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFE57373)),
+                ) {
+                    Text("Restart")
+                }
+            }
+
+            if (showRestartDialog) {
+                AlertDialog(
+                    onDismissRequest = { showRestartDialog = false },
+                    title = { Text("Restart Service?") },
+                    text = {
+                        Text(
+                            "This will disconnect all transports and restart the gateway service. " +
+                                "It should take a few seconds.",
+                        )
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                showRestartDialog = false
+                                GatewayService.scheduleRestart(context)
+                                Toast.makeText(context, "Service restarting...", Toast.LENGTH_SHORT).show()
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE57373)),
+                        ) {
+                            Text("Restart")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showRestartDialog = false }) {
+                            Text("Cancel")
+                        }
+                    },
+                )
+            }
         }
 
         // --- About ---
