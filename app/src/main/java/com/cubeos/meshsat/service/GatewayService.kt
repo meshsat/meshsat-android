@@ -2690,16 +2690,37 @@ class GatewayService : Service() {
             .build()
 
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                // Dynamically select foreground service types based on granted permissions.
-                // Requesting a type without the matching runtime permission crashes on Android 14+.
-                var types = ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
-                val hasLocation = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
-                    ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                // Android 14+ (API 34): each foreground service type requires its matching
+                // runtime permission. Build the bitmask from actually-granted permissions.
+                // remoteMessaging is always safe (normal permission, auto-granted).
+                var types = ServiceInfo.FOREGROUND_SERVICE_TYPE_REMOTE_MESSAGING
+
+                val hasBluetooth = ContextCompat.checkSelfPermission(
+                    this, Manifest.permission.BLUETOOTH_CONNECT
+                ) == PackageManager.PERMISSION_GRANTED
+                if (hasBluetooth) {
+                    types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+                }
+
+                val hasLocation = ContextCompat.checkSelfPermission(
+                    this, Manifest.permission.ACCESS_FINE_LOCATION
+                ) == PackageManager.PERMISSION_GRANTED ||
+                    ContextCompat.checkSelfPermission(
+                        this, Manifest.permission.ACCESS_COARSE_LOCATION
+                    ) == PackageManager.PERMISSION_GRANTED
                 if (hasLocation) {
                     types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
                 }
+
                 startForeground(1, notification, types)
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                // Android 10-13: types declared in manifest are sufficient, no runtime check needed.
+                startForeground(
+                    1, notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE or
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+                )
             } else {
                 @Suppress("DEPRECATION")
                 startForeground(1, notification)
@@ -2707,8 +2728,10 @@ class GatewayService : Service() {
         } catch (e: Exception) {
             Log.w("MeshSat", "startForeground with type failed, retrying: ${e.message}")
             try {
-                // Fallback: connectedDevice only (always safe — permission is in manifest)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                // Fallback: remoteMessaging only (always safe on API 34+)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                    startForeground(1, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_REMOTE_MESSAGING)
+                } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     startForeground(1, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
                 } else {
                     @Suppress("DEPRECATION")
