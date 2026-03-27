@@ -22,8 +22,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         AuditLogEntity::class,
         TleCacheEntity::class,
         ProviderCredential::class,
+        RnsTcpPeer::class,
+        IridiumCreditEntry::class,
     ],
-    version = 9,
+    version = 10,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -40,6 +42,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun auditLogDao(): AuditLogDao
     abstract fun tleCacheDao(): TleCacheDao
     abstract fun providerCredentialDao(): ProviderCredentialDao
+    abstract fun rnsTcpPeerDao(): RnsTcpPeerDao
+    abstract fun iridiumCreditDao(): IridiumCreditDao
 
     companion object {
         @Volatile
@@ -114,6 +118,30 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /** Migration 9→10: TCP peers + Iridium credit log [MESHSAT-392/399]. */
+        val MIGRATION_9_10 = object : Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS rns_tcp_peers (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        host TEXT NOT NULL,
+                        port INTEGER NOT NULL DEFAULT 4242,
+                        enabled INTEGER NOT NULL DEFAULT 1,
+                        label TEXT NOT NULL DEFAULT ''
+                    )
+                """.trimIndent())
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS iridium_credit_log (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        timestamp INTEGER NOT NULL,
+                        messageType TEXT NOT NULL,
+                        costCents INTEGER NOT NULL,
+                        moMsn INTEGER NOT NULL DEFAULT 0
+                    )
+                """.trimIndent())
+            }
+        }
+
         fun getInstance(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
@@ -121,7 +149,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "meshsat.db"
                 )
-                    .addMigrations(MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
+                    .addMigrations(MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10)
                     .fallbackToDestructiveMigration()
                     .build()
                     .also { INSTANCE = it }
