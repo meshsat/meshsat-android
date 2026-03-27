@@ -48,6 +48,7 @@ import com.cubeos.meshsat.ui.theme.MeshSatBlue
 import com.cubeos.meshsat.ui.theme.MeshSatGreen
 import com.cubeos.meshsat.ui.theme.MeshSatTeal
 import com.cubeos.meshsat.ui.theme.MeshSatTextMuted
+import com.cubeos.meshsat.ui.theme.ThemeState
 import org.osmdroid.config.Configuration
 import org.osmdroid.tileprovider.MapTileProviderArray
 import org.osmdroid.tileprovider.modules.MapTileFileArchiveProvider
@@ -146,12 +147,15 @@ fun MapScreen() {
                 .weight(1f)
                 .border(1.dp, MeshSatBorder, RoundedCornerShape(8.dp)),
         ) {
+            val darkModePref by ThemeState.darkMode.collectAsState()
+            val isDark = darkModePref ?: true
             OsmdroidMap(
                 nodes = filteredMeshNodes,
                 phoneLocation = effectivePhoneLocation,
                 trackPositions = filteredTrackPositions,
                 mbtilesFile = mbtilesFile,
                 offlineEnabled = offlineEnabled,
+                darkMode = isDark,
             )
         }
 
@@ -319,6 +323,9 @@ fun MapScreen() {
 // osmdroid Native Map
 // ============================================================================
 
+/** Tracks the current MBTiles file path to avoid re-creating tile provider on every recomposition. */
+private class TileProviderState(var currentFile: String? = null)
+
 @Composable
 private fun OsmdroidMap(
     nodes: List<NodePosition>,
@@ -326,9 +333,11 @@ private fun OsmdroidMap(
     trackPositions: List<NodePosition>,
     mbtilesFile: java.io.File?,
     offlineEnabled: Boolean,
+    darkMode: Boolean = true,
 ) {
     val context = LocalContext.current
     val mapViewRef = remember { mutableStateOf<MapView?>(null) }
+    val tileState = remember { TileProviderState() }
 
     DisposableEffect(Unit) {
         onDispose { mapViewRef.value?.onDetach() }
@@ -355,34 +364,54 @@ private fun OsmdroidMap(
             }
         },
         update = { mapView ->
-            // Set up offline MBTiles tile provider if available
-            if (offlineEnabled && mbtilesFile != null) {
-                try {
-                    val archives = org.osmdroid.tileprovider.modules.ArchiveFileFactory
-                        .getArchiveFile(mbtilesFile)
-                    if (archives != null) {
-                        val tileSource = XYTileSource(
-                            "MBTiles", 0, 19, 256, ".png",
-                            arrayOf<String>(),
-                        )
-                        val receiver = SimpleRegisterReceiver(mapView.context)
-                        val archiveProvider = MapTileFileArchiveProvider(
-                            receiver, tileSource, arrayOf(archives),
-                        )
-                        val provider = MapTileProviderArray(
-                            tileSource, receiver, arrayOf(archiveProvider),
-                        )
-                        mapView.tileProvider = provider
+            // Only re-create tile provider when the file actually changes
+            val newFile = if (offlineEnabled && mbtilesFile != null) mbtilesFile.absolutePath else null
+            if (newFile != tileState.currentFile) {
+                tileState.currentFile = newFile
+                if (newFile != null && mbtilesFile != null) {
+                    try {
+                        val archives = org.osmdroid.tileprovider.modules.ArchiveFileFactory
+                            .getArchiveFile(mbtilesFile)
+                        if (archives != null) {
+                            val tileSource = XYTileSource(
+                                "MBTiles", 0, 19, 256, ".png",
+                                arrayOf<String>(),
+                            )
+                            val receiver = SimpleRegisterReceiver(mapView.context)
+                            val archiveProvider = MapTileFileArchiveProvider(
+                                receiver, tileSource, arrayOf(archives),
+                            )
+                            val provider = MapTileProviderArray(
+                                tileSource, receiver, arrayOf(archiveProvider),
+                            )
+                            mapView.tileProvider = provider
+                        }
+                    } catch (_: Exception) {
+                        mapView.setTileSource(TileSourceFactory.MAPNIK)
                     }
-                } catch (_: Exception) {
-                    // Fall back to online tiles
+                } else {
                     mapView.setTileSource(TileSourceFactory.MAPNIK)
                 }
-            } else {
-                mapView.setTileSource(TileSourceFactory.MAPNIK)
             }
 
-            // Clear existing overlays and rebuild
+            // Dark mode: invert tile colors for a dark map appearance
+            if (darkMode) {
+                val invertMatrix = android.graphics.ColorMatrix(
+                    floatArrayOf(
+                        -1f, 0f, 0f, 0f, 255f,
+                        0f, -1f, 0f, 0f, 255f,
+                        0f, 0f, -1f, 0f, 255f,
+                        0f, 0f, 0f, 1f, 0f,
+                    )
+                )
+                mapView.overlayManager.tilesOverlay.setColorFilter(
+                    android.graphics.ColorMatrixColorFilter(invertMatrix)
+                )
+            } else {
+                mapView.overlayManager.tilesOverlay.setColorFilter(null)
+            }
+
+            // Rebuild overlays (markers, tracks) — tiles overlay is managed by osmdroid internally
             mapView.overlays.clear()
 
             // Track lines (per-node dashed polylines)
