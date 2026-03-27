@@ -73,23 +73,10 @@ class SecureKeyStore private constructor(
             } catch (e: Exception) {
                 // AEADBadTagException / InvalidProtocolBufferException: the Keystore master
                 // key was invalidated (OS update, app reinstall over existing data, Keystore
-                // corruption). Delete the corrupted file and recreate from scratch.
-                Log.w(TAG, "EncryptedSharedPreferences corrupted, resetting: ${e.message}")
-                deleteEncryptedPrefsFile(context)
-                try {
-                    openEncryptedPrefs(context)
-                } catch (e2: Exception) {
-                    // Keystore itself may be in a bad state — nuke the master key and retry once.
-                    Log.w(TAG, "Retry after file delete failed, clearing master key: ${e2.message}")
-                    try {
-                        val ks = java.security.KeyStore.getInstance("AndroidKeyStore")
-                        ks.load(null)
-                        ks.deleteEntry(MasterKey.DEFAULT_MASTER_KEY_ALIAS)
-                    } catch (ksErr: Exception) {
-                        Log.w(TAG, "Could not remove master key: ${ksErr.message}")
-                    }
-                    openEncryptedPrefs(context)
-                }
+                // corruption). Nuclear reset: wipe prefs, keyset, and master key, then recreate.
+                Log.w(TAG, "EncryptedSharedPreferences corrupted, nuclear reset: ${e.message}")
+                nukeEncryptedPrefs(context)
+                openEncryptedPrefs(context)
             }
 
             val store = SecureKeyStore(prefs)
@@ -115,12 +102,36 @@ class SecureKeyStore private constructor(
             )
         }
 
-        private fun deleteEncryptedPrefsFile(context: Context) {
-            val prefsDir = java.io.File(context.applicationInfo.dataDir, "shared_prefs")
-            val prefsFile = java.io.File(prefsDir, "$PREFS_NAME.xml")
-            if (prefsFile.exists()) {
-                prefsFile.delete()
-                Log.i(TAG, "Deleted corrupted encrypted prefs file")
+        /**
+         * Completely wipe all EncryptedSharedPreferences state so a fresh
+         * store can be created. Three things must be cleared:
+         * 1. The SharedPreferences file + in-memory cache (deleteSharedPreferences)
+         * 2. The Tink keyset prefs file that EncryptedSharedPreferences creates internally
+         * 3. The Android Keystore master key alias
+         */
+        private fun nukeEncryptedPrefs(context: Context) {
+            // 1. Delete the encrypted prefs (clears file AND in-memory cache)
+            try {
+                context.deleteSharedPreferences(PREFS_NAME)
+                Log.i(TAG, "Deleted encrypted prefs: $PREFS_NAME")
+            } catch (e: Exception) {
+                Log.w(TAG, "deleteSharedPreferences failed: ${e.message}")
+            }
+
+            // 2. Delete the internal Tink keyset prefs that EncryptedSharedPreferences creates
+            //    (named __androidx_security_crypto_encrypted_prefs__ by convention)
+            try {
+                context.deleteSharedPreferences("__androidx_security_crypto_encrypted_prefs__")
+            } catch (_: Exception) { /* may not exist */ }
+
+            // 3. Remove the master key from Android Keystore so a fresh one is generated
+            try {
+                val ks = java.security.KeyStore.getInstance("AndroidKeyStore")
+                ks.load(null)
+                ks.deleteEntry(MasterKey.DEFAULT_MASTER_KEY_ALIAS)
+                Log.i(TAG, "Deleted master key from Android Keystore")
+            } catch (e: Exception) {
+                Log.w(TAG, "Could not remove master key: ${e.message}")
             }
         }
 
