@@ -46,6 +46,7 @@ import com.cubeos.meshsat.bt.IridiumSpp
 import com.cubeos.meshsat.service.GatewayService
 import com.cubeos.meshsat.ui.screens.AboutScreen
 import com.cubeos.meshsat.ui.screens.AuditScreen
+import com.cubeos.meshsat.ui.screens.CredentialsScreen
 import com.cubeos.meshsat.ui.screens.DashboardScreen
 import com.cubeos.meshsat.ui.screens.DeliveryScreen
 import com.cubeos.meshsat.ui.screens.GeofenceScreen
@@ -137,6 +138,7 @@ fun MeshSatUI() {
             composable("passes") { PassPredictorScreen() }
             composable("peers") { PeersScreen() }
             composable("audit") { AuditScreen() }
+            composable("credentials") { CredentialsScreen() }
         }
     }
 }

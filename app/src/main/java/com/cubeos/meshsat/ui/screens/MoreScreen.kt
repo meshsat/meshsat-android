@@ -58,6 +58,10 @@ fun MoreScreen(navController: NavController) {
         SectionHeader("Radio")
         FeatureItem("Radio Config", "LoRa, TX power, device admin", navController, "radio-config")
 
+        // Security
+        SectionHeader("Security")
+        FeatureItem("Credentials", "Certificates, keys & expiry", navController, "credentials")
+
         // App
         SectionHeader("App")
         FeatureItem("Settings", "Theme, encryption, compression", navController, "settings")
