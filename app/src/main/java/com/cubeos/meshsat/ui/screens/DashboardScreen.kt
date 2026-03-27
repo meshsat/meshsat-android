@@ -87,6 +87,8 @@ import com.cubeos.meshsat.ui.theme.SignalGood
 import com.cubeos.meshsat.ui.theme.SignalPoor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -190,6 +192,30 @@ fun DashboardScreen() {
     val failedCount = statCount("failed")
     val deadCount = statCount("dead")
 
+    // --- Dashboard card order (MESHSAT-401) ---
+    val scope = rememberCoroutineScope()
+    val settings = remember { com.cubeos.meshsat.data.SettingsRepository(context) }
+    val defaultOrder = "transports,signals,sos,location,queue,burst,reticulum,activity"
+    var cardOrder by remember { mutableStateOf(defaultOrder.split(",")) }
+    var showReorderDialog by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        val saved = settings.dashboardOrder.first()
+        cardOrder = saved.split(",").filter { it.isNotBlank() }
+    }
+
+    if (showReorderDialog) {
+        ReorderDialog(
+            cards = cardOrder,
+            onDismiss = { showReorderDialog = false },
+            onConfirm = { newOrder ->
+                cardOrder = newOrder
+                scope.launch { settings.setDashboardOrder(newOrder.joinToString(",")) }
+                showReorderDialog = false
+            },
+        )
+    }
+
     // --- Layout ---
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -197,10 +223,23 @@ fun DashboardScreen() {
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item {
-            Text(
-                text = "Dashboard",
-                style = MaterialTheme.typography.headlineMedium,
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "Dashboard",
+                    style = MaterialTheme.typography.headlineMedium,
+                )
+                IconButton(onClick = { showReorderDialog = true }) {
+                    Text(
+                        text = "\u2630",
+                        color = MeshSatTextMuted,
+                        style = MaterialTheme.typography.titleLarge,
+                    )
+                }
+            }
         }
 
         // ====== 1. Transport Status Cards (horizontal scroll) ======
@@ -954,4 +993,105 @@ private fun ActivityLogEntry(msg: Message) {
             modifier = Modifier.weight(1f),
         )
     }
+}
+
+// ============================================================================
+// Reorder Dialog (MESHSAT-401)
+// ============================================================================
+
+private val CARD_LABELS = mapOf(
+    "transports" to "Transport Status",
+    "signals" to "Signal Charts",
+    "sos" to "SOS Emergency",
+    "location" to "Location",
+    "queue" to "Message Queue",
+    "burst" to "Burst Queue",
+    "reticulum" to "Reticulum Network",
+    "activity" to "Activity Log",
+)
+
+@Composable
+private fun ReorderDialog(
+    cards: List<String>,
+    onDismiss: () -> Unit,
+    onConfirm: (List<String>) -> Unit,
+) {
+    var order by remember { mutableStateOf(cards.toMutableList()) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Reorder Dashboard") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    "Tap arrows to move widgets up or down.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MeshSatTextMuted,
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                order.forEachIndexed { index, cardId ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(MeshSatSurface, RoundedCornerShape(6.dp))
+                            .border(1.dp, MeshSatBorder, RoundedCornerShape(6.dp))
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = CARD_LABELS[cardId] ?: cardId,
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Row {
+                            IconButton(
+                                onClick = {
+                                    if (index > 0) {
+                                        val newOrder = order.toMutableList()
+                                        newOrder[index] = newOrder[index - 1].also {
+                                            newOrder[index - 1] = newOrder[index]
+                                        }
+                                        order = newOrder
+                                    }
+                                },
+                                enabled = index > 0,
+                            ) {
+                                Text(
+                                    "\u25B2",
+                                    color = if (index > 0) MeshSatTeal else MeshSatBorder,
+                                )
+                            }
+                            IconButton(
+                                onClick = {
+                                    if (index < order.size - 1) {
+                                        val newOrder = order.toMutableList()
+                                        newOrder[index] = newOrder[index + 1].also {
+                                            newOrder[index + 1] = newOrder[index]
+                                        }
+                                        order = newOrder
+                                    }
+                                },
+                                enabled = index < order.size - 1,
+                            ) {
+                                Text(
+                                    "\u25BC",
+                                    color = if (index < order.size - 1) MeshSatTeal else MeshSatBorder,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { onConfirm(order) },
+                colors = ButtonDefaults.buttonColors(containerColor = MeshSatTeal),
+            ) { Text("Apply") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
+    )
 }

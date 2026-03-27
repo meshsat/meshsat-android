@@ -543,4 +543,15 @@ class SettingsRepository(private val context: Context) {
     suspend fun setHubClientCertPem(pem: String) { context.dataStore.edit { it[KEY_HUB_CLIENT_CERT] = pem } }
     suspend fun setHubClientKeyPem(pem: String) { secureStore.set("hub_client_key_pem", pem) }
     suspend fun setHubCaCertPem(pem: String) { context.dataStore.edit { it[KEY_HUB_CA_CERT] = pem } }
+
+    // --- Dashboard widget order (MESHSAT-401) ---
+
+    val dashboardOrder: Flow<String> = context.dataStore.data.map {
+        it[stringPreferencesKey("dashboard_card_order")]
+            ?: "transports,signals,sos,location,queue,burst,reticulum,activity"
+    }
+
+    suspend fun setDashboardOrder(order: String) {
+        context.dataStore.edit { it[stringPreferencesKey("dashboard_card_order")] = order }
+    }
 }
