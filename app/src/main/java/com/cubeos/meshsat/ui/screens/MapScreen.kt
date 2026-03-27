@@ -49,6 +49,9 @@ import com.cubeos.meshsat.ui.theme.MeshSatGreen
 import com.cubeos.meshsat.ui.theme.MeshSatTeal
 import com.cubeos.meshsat.ui.theme.MeshSatTextMuted
 import com.cubeos.meshsat.ui.theme.ThemeState
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import org.osmdroid.config.Configuration
 import org.osmdroid.tileprovider.MapTileProviderArray
 import org.osmdroid.tileprovider.modules.MapTileFileArchiveProvider
@@ -123,11 +126,6 @@ fun MapScreen() {
     val filteredMeshNodes = if (showMeshNodes) meshNodes.filter { it.nodeId in visibleNodeIds } else emptyList()
     val filteredTrackPositions = if (showTracks) trackPositions.filter { it.nodeId in visibleNodeIds } else emptyList()
     val effectivePhoneLocation = if (showGps) phoneLocation else null
-
-    // Configure osmdroid (must happen before MapView creation)
-    LaunchedEffect(Unit) {
-        Configuration.getInstance().userAgentValue = "MeshSat-Android"
-    }
 
     Column(
         modifier = Modifier
@@ -326,6 +324,63 @@ fun MapScreen() {
 /** Tracks the current MBTiles file path to avoid re-creating tile provider on every recomposition. */
 private class TileProviderState(var currentFile: String? = null)
 
+/**
+ * Create and remember a MapView that survives Compose recomposition and tab switches.
+ * Wires Android lifecycle (onResume/onPause) and prevents osmdroid's destructive onDetach.
+ */
+@Composable
+private fun rememberMapView(): MapView {
+    val context = LocalContext.current
+
+    // Configure osmdroid BEFORE creating MapView (synchronous, not in a coroutine)
+    val configured = remember {
+        Configuration.getInstance().apply {
+            userAgentValue = "MeshSat-Android"
+            osmdroidBasePath = java.io.File(context.filesDir, "osmdroid")
+            osmdroidTileCache = java.io.File(context.filesDir, "osmdroid/tiles")
+        }
+        true
+    }
+
+    val mapView = remember {
+        MapView(context).apply {
+            setDestroyMode(false) // CRITICAL: prevent tile provider destruction on detach
+            setMultiTouchControls(true)
+            clipToOutline = true
+            setBackgroundColor(android.graphics.Color.parseColor("#111827"))
+            setTileSource(TileSourceFactory.MAPNIK)
+            controller.setZoom(3.0)
+            controller.setCenter(GeoPoint(20.0, 0.0))
+
+            // Dark loading background (matches app while tiles load)
+            overlayManager.tilesOverlay.loadingBackgroundColor =
+                android.graphics.Color.parseColor("#111827")
+            overlayManager.tilesOverlay.loadingLineColor =
+                android.graphics.Color.parseColor("#1F2937")
+        }
+    }
+
+    // Wire lifecycle: onResume/onPause manage tile loading threads
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    DisposableEffect(lifecycle, mapView) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> mapView.onResume()
+                Lifecycle.Event.ON_PAUSE -> mapView.onPause()
+                else -> {}
+            }
+        }
+        lifecycle.addObserver(observer)
+        onDispose {
+            lifecycle.removeObserver(observer)
+            // Do NOT call mapView.onDetach() here — it's called on every tab switch
+            // and permanently destroys the tile provider. setDestroyMode(false) handles it.
+        }
+    }
+
+    return mapView
+}
+
 @Composable
 private fun OsmdroidMap(
     nodes: List<NodePosition>,
@@ -335,35 +390,12 @@ private fun OsmdroidMap(
     offlineEnabled: Boolean,
     darkMode: Boolean = true,
 ) {
-    val context = LocalContext.current
-    val mapViewRef = remember { mutableStateOf<MapView?>(null) }
+    val mapView = rememberMapView()
     val tileState = remember { TileProviderState() }
 
-    DisposableEffect(Unit) {
-        onDispose { mapViewRef.value?.onDetach() }
-    }
-
     AndroidView(
-        factory = { ctx ->
-            MapView(ctx).apply {
-                layoutParams = ViewGroup.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                )
-                setMultiTouchControls(true)
-                setBackgroundColor(android.graphics.Color.parseColor("#111827"))
-
-                // Default tile source (online OpenStreetMap)
-                setTileSource(TileSourceFactory.MAPNIK)
-
-                // Start at world view
-                controller.setZoom(3.0)
-                controller.setCenter(GeoPoint(20.0, 0.0))
-
-                mapViewRef.value = this
-            }
-        },
-        update = { mapView ->
+        factory = { mapView },
+        update = { mv ->
             // Only re-create tile provider when the file actually changes
             val newFile = if (offlineEnabled && mbtilesFile != null) mbtilesFile.absolutePath else null
             if (newFile != tileState.currentFile) {
@@ -377,20 +409,20 @@ private fun OsmdroidMap(
                                 "MBTiles", 0, 19, 256, ".png",
                                 arrayOf<String>(),
                             )
-                            val receiver = SimpleRegisterReceiver(mapView.context)
+                            val receiver = SimpleRegisterReceiver(mv.context)
                             val archiveProvider = MapTileFileArchiveProvider(
                                 receiver, tileSource, arrayOf(archives),
                             )
                             val provider = MapTileProviderArray(
                                 tileSource, receiver, arrayOf(archiveProvider),
                             )
-                            mapView.tileProvider = provider
+                            mv.tileProvider = provider
                         }
                     } catch (_: Exception) {
-                        mapView.setTileSource(TileSourceFactory.MAPNIK)
+                        mv.setTileSource(TileSourceFactory.MAPNIK)
                     }
                 } else {
-                    mapView.setTileSource(TileSourceFactory.MAPNIK)
+                    mv.setTileSource(TileSourceFactory.MAPNIK)
                 }
             }
 
@@ -404,21 +436,21 @@ private fun OsmdroidMap(
                         0f, 0f, 0f, 1f, 0f,
                     )
                 )
-                mapView.overlayManager.tilesOverlay.setColorFilter(
+                mv.overlayManager.tilesOverlay.setColorFilter(
                     android.graphics.ColorMatrixColorFilter(invertMatrix)
                 )
             } else {
-                mapView.overlayManager.tilesOverlay.setColorFilter(null)
+                mv.overlayManager.tilesOverlay.setColorFilter(null)
             }
 
             // Rebuild overlays (markers, tracks) — tiles overlay is managed by osmdroid internally
-            mapView.overlays.clear()
+            mv.overlays.clear()
 
             // Track lines (per-node dashed polylines)
             val tracksByNode = trackPositions.groupBy { it.nodeId }
             tracksByNode.entries.forEachIndexed { index, (_, positions) ->
                 if (positions.size >= 2) {
-                    val line = Polyline(mapView)
+                    val line = Polyline(mv)
                     line.outlinePaint.color = TRACK_COLORS[index % TRACK_COLORS.size]
                     line.outlinePaint.strokeWidth = 4f
                     line.outlinePaint.style = Paint.Style.STROKE
@@ -427,27 +459,27 @@ private fun OsmdroidMap(
                     val pts = positions.map { GeoPoint(it.latitude, it.longitude) }
                     line.setPoints(pts)
                     line.isGeodesic = false
-                    mapView.overlays.add(line)
+                    mv.overlays.add(line)
                 }
             }
 
             // Mesh node markers
             nodes.forEach { node ->
-                val marker = Marker(mapView)
+                val marker = Marker(mv)
                 marker.position = GeoPoint(node.latitude, node.longitude)
                 val name = node.nodeName.ifBlank { MeshtasticProtocol.formatNodeId(node.nodeId) }
                 val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(node.timestamp))
                 marker.title = name
                 marker.snippet = "Alt: ${node.altitude}m  ${time}"
-                marker.icon = createDotDrawable(mapView, 0xFF06B6D4.toInt(), 0xFF0D9488.toInt(), 16)
+                marker.icon = createDotDrawable(mv, 0xFF06B6D4.toInt(), 0xFF0D9488.toInt(), 16)
                 marker.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
-                mapView.overlays.add(marker)
+                mv.overlays.add(marker)
             }
 
             // Phone GPS marker + accuracy circle
             if (phoneLocation != null) {
                 // Accuracy circle
-                val circle = Polygon(mapView)
+                val circle = Polygon(mv)
                 val circlePoints = Polygon.pointsAsCircle(
                     GeoPoint(phoneLocation.latitude, phoneLocation.longitude),
                     phoneLocation.accuracy.toDouble(),
@@ -456,16 +488,16 @@ private fun OsmdroidMap(
                 circle.fillPaint.color = 0x1A3B82F6  // blue with low alpha
                 circle.outlinePaint.color = 0x4D3B82F6
                 circle.outlinePaint.strokeWidth = 2f
-                mapView.overlays.add(circle)
+                mv.overlays.add(circle)
 
                 // Phone dot marker
-                val phoneMarker = Marker(mapView)
+                val phoneMarker = Marker(mv)
                 phoneMarker.position = GeoPoint(phoneLocation.latitude, phoneLocation.longitude)
                 phoneMarker.title = "This Phone"
                 phoneMarker.snippet = "Alt: ${phoneLocation.altitude.toInt()}m  Acc: ${phoneLocation.accuracy.toInt()}m"
-                phoneMarker.icon = createDotDrawable(mapView, 0xFF3B82F6.toInt(), 0xFF1D4ED8.toInt(), 20)
+                phoneMarker.icon = createDotDrawable(mv, 0xFF3B82F6.toInt(), 0xFF1D4ED8.toInt(), 20)
                 phoneMarker.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
-                mapView.overlays.add(phoneMarker)
+                mv.overlays.add(phoneMarker)
             }
 
             // Auto-fit bounds to all points
@@ -474,13 +506,13 @@ private fun OsmdroidMap(
             phoneLocation?.let { allPoints.add(GeoPoint(it.latitude, it.longitude)) }
             if (allPoints.size >= 2) {
                 val bbox = BoundingBox.fromGeoPoints(allPoints)
-                mapView.post { mapView.zoomToBoundingBox(bbox, true, 60) }
+                mv.post { mv.zoomToBoundingBox(bbox, true, 60) }
             } else if (allPoints.size == 1) {
-                mapView.controller.setCenter(allPoints[0])
-                mapView.controller.setZoom(13.0)
+                mv.controller.setCenter(allPoints[0])
+                mv.controller.setZoom(13.0)
             }
 
-            mapView.invalidate()
+            mv.invalidate()
         },
     )
 }
