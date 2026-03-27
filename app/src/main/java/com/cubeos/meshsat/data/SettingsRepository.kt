@@ -551,7 +551,7 @@ class SettingsRepository(private val context: Context) {
     // --- Offline map settings ---
 
     val offlineMapEnabled: Flow<Boolean> = context.dataStore.data.map {
-        it[KEY_OFFLINE_MAP_ENABLED] ?: false
+        it[KEY_OFFLINE_MAP_ENABLED] ?: true
     }
 
     val offlineMapFile: Flow<String> = context.dataStore.data.map {

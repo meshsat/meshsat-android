@@ -21,15 +21,37 @@ object MBTilesManager {
         val sizeBytes: Long,
         val name: String,
         val format: String,
+        val isVector: Boolean,
         val minZoom: Int?,
         val maxZoom: Int?,
         val bounds: String?,
     )
 
+    const val BUNDLED_WORLD_MAP = "world.mbtiles"
+
     private fun mbtilesDir(context: Context): File {
         val dir = File(context.filesDir, DIR_NAME)
         if (!dir.exists()) dir.mkdirs()
         return dir
+    }
+
+    /**
+     * Ensure the bundled world map (from assets) is extracted to internal storage.
+     * Only copies on first launch or if the file is missing.
+     */
+    fun ensureBundledMap(context: Context) {
+        val dest = File(mbtilesDir(context), BUNDLED_WORLD_MAP)
+        if (dest.exists()) return
+        try {
+            context.assets.open(BUNDLED_WORLD_MAP).use { input ->
+                dest.outputStream().use { output ->
+                    input.copyTo(output, bufferSize = 65536)
+                }
+            }
+            Log.i(TAG, "Extracted bundled world map (${dest.length()} bytes)")
+        } catch (e: Exception) {
+            Log.w(TAG, "No bundled world map in assets: ${e.message}")
+        }
     }
 
     /**
@@ -71,6 +93,7 @@ object MBTilesManager {
                     sizeBytes = file.length(),
                     name = reader.name.ifBlank { file.nameWithoutExtension },
                     format = reader.format,
+                    isVector = reader.isVector,
                     minZoom = reader.minZoom,
                     maxZoom = reader.maxZoom,
                     bounds = reader.bounds,

@@ -29,7 +29,11 @@ class MBTilesReader private constructor(
             validate(db)
             val meta = readMetadata(db)
             val format = meta["format"]?.lowercase() ?: "png"
-            val mime = if (format == "jpg" || format == "jpeg") "image/jpeg" else "image/png"
+            val mime = when (format) {
+                "pbf" -> "application/x-protobuf"
+                "jpg", "jpeg" -> "image/jpeg"
+                else -> "image/png"
+            }
             Log.i(TAG, "Opened MBTiles: ${meta["name"] ?: file.name} (format=$format)")
             return MBTilesReader(db, mime, meta)
         }
@@ -79,6 +83,7 @@ class MBTilesReader private constructor(
     val maxZoom: Int? get() = metadata["maxzoom"]?.toIntOrNull()
     val bounds: String? get() = metadata["bounds"]
     val format: String get() = metadata["format"] ?: "png"
+    val isVector: Boolean get() = format == "pbf"
 
     override fun close() {
         try { db.close() } catch (_: Exception) {}

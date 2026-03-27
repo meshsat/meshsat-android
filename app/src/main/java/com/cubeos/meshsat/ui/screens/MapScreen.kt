@@ -74,10 +74,20 @@ fun MapScreen() {
 
     // Offline map settings
     val settings = remember { SettingsRepository(context) }
-    val offlineEnabled by settings.offlineMapEnabled.collectAsState(initial = false)
+    val offlineEnabled by settings.offlineMapEnabled.collectAsState(initial = true)
     val offlineFile by settings.offlineMapFile.collectAsState(initial = "")
-    val mbtilesReader = remember(offlineEnabled, offlineFile) {
-        if (offlineEnabled && offlineFile.isNotBlank()) MBTilesManager.getReader(context, offlineFile)
+
+    // Extract bundled world map from assets on first use
+    LaunchedEffect(Unit) {
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            MBTilesManager.ensureBundledMap(context)
+        }
+    }
+
+    // Use selected file, or fall back to bundled world map
+    val effectiveFile = offlineFile.ifBlank { MBTilesManager.BUNDLED_WORLD_MAP }
+    val mbtilesReader = remember(offlineEnabled, effectiveFile) {
+        if (offlineEnabled) MBTilesManager.getReader(context, effectiveFile)
         else null
     }
 
@@ -126,6 +136,7 @@ fun MapScreen() {
                 trackPositions = filteredTrackPositions,
                 offlineMapEnabled = offlineEnabled,
                 mbtilesReader = mbtilesReader,
+                isVectorTiles = mbtilesReader?.isVector == true,
             )
         }
 
@@ -311,10 +322,11 @@ private fun LeafletMap(
     trackPositions: List<NodePosition> = emptyList(),
     offlineMapEnabled: Boolean = false,
     mbtilesReader: MBTilesReader? = null,
+    isVectorTiles: Boolean = false,
 ) {
     val context = LocalContext.current
-    val html = remember(nodes, phoneLocation, darkMode, trackPositions, offlineMapEnabled) {
-        buildLeafletHtml(nodes, phoneLocation, darkMode, trackPositions, offlineMapEnabled)
+    val html = remember(nodes, phoneLocation, darkMode, trackPositions, offlineMapEnabled, isVectorTiles) {
+        buildLeafletHtml(nodes, phoneLocation, darkMode, trackPositions, offlineMapEnabled, isVectorTiles)
     }
     val readerHolder = remember { TileReaderHolder() }
     readerHolder.reader = mbtilesReader
@@ -382,7 +394,7 @@ private fun LeafletMap(
     )
 }
 
-private fun buildLeafletHtml(nodes: List<NodePosition>, phoneLocation: android.location.Location?, darkMode: Boolean = true, trackPositions: List<NodePosition> = emptyList(), offlineMapEnabled: Boolean = false): String {
+private fun buildLeafletHtml(nodes: List<NodePosition>, phoneLocation: android.location.Location?, darkMode: Boolean = true, trackPositions: List<NodePosition> = emptyList(), offlineMapEnabled: Boolean = false, isVectorTiles: Boolean = false): String {
     // Calculate center from all available positions
     val allLats = mutableListOf<Double>()
     val allLons = mutableListOf<Double>()
@@ -436,6 +448,10 @@ private fun buildLeafletHtml(nodes: List<NodePosition>, phoneLocation: android.l
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <link rel="stylesheet" href="https://appassets.androidplatform.net/assets/leaflet.css" />
         <script src="https://appassets.androidplatform.net/assets/leaflet.js"></script>
+        ${if (isVectorTiles) """
+        <script src="https://appassets.androidplatform.net/assets/vectorgrid.js"></script>
+        <script src="https://appassets.androidplatform.net/assets/map-style.js"></script>
+        """ else ""}
         <style>
             body { margin: 0; padding: 0; background: ${if (darkMode) "#111827" else "#F9FAFB"}; }
             #map { width: 100%; height: 100vh; }
@@ -447,12 +463,20 @@ private fun buildLeafletHtml(nodes: List<NodePosition>, phoneLocation: android.l
         <div id="map"></div>
         <script>
             var map = L.map('map').setView([${"%.7f".format(centerLat)}, ${"%.7f".format(centerLon)}], 13);
-            ${if (offlineMapEnabled) """
-            // Online CDN as base fallback (loads when network available)
+            ${if (offlineMapEnabled && isVectorTiles) """
+            // Vector tile layer from MBTiles (OpenMapTiles schema)
+            var vectorStyle = meshsatVectorStyle('${if (darkMode) "dark" else "light"}');
+            L.vectorGrid.protobuf('https://appassets.androidplatform.net/mbtiles/{z}/{x}/{y}', {
+                vectorTileLayerStyles: vectorStyle,
+                maxZoom: 19,
+                rendererFactory: L.canvas.tile,
+            }).addTo(map);
+            """ else if (offlineMapEnabled) """
+            // Online CDN as base fallback
             L.tileLayer('https://{s}.basemaps.cartocdn.com/${if (darkMode) "dark_all" else "light_all"}/{z}/{x}/{y}{r}.png', {
                 maxZoom: 19,
             }).addTo(map);
-            // Offline MBTiles layer on top (transparent PNG for missing tiles lets CDN show through)
+            // Offline raster MBTiles layer on top
             L.tileLayer('https://appassets.androidplatform.net/mbtiles/{z}/{x}/{y}', {
                 maxZoom: 19,
             }).addTo(map);
