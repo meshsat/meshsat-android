@@ -1,6 +1,8 @@
 package com.cubeos.meshsat.ui.screens
 
 import android.graphics.Canvas
+import android.graphics.ColorMatrix
+import android.graphics.ColorMatrixColorFilter
 import android.graphics.Paint
 import android.graphics.drawable.BitmapDrawable
 import android.view.ViewGroup
@@ -70,13 +72,52 @@ import java.util.Locale
 
 /** Track color cycle for per-node polylines. */
 private val TRACK_COLORS = intArrayOf(
-    0xFF06B6D4.toInt(), // cyan
-    0xFFA855F7.toInt(), // purple
-    0xFFF97316.toInt(), // orange
-    0xFF22C55E.toInt(), // green
-    0xFFF59E0B.toInt(), // amber
-    0xFFEF4444.toInt(), // red
+    0xFF06B6D4.toInt(), 0xFFA855F7.toInt(), 0xFFF97316.toInt(),
+    0xFF22C55E.toInt(), 0xFFF59E0B.toInt(), 0xFFEF4444.toInt(),
 )
+
+/**
+ * Singleton MapView holder — survives Compose NavHost tab switches.
+ *
+ * The fundamental problem: Compose NavHost disposes the entire composable tree
+ * when navigating away from a tab. Any MapView stored in `remember {}` is lost.
+ * osmdroid MapView cannot be re-created cheaply — its tile provider, cache, and
+ * internal state are destroyed. Holding it as a static singleton ensures the same
+ * MapView instance is reused across tab switches.
+ */
+private object MapViewHolder {
+    var mapView: MapView? = null
+    var configuredFile: String? = null
+
+    fun getOrCreate(context: android.content.Context): MapView {
+        mapView?.let {
+            // Detach from any previous parent before reusing
+            (it.parent as? ViewGroup)?.removeView(it)
+            return it
+        }
+
+        Configuration.getInstance().apply {
+            userAgentValue = "MeshSat-Android"
+            osmdroidBasePath = java.io.File(context.filesDir, "osmdroid")
+            osmdroidTileCache = java.io.File(context.filesDir, "osmdroid/tiles")
+        }
+
+        return MapView(context).apply {
+            setDestroyMode(false)
+            setMultiTouchControls(true)
+            clipToOutline = true
+            setBackgroundColor(android.graphics.Color.parseColor("#111827"))
+            setTileSource(TileSourceFactory.MAPNIK)
+            controller.setZoom(3.0)
+            controller.setCenter(GeoPoint(20.0, 0.0))
+            overlayManager.tilesOverlay.loadingBackgroundColor =
+                android.graphics.Color.parseColor("#111827")
+            overlayManager.tilesOverlay.loadingLineColor =
+                android.graphics.Color.parseColor("#1F2937")
+            mapView = this
+        }
+    }
+}
 
 @Composable
 fun MapScreen() {
@@ -85,52 +126,42 @@ fun MapScreen() {
     val nodes by db.nodePositionDao().getLatestPerNode().collectAsState(initial = emptyList())
     val phoneLocation by GatewayService.phoneLocation.collectAsState()
 
-    // Track line positions (all historical positions per node)
     var trackPositions by remember { mutableStateOf<List<NodePosition>>(emptyList()) }
     LaunchedEffect(Unit) {
         trackPositions = db.nodePositionDao().getAllRecentByNode(500)
     }
 
-    // Offline map settings
     val settings = remember { SettingsRepository(context) }
     val offlineEnabled by settings.offlineMapEnabled.collectAsState(initial = true)
     val offlineFile by settings.offlineMapFile.collectAsState(initial = "")
 
-    // Extract bundled world map from assets on first use
     LaunchedEffect(Unit) {
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             MBTilesManager.ensureBundledMap(context)
         }
     }
 
-    // Resolve MBTiles file path for osmdroid
     val effectiveFile = offlineFile.ifBlank { MBTilesManager.BUNDLED_WORLD_MAP }
     val mbtilesFile = remember(offlineEnabled, effectiveFile) {
         if (offlineEnabled) MBTilesManager.getMBTilesFile(context, effectiveFile) else null
     }
 
-    // Filter out nodeId=0 (phone GPS stored by GatewayService)
     val meshNodes = nodes.filter { it.nodeId != 0L }
 
-    // Layer toggles
     var showGps by remember { mutableStateOf(true) }
     var showMeshNodes by remember { mutableStateOf(true) }
     var showTracks by remember { mutableStateOf(true) }
 
-    // Per-node visibility filters
     var visibleNodeIds by remember(meshNodes) {
         mutableStateOf(meshNodes.map { it.nodeId }.toSet())
     }
 
-    // Filtered data
     val filteredMeshNodes = if (showMeshNodes) meshNodes.filter { it.nodeId in visibleNodeIds } else emptyList()
     val filteredTrackPositions = if (showTracks) trackPositions.filter { it.nodeId in visibleNodeIds } else emptyList()
     val effectivePhoneLocation = if (showGps) phoneLocation else null
 
     Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp),
+        modifier = Modifier.fillMaxSize().padding(16.dp),
     ) {
         Text(
             text = "Node Map",
@@ -138,7 +169,6 @@ fun MapScreen() {
             modifier = Modifier.padding(bottom = 8.dp),
         )
 
-        // Map view using osmdroid
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -157,52 +187,28 @@ fun MapScreen() {
             )
         }
 
-        // Layer controls + node list below map (scrollable)
         Column(
             modifier = Modifier
                 .padding(top = 8.dp)
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-                // LAYERS card
                 Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth()
                         .background(MeshSatSurface, RoundedCornerShape(8.dp))
                         .border(1.dp, MeshSatBorder, RoundedCornerShape(8.dp))
                         .padding(12.dp),
                 ) {
-                    Text(
-                        text = "LAYERS",
-                        style = MaterialTheme.typography.titleSmall,
-                        color = MeshSatTeal,
-                        modifier = Modifier.padding(bottom = 4.dp),
-                    )
-                    LayerToggleRow(
-                        label = "GPS",
-                        dotColor = MeshSatGreen,
-                        checked = showGps,
-                        onCheckedChange = { showGps = it },
-                    )
-                    LayerToggleRow(
-                        label = "Mesh Nodes",
-                        dotColor = ColorMesh,
-                        checked = showMeshNodes,
-                        onCheckedChange = { showMeshNodes = it },
-                    )
-                    LayerToggleRow(
-                        label = "Tracks",
-                        dotColor = MeshSatBlue,
-                        checked = showTracks,
-                        onCheckedChange = { showTracks = it },
-                    )
+                    Text("LAYERS", style = MaterialTheme.typography.titleSmall, color = MeshSatTeal,
+                        modifier = Modifier.padding(bottom = 4.dp))
+                    LayerToggleRow("GPS", MeshSatGreen, showGps) { showGps = it }
+                    LayerToggleRow("Mesh Nodes", ColorMesh, showMeshNodes) { showMeshNodes = it }
+                    LayerToggleRow("Tracks", MeshSatBlue, showTracks) { showTracks = it }
                 }
 
-                // NODE FILTERS card (only if multiple mesh nodes)
                 if (meshNodes.size > 1) {
                     Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth()
                             .background(MeshSatSurface, RoundedCornerShape(8.dp))
                             .border(1.dp, MeshSatBorder, RoundedCornerShape(8.dp))
                             .padding(12.dp),
@@ -212,75 +218,37 @@ fun MapScreen() {
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Text(
-                                text = "NODE FILTERS",
-                                style = MaterialTheme.typography.titleSmall,
-                                color = MeshSatTeal,
-                            )
+                            Text("NODE FILTERS", style = MaterialTheme.typography.titleSmall, color = MeshSatTeal)
                             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                Text(
-                                    text = "Show all",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MeshSatTeal,
-                                    modifier = Modifier.clickable {
-                                        visibleNodeIds = meshNodes.map { it.nodeId }.toSet()
-                                    },
-                                )
-                                Text(
-                                    text = "Hide all",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MeshSatTextMuted,
-                                    modifier = Modifier.clickable {
-                                        visibleNodeIds = emptySet()
-                                    },
-                                )
+                                Text("Show all", style = MaterialTheme.typography.bodySmall, color = MeshSatTeal,
+                                    modifier = Modifier.clickable { visibleNodeIds = meshNodes.map { it.nodeId }.toSet() })
+                                Text("Hide all", style = MaterialTheme.typography.bodySmall, color = MeshSatTextMuted,
+                                    modifier = Modifier.clickable { visibleNodeIds = emptySet() })
                             }
                         }
                         meshNodes.forEach { node ->
                             val name = node.nodeName.ifBlank { MeshtasticProtocol.formatNodeId(node.nodeId) }
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable {
-                                        visibleNodeIds = if (node.nodeId in visibleNodeIds) {
-                                            visibleNodeIds - node.nodeId
-                                        } else {
-                                            visibleNodeIds + node.nodeId
-                                        }
-                                    },
+                                modifier = Modifier.fillMaxWidth().clickable {
+                                    visibleNodeIds = if (node.nodeId in visibleNodeIds)
+                                        visibleNodeIds - node.nodeId else visibleNodeIds + node.nodeId
+                                },
                             ) {
-                                Checkbox(
-                                    checked = node.nodeId in visibleNodeIds,
-                                    onCheckedChange = { checked ->
-                                        visibleNodeIds = if (checked) {
-                                            visibleNodeIds + node.nodeId
-                                        } else {
-                                            visibleNodeIds - node.nodeId
-                                        }
-                                    },
-                                )
-                                Text(
-                                    text = name,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = ColorMesh,
-                                )
+                                Checkbox(checked = node.nodeId in visibleNodeIds, onCheckedChange = { checked ->
+                                    visibleNodeIds = if (checked) visibleNodeIds + node.nodeId else visibleNodeIds - node.nodeId
+                                })
+                                Text(name, style = MaterialTheme.typography.bodyMedium, color = ColorMesh)
                             }
                         }
                     }
                 }
 
-                // Phone GPS info
                 if (showGps) {
                     phoneLocation?.let { loc ->
-                        Text(
-                            text = "Phone GPS",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = MeshSatTeal,
-                        )
+                        Text("Phone GPS", style = MaterialTheme.typography.titleMedium, color = MeshSatTeal)
                         Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
+                            modifier = Modifier.fillMaxWidth()
                                 .background(MeshSatSurface, RoundedCornerShape(6.dp))
                                 .border(1.dp, MeshSatBorder, RoundedCornerShape(6.dp))
                                 .padding(10.dp),
@@ -288,98 +256,34 @@ fun MapScreen() {
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Column {
-                                Text(text = "This Phone", style = MaterialTheme.typography.bodyMedium, color = MeshSatTeal)
-                                Text(
-                                    text = "%.5f, %.5f  alt %dm".format(loc.latitude, loc.longitude, loc.altitude.toInt()),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MeshSatTextMuted,
-                                )
+                                Text("This Phone", style = MaterialTheme.typography.bodyMedium, color = MeshSatTeal)
+                                Text("%.5f, %.5f  alt %dm".format(loc.latitude, loc.longitude, loc.altitude.toInt()),
+                                    style = MaterialTheme.typography.bodySmall, color = MeshSatTextMuted)
                             }
-                            Text(
-                                text = "acc ${loc.accuracy.toInt()}m",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MeshSatTextMuted,
-                            )
+                            Text("acc ${loc.accuracy.toInt()}m", style = MaterialTheme.typography.bodySmall, color = MeshSatTextMuted)
                         }
                     }
                 }
 
                 if (filteredMeshNodes.isNotEmpty()) {
-                    Text(
-                        text = "Mesh Nodes (${filteredMeshNodes.size})",
-                        style = MaterialTheme.typography.titleMedium,
-                    )
-                    filteredMeshNodes.forEach { node ->
-                        NodeRow(node)
-                    }
+                    Text("Mesh Nodes (${filteredMeshNodes.size})", style = MaterialTheme.typography.titleMedium)
+                    filteredMeshNodes.forEach { node -> NodeRow(node) }
                 }
             }
         }
     }
 
 // ============================================================================
-// osmdroid Native Map
+// osmdroid Native Map — singleton MapView pattern
 // ============================================================================
 
-/** Tracks the current MBTiles file path to avoid re-creating tile provider on every recomposition. */
-private class TileProviderState(var currentFile: String? = null)
-
-/**
- * Create and remember a MapView that survives Compose recomposition and tab switches.
- * Wires Android lifecycle (onResume/onPause) and prevents osmdroid's destructive onDetach.
- */
-@Composable
-private fun rememberMapView(): MapView {
-    val context = LocalContext.current
-
-    // Configure osmdroid BEFORE creating MapView (synchronous, not in a coroutine)
-    val configured = remember {
-        Configuration.getInstance().apply {
-            userAgentValue = "MeshSat-Android"
-            osmdroidBasePath = java.io.File(context.filesDir, "osmdroid")
-            osmdroidTileCache = java.io.File(context.filesDir, "osmdroid/tiles")
-        }
-        true
-    }
-
-    val mapView = remember {
-        MapView(context).apply {
-            setDestroyMode(false) // CRITICAL: prevent tile provider destruction on detach
-            setMultiTouchControls(true)
-            clipToOutline = true
-            setBackgroundColor(android.graphics.Color.parseColor("#111827"))
-            setTileSource(TileSourceFactory.MAPNIK)
-            controller.setZoom(3.0)
-            controller.setCenter(GeoPoint(20.0, 0.0))
-
-            // Dark loading background (matches app while tiles load)
-            overlayManager.tilesOverlay.loadingBackgroundColor =
-                android.graphics.Color.parseColor("#111827")
-            overlayManager.tilesOverlay.loadingLineColor =
-                android.graphics.Color.parseColor("#1F2937")
-        }
-    }
-
-    // Wire lifecycle: onResume/onPause manage tile loading threads
-    val lifecycle = LocalLifecycleOwner.current.lifecycle
-    DisposableEffect(lifecycle, mapView) {
-        val observer = LifecycleEventObserver { _, event ->
-            when (event) {
-                Lifecycle.Event.ON_RESUME -> mapView.onResume()
-                Lifecycle.Event.ON_PAUSE -> mapView.onPause()
-                else -> {}
-            }
-        }
-        lifecycle.addObserver(observer)
-        onDispose {
-            lifecycle.removeObserver(observer)
-            // Do NOT call mapView.onDetach() here — it's called on every tab switch
-            // and permanently destroys the tile provider. setDestroyMode(false) handles it.
-        }
-    }
-
-    return mapView
-}
+/** Dark mode color inversion matrix. */
+private val DARK_INVERT = ColorMatrixColorFilter(ColorMatrix(floatArrayOf(
+    -1f, 0f, 0f, 0f, 255f,
+    0f, -1f, 0f, 0f, 255f,
+    0f, 0f, -1f, 0f, 255f,
+    0f, 0f, 0f, 1f, 0f,
+)))
 
 @Composable
 private fun OsmdroidMap(
@@ -390,33 +294,47 @@ private fun OsmdroidMap(
     offlineEnabled: Boolean,
     darkMode: Boolean = true,
 ) {
-    val mapView = rememberMapView()
-    val tileState = remember { TileProviderState() }
+    val context = LocalContext.current
+
+    // Wire lifecycle for onResume/onPause
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    DisposableEffect(lifecycle) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> MapViewHolder.mapView?.onResume()
+                Lifecycle.Event.ON_PAUSE -> MapViewHolder.mapView?.onPause()
+                else -> {}
+            }
+        }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer) }
+    }
 
     AndroidView(
-        factory = { mapView },
+        factory = { ctx ->
+            val mv = MapViewHolder.getOrCreate(ctx)
+            mv.layoutParams = ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT,
+            )
+            // Ensure tiles are loading after re-attach
+            mv.onResume()
+            mv
+        },
         update = { mv ->
-            // Only re-create tile provider when the file actually changes
+            // Configure offline tile provider (only when file changes)
             val newFile = if (offlineEnabled && mbtilesFile != null) mbtilesFile.absolutePath else null
-            if (newFile != tileState.currentFile) {
-                tileState.currentFile = newFile
+            if (newFile != MapViewHolder.configuredFile) {
+                MapViewHolder.configuredFile = newFile
                 if (newFile != null && mbtilesFile != null) {
                     try {
                         val archives = org.osmdroid.tileprovider.modules.ArchiveFileFactory
                             .getArchiveFile(mbtilesFile)
                         if (archives != null) {
-                            val tileSource = XYTileSource(
-                                "MBTiles", 0, 19, 256, ".png",
-                                arrayOf<String>(),
-                            )
+                            val tileSource = XYTileSource("MBTiles", 0, 19, 256, ".png", arrayOf())
                             val receiver = SimpleRegisterReceiver(mv.context)
-                            val archiveProvider = MapTileFileArchiveProvider(
-                                receiver, tileSource, arrayOf(archives),
-                            )
-                            val provider = MapTileProviderArray(
-                                tileSource, receiver, arrayOf(archiveProvider),
-                            )
-                            mv.tileProvider = provider
+                            val archiveProvider = MapTileFileArchiveProvider(receiver, tileSource, arrayOf(archives))
+                            mv.tileProvider = MapTileProviderArray(tileSource, receiver, arrayOf(archiveProvider))
                         }
                     } catch (_: Exception) {
                         mv.setTileSource(TileSourceFactory.MAPNIK)
@@ -426,27 +344,16 @@ private fun OsmdroidMap(
                 }
             }
 
-            // Dark mode: invert tile colors for a dark map appearance
-            if (darkMode) {
-                val invertMatrix = android.graphics.ColorMatrix(
-                    floatArrayOf(
-                        -1f, 0f, 0f, 0f, 255f,
-                        0f, -1f, 0f, 0f, 255f,
-                        0f, 0f, -1f, 0f, 255f,
-                        0f, 0f, 0f, 1f, 0f,
-                    )
-                )
-                mv.overlayManager.tilesOverlay.setColorFilter(
-                    android.graphics.ColorMatrixColorFilter(invertMatrix)
-                )
-            } else {
-                mv.overlayManager.tilesOverlay.setColorFilter(null)
-            }
+            // Dark mode
+            mv.overlayManager.tilesOverlay.setColorFilter(if (darkMode) DARK_INVERT else null)
 
-            // Rebuild overlays (markers, tracks) — tiles overlay is managed by osmdroid internally
-            mv.overlays.clear()
+            // Rebuild marker/track overlays (keep tiles overlay untouched)
+            val nonTileOverlays = mv.overlays.filterIsInstance<Marker>() +
+                mv.overlays.filterIsInstance<Polyline>() +
+                mv.overlays.filterIsInstance<Polygon>()
+            nonTileOverlays.forEach { mv.overlays.remove(it) }
 
-            // Track lines (per-node dashed polylines)
+            // Track lines
             val tracksByNode = trackPositions.groupBy { it.nodeId }
             tracksByNode.entries.forEachIndexed { index, (_, positions) ->
                 if (positions.size >= 2) {
@@ -456,8 +363,7 @@ private fun OsmdroidMap(
                     line.outlinePaint.style = Paint.Style.STROKE
                     line.outlinePaint.pathEffect = android.graphics.DashPathEffect(floatArrayOf(12f, 8f), 0f)
                     line.outlinePaint.isAntiAlias = true
-                    val pts = positions.map { GeoPoint(it.latitude, it.longitude) }
-                    line.setPoints(pts)
+                    line.setPoints(positions.map { GeoPoint(it.latitude, it.longitude) })
                     line.isGeodesic = false
                     mv.overlays.add(line)
                 }
@@ -478,19 +384,16 @@ private fun OsmdroidMap(
 
             // Phone GPS marker + accuracy circle
             if (phoneLocation != null) {
-                // Accuracy circle
                 val circle = Polygon(mv)
-                val circlePoints = Polygon.pointsAsCircle(
+                circle.points = Polygon.pointsAsCircle(
                     GeoPoint(phoneLocation.latitude, phoneLocation.longitude),
                     phoneLocation.accuracy.toDouble(),
                 )
-                circle.points = circlePoints
-                circle.fillPaint.color = 0x1A3B82F6  // blue with low alpha
+                circle.fillPaint.color = 0x1A3B82F6
                 circle.outlinePaint.color = 0x4D3B82F6
                 circle.outlinePaint.strokeWidth = 2f
                 mv.overlays.add(circle)
 
-                // Phone dot marker
                 val phoneMarker = Marker(mv)
                 phoneMarker.position = GeoPoint(phoneLocation.latitude, phoneLocation.longitude)
                 phoneMarker.title = "This Phone"
@@ -500,7 +403,7 @@ private fun OsmdroidMap(
                 mv.overlays.add(phoneMarker)
             }
 
-            // Auto-fit bounds to all points
+            // Auto-fit bounds
             val allPoints = mutableListOf<GeoPoint>()
             nodes.forEach { allPoints.add(GeoPoint(it.latitude, it.longitude)) }
             phoneLocation?.let { allPoints.add(GeoPoint(it.latitude, it.longitude)) }
@@ -517,7 +420,6 @@ private fun OsmdroidMap(
     )
 }
 
-/** Create a small filled circle drawable for map markers. */
 private fun createDotDrawable(mapView: MapView, fillColor: Int, strokeColor: Int, sizeDp: Int): BitmapDrawable {
     val density = mapView.resources.displayMetrics.density
     val sizePx = (sizeDp * density).toInt()
@@ -526,33 +428,23 @@ private fun createDotDrawable(mapView: MapView, fillColor: Int, strokeColor: Int
     val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     val cx = sizePx / 2f
     val r = sizePx / 2f - 2 * density
-
-    // Fill
-    paint.style = Paint.Style.FILL
-    paint.color = fillColor
+    paint.style = Paint.Style.FILL; paint.color = fillColor
     canvas.drawCircle(cx, cx, r, paint)
-
-    // Stroke
-    paint.style = Paint.Style.STROKE
-    paint.color = strokeColor
-    paint.strokeWidth = 2 * density
+    paint.style = Paint.Style.STROKE; paint.color = strokeColor; paint.strokeWidth = 2 * density
     canvas.drawCircle(cx, cx, r, paint)
-
     return BitmapDrawable(mapView.resources, bitmap)
 }
 
 // ============================================================================
-// Shared UI Components (unchanged)
+// Shared UI Components
 // ============================================================================
 
 @Composable
 private fun NodeRow(node: NodePosition) {
     val name = node.nodeName.ifBlank { MeshtasticProtocol.formatNodeId(node.nodeId) }
     val timeStr = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(node.timestamp))
-
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
+        modifier = Modifier.fillMaxWidth()
             .background(MeshSatSurface, RoundedCornerShape(6.dp))
             .border(1.dp, MeshSatBorder, RoundedCornerShape(6.dp))
             .padding(10.dp),
@@ -560,43 +452,25 @@ private fun NodeRow(node: NodePosition) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column {
-            Text(text = name, style = MaterialTheme.typography.bodyMedium, color = ColorMesh)
-            Text(
-                text = "%.5f, %.5f  alt %dm".format(node.latitude, node.longitude, node.altitude),
-                style = MaterialTheme.typography.bodySmall,
-                color = MeshSatTextMuted,
-            )
+            Text(name, style = MaterialTheme.typography.bodyMedium, color = ColorMesh)
+            Text("%.5f, %.5f  alt %dm".format(node.latitude, node.longitude, node.altitude),
+                style = MaterialTheme.typography.bodySmall, color = MeshSatTextMuted)
         }
-        Text(text = timeStr, style = MaterialTheme.typography.bodySmall, color = MeshSatTextMuted)
+        Text(timeStr, style = MaterialTheme.typography.bodySmall, color = MeshSatTextMuted)
     }
 }
 
 @Composable
 private fun LayerToggleRow(
-    label: String,
-    dotColor: androidx.compose.ui.graphics.Color,
-    checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit,
+    label: String, dotColor: androidx.compose.ui.graphics.Color,
+    checked: Boolean, onCheckedChange: (Boolean) -> Unit,
 ) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onCheckedChange(!checked) },
+        modifier = Modifier.fillMaxWidth().clickable { onCheckedChange(!checked) },
     ) {
-        Checkbox(
-            checked = checked,
-            onCheckedChange = onCheckedChange,
-        )
-        Box(
-            modifier = Modifier
-                .size(8.dp)
-                .background(dotColor, CircleShape),
-        )
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodyMedium,
-            modifier = Modifier.padding(start = 8.dp),
-        )
+        Checkbox(checked = checked, onCheckedChange = onCheckedChange)
+        Box(modifier = Modifier.size(8.dp).background(dotColor, CircleShape))
+        Text(label, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(start = 8.dp))
     }
 }
