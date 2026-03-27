@@ -58,6 +58,10 @@ class SettingsRepository(private val context: Context) {
         val KEY_RNS_TCP_HOST = stringPreferencesKey("rns_tcp_host")
         val KEY_RNS_TCP_PORT = stringPreferencesKey("rns_tcp_port")
 
+        // Offline map settings
+        val KEY_OFFLINE_MAP_ENABLED = booleanPreferencesKey("offline_map_enabled")
+        val KEY_OFFLINE_MAP_FILE = stringPreferencesKey("offline_map_file")
+
         // Reticulum Routing settings (MESHSAT-394)
         val KEY_RNS_ANNOUNCE_INTERVAL = stringPreferencesKey("rns_announce_interval_min")
         val KEY_RNS_TCP_LISTEN_PORT = stringPreferencesKey("rns_tcp_listen_port")
@@ -543,6 +547,24 @@ class SettingsRepository(private val context: Context) {
     suspend fun setHubClientCertPem(pem: String) { context.dataStore.edit { it[KEY_HUB_CLIENT_CERT] = pem } }
     suspend fun setHubClientKeyPem(pem: String) { secureStore.set("hub_client_key_pem", pem) }
     suspend fun setHubCaCertPem(pem: String) { context.dataStore.edit { it[KEY_HUB_CA_CERT] = pem } }
+
+    // --- Offline map settings ---
+
+    val offlineMapEnabled: Flow<Boolean> = context.dataStore.data.map {
+        it[KEY_OFFLINE_MAP_ENABLED] ?: false
+    }
+
+    val offlineMapFile: Flow<String> = context.dataStore.data.map {
+        it[KEY_OFFLINE_MAP_FILE] ?: ""
+    }
+
+    suspend fun setOfflineMapEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[KEY_OFFLINE_MAP_ENABLED] = enabled }
+    }
+
+    suspend fun setOfflineMapFile(file: String) {
+        context.dataStore.edit { it[KEY_OFFLINE_MAP_FILE] = file }
+    }
 
     // --- Dashboard widget order (MESHSAT-401) ---
 

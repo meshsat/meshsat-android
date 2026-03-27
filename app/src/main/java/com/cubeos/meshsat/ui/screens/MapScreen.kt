@@ -50,6 +50,11 @@ import com.cubeos.meshsat.ui.theme.MeshSatGreen
 import com.cubeos.meshsat.ui.theme.MeshSatTeal
 import com.cubeos.meshsat.ui.theme.MeshSatTextMuted
 import com.cubeos.meshsat.ui.theme.ThemeState
+import com.cubeos.meshsat.data.SettingsRepository
+import com.cubeos.meshsat.map.MBTilesManager
+import com.cubeos.meshsat.map.MBTilesReader
+import kotlinx.coroutines.flow.first
+import java.io.ByteArrayInputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -65,6 +70,15 @@ fun MapScreen() {
     var trackPositions by remember { mutableStateOf<List<NodePosition>>(emptyList()) }
     LaunchedEffect(Unit) {
         trackPositions = db.nodePositionDao().getAllRecentByNode(500)
+    }
+
+    // Offline map settings
+    val settings = remember { SettingsRepository(context) }
+    val offlineEnabled by settings.offlineMapEnabled.collectAsState(initial = false)
+    val offlineFile by settings.offlineMapFile.collectAsState(initial = "")
+    val mbtilesReader = remember(offlineEnabled, offlineFile) {
+        if (offlineEnabled && offlineFile.isNotBlank()) MBTilesManager.getReader(context, offlineFile)
+        else null
     }
 
     // Filter out nodeId=0 (phone GPS stored by GatewayService)
@@ -110,6 +124,8 @@ fun MapScreen() {
                 phoneLocation = effectivePhoneLocation,
                 darkMode = isDark,
                 trackPositions = filteredTrackPositions,
+                offlineMapEnabled = offlineEnabled,
+                mbtilesReader = mbtilesReader,
             )
         }
 
@@ -273,11 +289,35 @@ fun MapScreen() {
         }
     }
 
+/** Holds a mutable reader reference so the WebViewClient closure (created once) can access updates. */
+private class TileReaderHolder(var reader: MBTilesReader? = null)
+
+/** Minimal transparent 1x1 PNG returned for missing offline tiles. */
+private val TRANSPARENT_PNG = byteArrayOf(
+    0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D,
+    0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06,
+    0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4.toByte(), 0x89.toByte(), 0x00, 0x00, 0x00, 0x0A,
+    0x49, 0x44, 0x41, 0x54, 0x78, 0x9C.toByte(), 0x62, 0x00, 0x00, 0x00, 0x02, 0x00, 0x01,
+    0xE5.toByte(), 0x27, 0xDE.toByte(), 0xFC.toByte(), 0x00, 0x00, 0x00, 0x00, 0x49, 0x45,
+    0x4E, 0x44, 0xAE.toByte(), 0x42, 0x60, 0x82.toByte(),
+)
+
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-private fun LeafletMap(nodes: List<NodePosition>, phoneLocation: android.location.Location?, darkMode: Boolean = true, trackPositions: List<NodePosition> = emptyList()) {
+private fun LeafletMap(
+    nodes: List<NodePosition>,
+    phoneLocation: android.location.Location?,
+    darkMode: Boolean = true,
+    trackPositions: List<NodePosition> = emptyList(),
+    offlineMapEnabled: Boolean = false,
+    mbtilesReader: MBTilesReader? = null,
+) {
     val context = LocalContext.current
-    val html = remember(nodes, phoneLocation, darkMode, trackPositions) { buildLeafletHtml(nodes, phoneLocation, darkMode, trackPositions) }
+    val html = remember(nodes, phoneLocation, darkMode, trackPositions, offlineMapEnabled) {
+        buildLeafletHtml(nodes, phoneLocation, darkMode, trackPositions, offlineMapEnabled)
+    }
+    val readerHolder = remember { TileReaderHolder() }
+    readerHolder.reader = mbtilesReader
 
     AndroidView(
         factory = { ctx ->
@@ -298,11 +338,39 @@ private fun LeafletMap(nodes: List<NodePosition>, phoneLocation: android.locatio
                         view: WebView,
                         request: WebResourceRequest,
                     ): WebResourceResponse? {
+                        val url = request.url
+                        // Intercept offline tile requests: /mbtiles/{z}/{x}/{y}
+                        if (url.host == "appassets.androidplatform.net" &&
+                            url.path?.startsWith("/mbtiles/") == true
+                        ) {
+                            val parts = url.path!!.removePrefix("/mbtiles/").split("/")
+                            if (parts.size == 3) {
+                                val z = parts[0].toIntOrNull()
+                                val x = parts[1].toIntOrNull()
+                                val y = parts[2].toIntOrNull()
+                                if (z != null && x != null && y != null) {
+                                    val reader = readerHolder.reader
+                                    if (reader != null) {
+                                        val tile = reader.getTile(z, x, y)
+                                        if (tile != null) {
+                                            return WebResourceResponse(
+                                                reader.mimeType, null,
+                                                ByteArrayInputStream(tile),
+                                            )
+                                        }
+                                    }
+                                    // Missing tile — return transparent PNG so online layer shows through
+                                    return WebResourceResponse(
+                                        "image/png", null,
+                                        ByteArrayInputStream(TRANSPARENT_PNG),
+                                    )
+                                }
+                            }
+                        }
                         return assetLoader.shouldInterceptRequest(request.url)
                     }
                 }
                 setBackgroundColor(android.graphics.Color.parseColor("#111827"))
-                tag = assetLoader
             }
         },
         update = { webView ->
@@ -314,7 +382,7 @@ private fun LeafletMap(nodes: List<NodePosition>, phoneLocation: android.locatio
     )
 }
 
-private fun buildLeafletHtml(nodes: List<NodePosition>, phoneLocation: android.location.Location?, darkMode: Boolean = true, trackPositions: List<NodePosition> = emptyList()): String {
+private fun buildLeafletHtml(nodes: List<NodePosition>, phoneLocation: android.location.Location?, darkMode: Boolean = true, trackPositions: List<NodePosition> = emptyList(), offlineMapEnabled: Boolean = false): String {
     // Calculate center from all available positions
     val allLats = mutableListOf<Double>()
     val allLons = mutableListOf<Double>()
@@ -379,9 +447,20 @@ private fun buildLeafletHtml(nodes: List<NodePosition>, phoneLocation: android.l
         <div id="map"></div>
         <script>
             var map = L.map('map').setView([${"%.7f".format(centerLat)}, ${"%.7f".format(centerLon)}], 13);
+            ${if (offlineMapEnabled) """
+            // Online CDN as base fallback (loads when network available)
             L.tileLayer('https://{s}.basemaps.cartocdn.com/${if (darkMode) "dark_all" else "light_all"}/{z}/{x}/{y}{r}.png', {
                 maxZoom: 19,
             }).addTo(map);
+            // Offline MBTiles layer on top (transparent PNG for missing tiles lets CDN show through)
+            L.tileLayer('https://appassets.androidplatform.net/mbtiles/{z}/{x}/{y}', {
+                maxZoom: 19,
+            }).addTo(map);
+            """ else """
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/${if (darkMode) "dark_all" else "light_all"}/{z}/{x}/{y}{r}.png', {
+                maxZoom: 19,
+            }).addTo(map);
+            """}
             $phoneMarker
             $nodeMarkers
             $trackLines

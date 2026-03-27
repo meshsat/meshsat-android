@@ -11,6 +11,11 @@ import android.os.Build
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.foundation.background
 import androidx.core.content.ContextCompat
 import androidx.compose.foundation.BorderStroke
@@ -22,6 +27,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -61,7 +67,11 @@ import com.cubeos.meshsat.ble.MeshtasticBle
 import com.cubeos.meshsat.bt.IridiumSpp
 import com.cubeos.meshsat.crypto.AesGcmCrypto
 import com.cubeos.meshsat.data.SettingsRepository
+import com.cubeos.meshsat.map.MBTilesManager
 import com.cubeos.meshsat.service.GatewayService
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
 import com.cubeos.meshsat.ui.theme.ColorIridium
 import com.cubeos.meshsat.ui.theme.ColorMesh
 import com.cubeos.meshsat.ui.theme.MeshSatAmber
@@ -1675,6 +1685,164 @@ fun SettingsScreen(navController: NavController? = null) {
             modifier = Modifier.fillMaxWidth(),
         ) {
             Text("Audit Log", style = MaterialTheme.typography.bodyMedium)
+        }
+
+        // --- Offline Maps ---
+        SectionCard("Offline Maps") {
+            var offlineEnabled by remember { mutableStateOf(false) }
+            var offlineFile by remember { mutableStateOf("") }
+            var mapFiles by remember { mutableStateOf<List<MBTilesManager.MBTilesInfo>>(emptyList()) }
+            var importing by remember { mutableStateOf(false) }
+
+            LaunchedEffect(Unit) {
+                offlineEnabled = settings.offlineMapEnabled.first()
+                offlineFile = settings.offlineMapFile.first()
+                mapFiles = withContext(Dispatchers.IO) { MBTilesManager.listFiles(context) }
+            }
+
+            val mbtilesPickerLauncher = rememberLauncherForActivityResult(
+                ActivityResultContracts.OpenDocument()
+            ) { uri ->
+                if (uri == null) return@rememberLauncherForActivityResult
+                scope.launch {
+                    try {
+                        importing = true
+                        val filename = withContext(Dispatchers.IO) {
+                            MBTilesManager.import(context, uri)
+                        }
+                        settings.setOfflineMapFile(filename)
+                        settings.setOfflineMapEnabled(true)
+                        offlineFile = filename
+                        offlineEnabled = true
+                        mapFiles = withContext(Dispatchers.IO) { MBTilesManager.listFiles(context) }
+                        Toast.makeText(context, "Map imported: $filename", Toast.LENGTH_SHORT).show()
+                    } catch (e: Exception) {
+                        Toast.makeText(context, "Import failed: ${e.message}", Toast.LENGTH_LONG).show()
+                    } finally {
+                        importing = false
+                    }
+                }
+            }
+
+            // Enable/disable toggle
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Use Offline Tiles", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        "Serve map tiles from imported MBTiles file",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MeshSatTextMuted,
+                    )
+                }
+                Switch(
+                    checked = offlineEnabled,
+                    onCheckedChange = { enabled ->
+                        offlineEnabled = enabled
+                        scope.launch { settings.setOfflineMapEnabled(enabled) }
+                    },
+                    colors = SwitchDefaults.colors(checkedTrackColor = MeshSatTeal),
+                )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Import button
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                OutlinedButton(
+                    onClick = {
+                        mbtilesPickerLauncher.launch(arrayOf("application/octet-stream", "application/x-sqlite3", "*/*"))
+                    },
+                    enabled = !importing,
+                ) {
+                    Text("Import MBTiles")
+                }
+                if (importing) {
+                    CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                    Text("Importing...", style = MaterialTheme.typography.bodySmall, color = MeshSatTextMuted)
+                }
+            }
+
+            // Imported map list
+            if (mapFiles.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(8.dp))
+                mapFiles.forEach { info ->
+                    val isActive = info.filename == offlineFile
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(
+                                if (isActive) MeshSatTeal.copy(alpha = 0.1f) else Color.Transparent,
+                                RoundedCornerShape(6.dp),
+                            )
+                            .border(
+                                1.dp,
+                                if (isActive) MeshSatTeal.copy(alpha = 0.4f) else MeshSatBorder,
+                                RoundedCornerShape(6.dp),
+                            )
+                            .clickable {
+                                offlineFile = info.filename
+                                offlineEnabled = true
+                                scope.launch {
+                                    settings.setOfflineMapFile(info.filename)
+                                    settings.setOfflineMapEnabled(true)
+                                }
+                            }
+                            .padding(10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = info.name,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = if (isActive) MeshSatTeal else Color.Unspecified,
+                            )
+                            val sizeMb = "%.1f MB".format(info.sizeBytes / 1_048_576.0)
+                            val zoomRange = when {
+                                info.minZoom != null && info.maxZoom != null -> "z${info.minZoom}-${info.maxZoom}"
+                                else -> ""
+                            }
+                            Text(
+                                text = listOf(sizeMb, info.format.uppercase(), zoomRange)
+                                    .filter { it.isNotBlank() }.joinToString(" \u00B7 "),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MeshSatTextMuted,
+                            )
+                        }
+                        IconButton(onClick = {
+                            scope.launch {
+                                withContext(Dispatchers.IO) { MBTilesManager.delete(context, info.filename) }
+                                mapFiles = withContext(Dispatchers.IO) { MBTilesManager.listFiles(context) }
+                                if (offlineFile == info.filename) {
+                                    offlineFile = ""
+                                    offlineEnabled = false
+                                    settings.setOfflineMapFile("")
+                                    settings.setOfflineMapEnabled(false)
+                                }
+                                Toast.makeText(context, "Deleted: ${info.name}", Toast.LENGTH_SHORT).show()
+                            }
+                        }) {
+                            Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MeshSatTextMuted)
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                }
+            } else if (!importing) {
+                Text(
+                    "No offline maps imported. Use MBTiles files from OpenStreetMap or OpenMapTiles.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MeshSatTextMuted,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
         }
 
         // --- Service ---
