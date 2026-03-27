@@ -2,9 +2,12 @@ package com.cubeos.meshsat.ui.screens
 
 import android.annotation.SuppressLint
 import android.view.ViewGroup
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.webkit.WebViewAssetLoader
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -273,10 +276,15 @@ fun MapScreen() {
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 private fun LeafletMap(nodes: List<NodePosition>, phoneLocation: android.location.Location?, darkMode: Boolean = true, trackPositions: List<NodePosition> = emptyList()) {
+    val context = LocalContext.current
     val html = remember(nodes, phoneLocation, darkMode, trackPositions) { buildLeafletHtml(nodes, phoneLocation, darkMode, trackPositions) }
 
     AndroidView(
         factory = { ctx ->
+            val assetLoader = WebViewAssetLoader.Builder()
+                .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(ctx))
+                .build()
+
             WebView(ctx).apply {
                 layoutParams = ViewGroup.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
@@ -285,14 +293,23 @@ private fun LeafletMap(nodes: List<NodePosition>, phoneLocation: android.locatio
                 settings.javaScriptEnabled = true
                 settings.domStorageEnabled = true
                 settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                @Suppress("DEPRECATION")
-                settings.allowUniversalAccessFromFileURLs = true
-                webViewClient = WebViewClient()
+                webViewClient = object : WebViewClient() {
+                    override fun shouldInterceptRequest(
+                        view: WebView,
+                        request: WebResourceRequest,
+                    ): WebResourceResponse? {
+                        return assetLoader.shouldInterceptRequest(request.url)
+                    }
+                }
                 setBackgroundColor(android.graphics.Color.parseColor("#111827"))
+                tag = assetLoader
             }
         },
         update = { webView ->
-            webView.loadDataWithBaseURL("file:///android_asset/", html, "text/html", "UTF-8", null)
+            webView.loadDataWithBaseURL(
+                "https://appassets.androidplatform.net",
+                html, "text/html", "UTF-8", null,
+            )
         },
     )
 }
@@ -349,8 +366,8 @@ private fun buildLeafletHtml(nodes: List<NodePosition>, phoneLocation: android.l
     <html>
     <head>
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <link rel="stylesheet" href="file:///android_asset/leaflet.css" />
-        <script src="file:///android_asset/leaflet.js"></script>
+        <link rel="stylesheet" href="https://appassets.androidplatform.net/assets/leaflet.css" />
+        <script src="https://appassets.androidplatform.net/assets/leaflet.js"></script>
         <style>
             body { margin: 0; padding: 0; background: ${if (darkMode) "#111827" else "#F9FAFB"}; }
             #map { width: 100%; height: 100vh; }

@@ -14,8 +14,8 @@ android {
         applicationId = "com.cubeos.meshsat"
         minSdk = 26
         targetSdk = 35
-        versionCode = 17
-        versionName = "1.5.3"
+        versionCode = 18
+        versionName = "1.5.4"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -107,6 +107,9 @@ dependencies {
 
     // ONNX Runtime (MSVQ-SC sentence encoder for lossy semantic compression)
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.21.1")
+
+    // WebView asset loader (serve local assets via https:// so tile requests work)
+    implementation("androidx.webkit:webkit:1.12.1")
 
     // NanoHTTPD (lightweight local REST API server)
     implementation("org.nanohttpd:nanohttpd:2.3.1")
