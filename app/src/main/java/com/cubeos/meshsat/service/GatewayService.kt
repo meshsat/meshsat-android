@@ -95,6 +95,9 @@ class GatewayService : Service() {
         const val EXTRA_TEXT = "text"
         const val EXTRA_RECIPIENT = "recipient"
 
+        // Multi-instance transport registry (MESHSAT-388)
+        val registry = TransportRegistry()
+
         // Singleton references for UI state observation
         var meshtasticBle: MeshtasticBle? = null
             private set
@@ -172,6 +175,10 @@ class GatewayService : Service() {
         var hubReporter: com.cubeos.meshsat.hub.HubReporter? = null
             private set
 
+        // Pass-aware satellite scheduling (MESHSAT-386)
+        var passScheduler: com.cubeos.meshsat.satellite.PassScheduler? = null
+            private set
+
         private var notificationId = 100
 
         /**
@@ -230,9 +237,13 @@ class GatewayService : Service() {
         com.cubeos.meshsat.crypto.SecureKeyStore.getInstance(this)
 
         meshtasticBle = MeshtasticBle(this)
+        registry.register("ble_mesh_0", meshtasticBle!!)
         iridiumSpp = IridiumSpp(this)
+        registry.register("iridium_spp_0", iridiumSpp!!)
         iridium9704Spp = com.cubeos.meshsat.bt.Iridium9704Spp(this)
+        registry.register("iridium_imt_0", iridium9704Spp!!)
         astrocastSpp = com.cubeos.meshsat.astrocast.AstrocastSpp(this)
+        registry.register("astrocast_0", astrocastSpp!!)
 
         startForegroundNotification()
 
@@ -255,6 +266,8 @@ class GatewayService : Service() {
             initRnsTcp()
             initReticulumTransportNode()
             initHubReporter()
+            // 15. Pass-aware scheduling (MESHSAT-386)
+            initPassScheduler()
         } catch (e: Exception) {
             Log.e("MeshSat", "Service init error (non-fatal): ${e.message}", e)
         }
@@ -307,6 +320,9 @@ class GatewayService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        registry.clear()
+        passScheduler?.stop()
+        passScheduler = null
         hubReporter?.stop()
         hubReporter = null
         aprsMessageTracker?.cancelAll()
@@ -555,6 +571,9 @@ class GatewayService : Service() {
                 val healthInterval = settings.hubHealthInterval.first().toIntOrNull() ?: 30
                 val certPin = settings.mqttCertPin.first()
                 val certPinBackup = settings.mqttCertPinBackup.first()
+                val clientCert = settings.hubClientCertPem.first()
+                val clientKey = settings.hubClientKeyPem.first()
+                val caCert = settings.hubCaCertPem.first()
 
                 val config = com.cubeos.meshsat.hub.HubReporterConfig(
                     hubUrl = hubUrl,
@@ -565,6 +584,9 @@ class GatewayService : Service() {
                     certPin = certPin,
                     certPinBackup = certPinBackup,
                     healthIntervalSec = healthInterval,
+                    clientCertPem = clientCert,
+                    clientKeyPem = clientKey,
+                    caCertPem = caCert,
                 )
 
                 val reporter = com.cubeos.meshsat.hub.HubReporter(
@@ -766,6 +788,46 @@ class GatewayService : Service() {
                 )
             }
         }
+    }
+
+    /** Initialize pass-aware satellite scheduling (MESHSAT-386). */
+    private fun initPassScheduler() {
+        val iridium = iridiumSpp ?: return
+        val predictor = {
+            val allTles = kotlinx.coroutines.runBlocking { db.tleCacheDao().getAll() }
+            val loc = _phoneLocation.value
+            if (allTles.isNotEmpty() && loc != null) {
+                val now = System.currentTimeMillis()
+                allTles.mapNotNull { tle ->
+                    com.cubeos.meshsat.satellite.TleParser.parse(tle.satelliteName, tle.line1, tle.line2)
+                }.flatMap { tleElements ->
+                    com.cubeos.meshsat.satellite.PassPredictor.predictPasses(
+                        tle = tleElements,
+                        lat = loc.latitude,
+                        lon = loc.longitude,
+                        altKm = (loc.altitude / 1000.0),
+                        startUnix = now,
+                        endUnix = now + 6 * 3600_000L,
+                    )
+                }.sortedBy { it.aosUnix }
+            } else emptyList()
+        }
+        val scheduler = com.cubeos.meshsat.satellite.PassScheduler(
+            passProvider = predictor,
+            signalPoller = { iridium.pollSignal() },
+            burstFlusher = {
+                burstQueue?.flush()?.let { (payload, count) ->
+                    if (payload != null && count > 0) {
+                        iridium.writeMoBuffer(payload)
+                        iridium.sbdix()
+                    }
+                }
+            },
+            scope = scope,
+        )
+        scheduler.start()
+        passScheduler = scheduler
+        Log.i("MeshSat", "Pass scheduler initialized")
     }
 
     /** Handle inbound MQTT messages (MT sends, TAK events, config updates). */
@@ -1181,6 +1243,19 @@ class GatewayService : Service() {
                     }
                 }
                 Log.i("MeshSat", "RNS TCP interface initialized: $host:$port")
+
+                // Multi-peer loading (MESHSAT-392) — peers managed via Settings UI
+                // Additional peers connect independently when configured in the database.
+                scope.launch {
+                    val peers = db.rnsTcpPeerDao().getEnabled()
+                    for (peer in peers) {
+                        // Each additional peer gets its own RnsTcpInterface instance
+                        val peerTcp = com.cubeos.meshsat.reticulum.RnsTcpInterface(scope, "tcp_rns_${peer.id}")
+                        peerTcp.connect(peer.host, peer.port)
+                        registry.register("tcp_rns_${peer.id}", peerTcp)
+                    }
+                    if (peers.isNotEmpty()) Log.i("MeshSat", "Loaded ${peers.size} additional TCP peers")
+                }
             } catch (e: Exception) {
                 Log.w("MeshSat", "RNS TCP init failed (non-fatal): ${e.message}")
             }
@@ -1194,6 +1269,15 @@ class GatewayService : Service() {
     private fun initReticulumTransportNode() {
         scope.launch {
             try {
+                // Check if transport node is enabled (MESHSAT-394)
+                val transportEnabled = settings.rnsTransportEnabled.first()
+                if (!transportEnabled) {
+                    Log.i("MeshSat", "Reticulum transport node disabled by settings")
+                    return@launch
+                }
+                val announceMin = settings.rnsAnnounceInterval.first().toIntOrNull() ?: 10
+                val announceIntervalMs = announceMin * 60 * 1000L
+
                 val kvStore = com.cubeos.meshsat.crypto.SecureKeyStore.getInstance(this@GatewayService)
                 val identity = com.cubeos.meshsat.routing.Identity.loadOrGenerate(kvStore)
 
@@ -1246,6 +1330,7 @@ class GatewayService : Service() {
                     forwardingTable = forwardingTable,
                     interfaces = rnsInterfaces,
                     scope = scope,
+                    announceIntervalMs = announceIntervalMs,
                 )
 
                 // Deliver locally-addressed Reticulum packets to the message pipeline
