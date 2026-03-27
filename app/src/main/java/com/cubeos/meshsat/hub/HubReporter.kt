@@ -106,14 +106,28 @@ class HubReporter(
                         false,
                     )
 
-                    // Certificate pinning for SSL connections
-                    val pinBuilder = CertificatePinner.Builder()
-                        .addPin(config.certPin)
-                        .addPin(config.certPinBackup)
-                    if (pinBuilder.hasPins() && config.hubUrl.startsWith("ssl://")) {
-                        val (sslFactory, _) = pinBuilder.build().createSSLSocketFactory()
-                        socketFactory = sslFactory
-                        Log.i(TAG, "Certificate pinning enabled for Hub MQTT")
+                    // mTLS client certificates (preferred) or certificate pinning
+                    if (config.clientCertPem.isNotBlank() && config.clientKeyPem.isNotBlank()) {
+                        try {
+                            socketFactory = com.cubeos.meshsat.mqtt.CertificatePinner.createMtlsSSLSocketFactory(
+                                clientCertPem = config.clientCertPem,
+                                clientKeyPem = config.clientKeyPem,
+                                caCertPem = config.caCertPem.ifBlank { null },
+                            )
+                            Log.i(TAG, "mTLS client certificate configured for Hub MQTT")
+                        } catch (e: Exception) {
+                            Log.e(TAG, "mTLS setup failed, falling back to pinning: ${e.message}")
+                        }
+                    }
+                    if (socketFactory == null) {
+                        val pinBuilder = CertificatePinner.Builder()
+                            .addPin(config.certPin)
+                            .addPin(config.certPinBackup)
+                        if (pinBuilder.hasPins() && config.hubUrl.startsWith("ssl://")) {
+                            val (sslFactory, _) = pinBuilder.build().createSSLSocketFactory()
+                            socketFactory = sslFactory
+                            Log.i(TAG, "Certificate pinning enabled for Hub MQTT")
+                        }
                     }
                 }
 
@@ -547,4 +561,7 @@ data class HubReporterConfig(
     val certPinBackup: String = "",
     val healthIntervalSec: Int = 30,
     val enabled: Boolean = true,
+    val clientCertPem: String = "",
+    val clientKeyPem: String = "",
+    val caCertPem: String = "",
 )

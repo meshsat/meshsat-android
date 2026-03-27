@@ -29,6 +29,57 @@ class CertificatePinner private constructor(
             val digest = MessageDigest.getInstance("SHA-256").digest(spki)
             return Base64.encodeToString(digest, Base64.NO_WRAP)
         }
+
+        /**
+         * Create an SSLSocketFactory configured for mutual TLS (mTLS).
+         * Parses PEM-encoded client certificate + private key, optionally a CA cert.
+         */
+        fun createMtlsSSLSocketFactory(
+            clientCertPem: String,
+            clientKeyPem: String,
+            caCertPem: String? = null,
+        ): SSLSocketFactory {
+            val cf = java.security.cert.CertificateFactory.getInstance("X.509")
+            val clientCert = cf.generateCertificate(clientCertPem.byteInputStream()) as X509Certificate
+
+            val keyPem = clientKeyPem
+                .replace("-----BEGIN PRIVATE KEY-----", "")
+                .replace("-----END PRIVATE KEY-----", "")
+                .replace("-----BEGIN RSA PRIVATE KEY-----", "")
+                .replace("-----END RSA PRIVATE KEY-----", "")
+                .replace("-----BEGIN EC PRIVATE KEY-----", "")
+                .replace("-----END EC PRIVATE KEY-----", "")
+                .replace("\\s".toRegex(), "")
+            val keyBytes = Base64.decode(keyPem, Base64.DEFAULT)
+            val keySpec = java.security.spec.PKCS8EncodedKeySpec(keyBytes)
+            val privateKey = try {
+                java.security.KeyFactory.getInstance("RSA").generatePrivate(keySpec)
+            } catch (_: Exception) {
+                java.security.KeyFactory.getInstance("EC").generatePrivate(keySpec)
+            }
+
+            val clientKs = java.security.KeyStore.getInstance(java.security.KeyStore.getDefaultType())
+            clientKs.load(null, null)
+            clientKs.setKeyEntry("client", privateKey, charArrayOf(), arrayOf(clientCert))
+
+            val kmf = javax.net.ssl.KeyManagerFactory.getInstance(javax.net.ssl.KeyManagerFactory.getDefaultAlgorithm())
+            kmf.init(clientKs, charArrayOf())
+
+            val tmf = javax.net.ssl.TrustManagerFactory.getInstance(javax.net.ssl.TrustManagerFactory.getDefaultAlgorithm())
+            if (caCertPem != null) {
+                val caKs = java.security.KeyStore.getInstance(java.security.KeyStore.getDefaultType())
+                caKs.load(null, null)
+                val caCert = cf.generateCertificate(caCertPem.byteInputStream()) as X509Certificate
+                caKs.setCertificateEntry("ca", caCert)
+                tmf.init(caKs)
+            } else {
+                tmf.init(null as java.security.KeyStore?)
+            }
+
+            val sslContext = SSLContext.getInstance("TLS")
+            sslContext.init(kmf.keyManagers, tmf.trustManagers, null)
+            return sslContext.socketFactory
+        }
     }
 
     /**
