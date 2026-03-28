@@ -17,6 +17,8 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.shape.CircleShape
 import androidx.core.content.ContextCompat
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
@@ -1501,12 +1503,14 @@ fun SettingsScreen(navController: NavController? = null) {
                             scope.launch {
                                 try {
                                     val msg = com.cubeos.meshsat.crypto.ProvisionImporter.apply(bundle, context)
-                                    Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
-                                    // Update local state to reflect new values
+                                    // Update ALL local UI state vars immediately
                                     hubUrlInput = bundle.mqttUrl
                                     hubBridgeIdInput = bundle.bridgeId
                                     hubUsernameInput = bundle.username
                                     hubPasswordInput = bundle.password
+                                    hubCallsignInput = "" // reset callsign
+                                    hubHealthIntervalInput = "30"
+                                    Toast.makeText(context, "$msg — restart app to connect", Toast.LENGTH_LONG).show()
                                 } catch (e: Exception) {
                                     Toast.makeText(context, "Provision failed: ${e.message}", Toast.LENGTH_LONG).show()
                                 }
@@ -1522,7 +1526,91 @@ fun SettingsScreen(navController: NavController? = null) {
         }
 
         SectionCard("Hub Reporter") {
-            // Scan Provision QR button
+            // --- Health LED + Status ---
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    val hubState = hubReporterState?.value
+                    val ledColor = when (hubState) {
+                        com.cubeos.meshsat.hub.HubReporter.State.Connected -> MeshSatGreen
+                        com.cubeos.meshsat.hub.HubReporter.State.Connecting -> MeshSatAmber
+                        com.cubeos.meshsat.hub.HubReporter.State.Error -> MeshSatRed
+                        else -> MeshSatTextMuted
+                    }
+                    val statusLabel = when (hubState) {
+                        com.cubeos.meshsat.hub.HubReporter.State.Connected -> "Connected"
+                        com.cubeos.meshsat.hub.HubReporter.State.Connecting -> "Connecting..."
+                        com.cubeos.meshsat.hub.HubReporter.State.Error -> "Error"
+                        com.cubeos.meshsat.hub.HubReporter.State.Disconnected -> "Disconnected"
+                        else -> "Disabled"
+                    }
+                    Box(
+                        modifier = Modifier
+                            .size(12.dp)
+                            .background(ledColor, CircleShape),
+                    )
+                    Text(statusLabel, style = MaterialTheme.typography.bodyMedium, color = ledColor)
+                }
+                Switch(
+                    checked = hubEnabled,
+                    onCheckedChange = { scope.launch { settings.setHubEnabled(it) } },
+                    colors = SwitchDefaults.colors(checkedTrackColor = MeshSatTeal),
+                )
+            }
+
+            // --- Ping Button ---
+            var pingResult by remember { mutableStateOf("") }
+            var pinging by remember { mutableStateOf(false) }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                OutlinedButton(
+                    onClick = {
+                        val mqttClient = GatewayService.mqttTransport
+                        if (mqttClient == null || !mqttClient.isConnected) {
+                            pingResult = "Not connected"
+                            return@OutlinedButton
+                        }
+                        pinging = true
+                        pingResult = "..."
+                        scope.launch {
+                            val start = System.currentTimeMillis()
+                            try {
+                                withContext(Dispatchers.IO) {
+                                    mqttClient.publishRaw(
+                                        "meshsat/${hubBridgeIdInput.ifBlank { "android" }}/ping",
+                                        qos = 1, retained = false,
+                                        payload = start.toString(),
+                                    )
+                                }
+                                val elapsed = System.currentTimeMillis() - start
+                                pingResult = "${elapsed}ms"
+                            } catch (e: Exception) {
+                                pingResult = "failed"
+                            }
+                            pinging = false
+                        }
+                    },
+                    enabled = !pinging,
+                ) {
+                    Text("Ping Hub")
+                }
+                Text(
+                    text = if (pingResult.isNotBlank()) pingResult else "",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (pingResult.endsWith("ms")) MeshSatGreen else MeshSatTextMuted,
+                )
+            }
+
+            // --- Scan Provision QR ---
             OutlinedButton(
                 onClick = {
                     val scanIntent = com.journeyapps.barcodescanner.ScanContract().createIntent(
@@ -1540,38 +1628,13 @@ fun SettingsScreen(navController: NavController? = null) {
             ) {
                 Text("Scan Hub Provision QR")
             }
-            Spacer(modifier = Modifier.height(8.dp))
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("Enable Hub Reporting", style = MaterialTheme.typography.bodyMedium)
-                Switch(
-                    checked = hubEnabled,
-                    onCheckedChange = { scope.launch { settings.setHubEnabled(it) } },
-                    colors = SwitchDefaults.colors(checkedTrackColor = MeshSatTeal),
-                )
-            }
-
-            // Connection status
-            hubReporterState?.let { state ->
-                val statusText = when (state.value) {
-                    com.cubeos.meshsat.hub.HubReporter.State.Connected -> "Connected"
-                    com.cubeos.meshsat.hub.HubReporter.State.Connecting -> "Connecting..."
-                    com.cubeos.meshsat.hub.HubReporter.State.Error -> "Error"
-                    com.cubeos.meshsat.hub.HubReporter.State.Disconnected -> "Disconnected"
-                }
-                val isOnline = state.value == com.cubeos.meshsat.hub.HubReporter.State.Connected
-                ConnectionStatusRow("Hub", isOnline, statusText, MeshSatTeal)
-            }
-
+            // --- Fields ---
             OutlinedTextField(
                 value = hubUrlInput,
                 onValueChange = { hubUrlInput = it },
                 label = { Text("Hub MQTT URL", style = MaterialTheme.typography.bodySmall) },
-                placeholder = { Text("tcp://hub.meshsat.net:1883", style = MaterialTheme.typography.bodySmall, color = MeshSatTextMuted) },
+                placeholder = { Text("wss://mqtt-hub.meshsat.net/mqtt", style = MaterialTheme.typography.bodySmall, color = MeshSatTextMuted) },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
                 textStyle = MaterialTheme.typography.bodyMedium,
@@ -1587,26 +1650,18 @@ fun SettingsScreen(navController: NavController? = null) {
                     onValueChange = { hubBridgeIdInput = it },
                     label = { Text("Bridge ID", style = MaterialTheme.typography.bodySmall) },
                     placeholder = { Text("auto (Android ID)", style = MaterialTheme.typography.bodySmall, color = MeshSatTextMuted) },
-                    singleLine = true,
-                    modifier = Modifier.weight(1f),
+                    singleLine = true, modifier = Modifier.weight(1f),
                     textStyle = MaterialTheme.typography.bodyMedium,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = MeshSatTeal,
-                        unfocusedBorderColor = MeshSatBorder,
-                    ),
+                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = MeshSatTeal, unfocusedBorderColor = MeshSatBorder),
                 )
                 OutlinedTextField(
                     value = hubCallsignInput,
                     onValueChange = { hubCallsignInput = it },
                     label = { Text("Callsign", style = MaterialTheme.typography.bodySmall) },
                     placeholder = { Text("TAK callsign", style = MaterialTheme.typography.bodySmall, color = MeshSatTextMuted) },
-                    singleLine = true,
-                    modifier = Modifier.weight(1f),
+                    singleLine = true, modifier = Modifier.weight(1f),
                     textStyle = MaterialTheme.typography.bodyMedium,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = MeshSatTeal,
-                        unfocusedBorderColor = MeshSatBorder,
-                    ),
+                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = MeshSatTeal, unfocusedBorderColor = MeshSatBorder),
                 )
             }
 
@@ -1615,26 +1670,18 @@ fun SettingsScreen(navController: NavController? = null) {
                     value = hubUsernameInput,
                     onValueChange = { hubUsernameInput = it },
                     label = { Text("Username", style = MaterialTheme.typography.bodySmall) },
-                    singleLine = true,
-                    modifier = Modifier.weight(1f),
+                    singleLine = true, modifier = Modifier.weight(1f),
                     textStyle = MaterialTheme.typography.bodyMedium,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = MeshSatTeal,
-                        unfocusedBorderColor = MeshSatBorder,
-                    ),
+                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = MeshSatTeal, unfocusedBorderColor = MeshSatBorder),
                 )
                 OutlinedTextField(
                     value = hubPasswordInput,
                     onValueChange = { hubPasswordInput = it },
                     label = { Text("Password", style = MaterialTheme.typography.bodySmall) },
-                    singleLine = true,
-                    modifier = Modifier.weight(1f),
+                    singleLine = true, modifier = Modifier.weight(1f),
                     textStyle = MaterialTheme.typography.bodyMedium,
                     visualTransformation = if (showHubPassword) VisualTransformation.None else PasswordVisualTransformation(),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = MeshSatTeal,
-                        unfocusedBorderColor = MeshSatBorder,
-                    ),
+                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = MeshSatTeal, unfocusedBorderColor = MeshSatBorder),
                 )
             }
 
@@ -1646,10 +1693,7 @@ fun SettingsScreen(navController: NavController? = null) {
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 modifier = Modifier.fillMaxWidth(),
                 textStyle = MaterialTheme.typography.bodyMedium,
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = MeshSatTeal,
-                    unfocusedBorderColor = MeshSatBorder,
-                ),
+                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = MeshSatTeal, unfocusedBorderColor = MeshSatBorder),
             )
 
             Button(
