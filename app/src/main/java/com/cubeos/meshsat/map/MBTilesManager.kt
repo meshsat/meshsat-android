@@ -36,6 +36,12 @@ object MBTilesManager {
     }
 
     /**
+     * Synchronous version — safe to call from remember{} blocks.
+     * Only does work on first call (copies 244KB file from assets).
+     */
+    fun ensureBundledMapSync(context: Context) = ensureBundledMap(context)
+
+    /**
      * Ensure the bundled world map (from assets) is extracted to internal storage.
      * Only copies on first launch or if the file is missing.
      */

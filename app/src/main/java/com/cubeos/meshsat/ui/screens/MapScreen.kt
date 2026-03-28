@@ -95,14 +95,13 @@ fun MapScreen() {
     val offlineEnabled by settings.offlineMapEnabled.collectAsState(initial = true)
     val offlineFile by settings.offlineMapFile.collectAsState(initial = "")
 
-    LaunchedEffect(Unit) {
-        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-            MBTilesManager.ensureBundledMap(context)
-        }
-    }
-
+    // Extract bundled map synchronously on first composition, then resolve file
     val effectiveFile = offlineFile.ifBlank { MBTilesManager.BUNDLED_WORLD_MAP }
-    val mbtilesFile = remember(offlineEnabled, effectiveFile) {
+    val bundledReady = remember {
+        MBTilesManager.ensureBundledMapSync(context)
+        true
+    }
+    val mbtilesFile = remember(offlineEnabled, effectiveFile, bundledReady) {
         if (offlineEnabled) MBTilesManager.getMBTilesFile(context, effectiveFile) else null
     }
 
@@ -296,26 +295,28 @@ private fun OsmdroidMap(
     AndroidView(
         factory = { mapView },
         update = { mv ->
-            // Configure offline tile provider only when file changes
+            // Copy MBTiles to osmdroid's base path — osmdroid auto-detects archives there
             if (offlineEnabled && mbtilesFile != null) {
                 val newFile = mbtilesFile.absolutePath
                 if (newFile != tileState.configuredFile) {
                     tileState.configuredFile = newFile
                     try {
-                        val archives = org.osmdroid.tileprovider.modules.ArchiveFileFactory
-                            .getArchiveFile(mbtilesFile)
-                        if (archives != null) {
-                            val tileSource = XYTileSource("MBTiles", 0, 19, 256, ".png", arrayOf())
-                            val receiver = SimpleRegisterReceiver(mv.context)
-                            val archiveProvider = MapTileFileArchiveProvider(receiver, tileSource, arrayOf(archives))
-                            mv.tileProvider = MapTileProviderArray(tileSource, receiver, arrayOf(archiveProvider))
+                        val osmdroidDir = Configuration.getInstance().osmdroidBasePath
+                        val destFile = java.io.File(osmdroidDir, mbtilesFile.name)
+                        if (!destFile.exists() || destFile.length() != mbtilesFile.length()) {
+                            mbtilesFile.copyTo(destFile, overwrite = true)
                         }
-                    } catch (_: Exception) {
+                        // Use default provider which auto-scans osmdroid base path for archives
+                        mv.setTileSource(TileSourceFactory.DEFAULT_TILE_SOURCE)
+                        mv.setUseDataConnection(false)
+                    } catch (e: Exception) {
+                        android.util.Log.w("MeshSatMap", "MBTiles setup failed: ${e.message}")
                         mv.setTileSource(TileSourceFactory.MAPNIK)
                     }
                 }
             } else if (!offlineEnabled && tileState.configuredFile != null) {
                 tileState.configuredFile = null
+                mv.setUseDataConnection(true)
                 mv.setTileSource(TileSourceFactory.MAPNIK)
             }
 
