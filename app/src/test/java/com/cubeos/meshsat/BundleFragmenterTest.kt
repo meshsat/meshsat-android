@@ -41,7 +41,6 @@ class BundleFragmenterTest {
         assertTrue(fragments.size > 1)
 
         val reassembler = BundleReassembler()
-        // Feed in reverse order
         for (frag in fragments.reversed()) {
             val result = reassembler.feed(frag)
             if (result != null) {
@@ -65,35 +64,43 @@ class BundleFragmenterTest {
     }
 
     @Test
-    fun `custody offer wire format round-trip`() {
-        val hash = ByteArray(16) { it.toByte() }
-        val offer = DtnProtocol.CustodyOffer(hash, 1000, 3, 3600, 1)
+    fun `custody offer wire format matches bridge (0x16, 37B header)`() {
+        val custodyId = ByteArray(16) { it.toByte() }
+        val sourceHash = ByteArray(16) { (it + 10).toByte() }
+        val payload = "test payload".toByteArray()
+        val offer = DtnProtocol.CustodyOffer(custodyId, sourceHash, 42, payload)
         val bytes = offer.marshal()
-        assertEquals(DtnProtocol.CustodyOffer.SIZE, bytes.size)
+
+        assertEquals(0x16.toByte(), bytes[0]) // type byte
+        assertEquals(DtnProtocol.CustodyOffer.HEADER_SIZE + payload.size, bytes.size)
 
         val parsed = DtnProtocol.CustodyOffer.unmarshal(bytes)!!
-        assertArrayEquals(hash, parsed.bundleHash)
-        assertEquals(1000, parsed.totalSize)
-        assertEquals(3, parsed.fragmentCount)
-        assertEquals(3600, parsed.ttlSeconds)
-        assertEquals(1, parsed.priority)
+        assertArrayEquals(custodyId, parsed.custodyId)
+        assertArrayEquals(sourceHash, parsed.sourceHash)
+        assertEquals(42, parsed.deliveryId)
+        assertArrayEquals(payload, parsed.payload)
     }
 
     @Test
-    fun `custody accept wire format round-trip`() {
-        val hash = ByteArray(16) { (it + 10).toByte() }
-        val custodian = ByteArray(16) { (it + 20).toByte() }
-        val accept = DtnProtocol.CustodyAccept(hash, custodian)
-        val bytes = accept.marshal()
-        assertEquals(DtnProtocol.CustodyAccept.SIZE, bytes.size)
+    fun `custody ack wire format matches bridge (0x17, 97B)`() {
+        val custodyId = ByteArray(16) { (it + 20).toByte() }
+        val acceptorHash = ByteArray(16) { (it + 30).toByte() }
+        val signature = ByteArray(64) { (it + 40).toByte() }
+        val ack = DtnProtocol.CustodyAck(custodyId, acceptorHash, signature)
+        val bytes = ack.marshal()
 
-        val parsed = DtnProtocol.CustodyAccept.unmarshal(bytes)!!
-        assertArrayEquals(hash, parsed.bundleHash)
-        assertArrayEquals(custodian, parsed.custodianHash)
+        assertEquals(0x17.toByte(), bytes[0]) // type byte
+        assertEquals(DtnProtocol.CustodyAck.SIZE, bytes.size)
+        assertEquals(97, bytes.size)
+
+        val parsed = DtnProtocol.CustodyAck.unmarshal(bytes)!!
+        assertArrayEquals(custodyId, parsed.custodyId)
+        assertArrayEquals(acceptorHash, parsed.acceptorHash)
+        assertArrayEquals(signature, parsed.signature)
     }
 
     @Test
-    fun `fragment header wire format round-trip`() {
+    fun `fragment header wire format round-trip (LE byte order)`() {
         val id = ByteArray(16) { (it * 3).toByte() }
         val header = DtnProtocol.FragmentHeader(id, 5, 10, 5000)
         val bytes = header.marshal()

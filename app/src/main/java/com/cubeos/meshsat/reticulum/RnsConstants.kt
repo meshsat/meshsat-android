@@ -70,12 +70,12 @@ object RnsConstants {
     const val CTX_COMMAND: Byte = 0x0C
     const val CTX_COMMAND_STATUS: Byte = 0x0D
     const val CTX_CHANNEL: Byte = 0x0E
-    // Protocol enhancements (MESHSAT-407)
-    const val CTX_CUSTODY_OFFER: Byte = 0x10
-    const val CTX_CUSTODY_ACCEPT: Byte = 0x11
-    const val CTX_CUSTODY_SIGNAL: Byte = 0x12
-    const val CTX_TIME_SYNC: Byte = 0x13
-    const val CTX_RLNC: Byte = 0x14
+    // Protocol enhancements (MESHSAT-407) — must match bridge wire format byte-for-byte
+    const val CTX_TIME_SYNC_REQ: Byte = 0x14
+    const val CTX_TIME_SYNC_RESP: Byte = 0x15
+    const val CTX_CUSTODY_OFFER: Byte = 0x16
+    const val CTX_CUSTODY_ACK: Byte = 0x17
+    const val CTX_RLNC: Byte = 0x18
 
     const val CTX_KEEPALIVE: Byte = 0xFA.toByte()
     const val CTX_LINKIDENTIFY: Byte = 0xFB.toByte()

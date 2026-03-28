@@ -18,7 +18,7 @@ object BundleFragmenter {
         val dataPerFragment = mtu - headerSize
         require(dataPerFragment > 0) { "MTU ($mtu) too small for fragment header ($headerSize)" }
 
-        val bundleId = DtnProtocol.generateBundleId()
+        val bundleId = DtnProtocol.generateId()
         val fragmentCount = (payload.size + dataPerFragment - 1) / dataPerFragment
 
         if (fragmentCount <= 1) {

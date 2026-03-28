@@ -5,53 +5,66 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class TimeSyncProtocolTest {
-    @Test
-    fun `request wire format round-trip`() {
-        val request = TimeSyncProtocol.createRequest()
-        assertEquals(TimeSyncProtocol.WIRE_SIZE, request.size)
+    private val testHash = ByteArray(16) { it.toByte() }
 
-        val parsed = TimeSyncProtocol.unmarshal(request)
-        assertNotNull(parsed)
-        assertEquals(TimeSyncProtocol.MSG_REQUEST, parsed!!.type)
-        assertTrue(parsed.timestampMs > 0)
-        assertEquals(parsed.timestampMs, parsed.originTimestampMs) // request echoes itself
+    @Test
+    fun `request wire format size matches bridge`() {
+        val req = TimeSyncProtocol.createRequest(testHash)
+        val bytes = req.marshal()
+        assertEquals(TimeSyncProtocol.REQ_SIZE, bytes.size)
+        assertEquals(0x14.toByte(), bytes[0]) // TYPE_REQUEST
     }
 
     @Test
-    fun `response echoes origin timestamp`() {
-        val reqBytes = TimeSyncProtocol.createRequest()
-        val reqMsg = TimeSyncProtocol.unmarshal(reqBytes)!!
+    fun `request round-trip`() {
+        val req = TimeSyncProtocol.createRequest(testHash)
+        val bytes = req.marshal()
+        val parsed = TimeSyncProtocol.TimeSyncRequest.unmarshal(bytes)!!
+        assertArrayEquals(testHash, parsed.senderHash)
+        assertEquals(req.stratum, parsed.stratum)
+        assertEquals(req.unixNanos, parsed.unixNanos)
+    }
 
-        val respBytes = TimeSyncProtocol.createResponse(reqMsg)
-        val respMsg = TimeSyncProtocol.unmarshal(respBytes)!!
+    @Test
+    fun `response wire format size matches bridge`() {
+        val req = TimeSyncProtocol.createRequest(testHash)
+        val respHash = ByteArray(16) { (it + 10).toByte() }
+        val resp = TimeSyncProtocol.createResponse(respHash, req)
+        val bytes = resp.marshal()
+        assertEquals(TimeSyncProtocol.RESP_SIZE, bytes.size)
+        assertEquals(0x15.toByte(), bytes[0]) // TYPE_RESPONSE
+    }
 
-        assertEquals(TimeSyncProtocol.MSG_RESPONSE, respMsg.type)
-        assertEquals(reqMsg.timestampMs, respMsg.originTimestampMs) // T1 echoed
-        assertTrue(respMsg.timestampMs >= reqMsg.timestampMs) // T3 >= T1
+    @Test
+    fun `response echoes request timestamp`() {
+        val req = TimeSyncProtocol.createRequest(testHash)
+        val respHash = ByteArray(16) { (it + 20).toByte() }
+        val resp = TimeSyncProtocol.createResponse(respHash, req)
+        assertEquals(req.unixNanos, resp.echoTs)
+    }
+
+    @Test
+    fun `response round-trip`() {
+        val req = TimeSyncProtocol.createRequest(testHash)
+        val respHash = ByteArray(16) { (it + 30).toByte() }
+        val resp = TimeSyncProtocol.createResponse(respHash, req)
+        val bytes = resp.marshal()
+        val parsed = TimeSyncProtocol.TimeSyncResponse.unmarshal(bytes)!!
+        assertArrayEquals(respHash, parsed.responderHash)
+        assertEquals(resp.unixNanos, parsed.unixNanos)
+        assertEquals(resp.echoTs, parsed.echoTs)
     }
 
     @Test
     fun `unmarshal rejects short data`() {
-        assertNull(TimeSyncProtocol.unmarshal(ByteArray(5)))
+        assertNull(TimeSyncProtocol.TimeSyncRequest.unmarshal(ByteArray(5)))
+        assertNull(TimeSyncProtocol.TimeSyncResponse.unmarshal(ByteArray(10)))
     }
 
     @Test
-    fun `unmarshal rejects invalid type`() {
-        val bad = ByteArray(18)
-        bad[0] = 0x99.toByte() // invalid type
-        assertNull(TimeSyncProtocol.unmarshal(bad))
-    }
-
-    @Test
-    fun `marshal produces correct size`() {
-        val msg = TimeSyncProtocol.TimeSyncMessage(
-            TimeSyncProtocol.MSG_REQUEST, 3, 1000L, 1000L
-        )
-        val bytes = TimeSyncProtocol.marshal(msg)
-        assertEquals(18, bytes.size)
-
-        val parsed = TimeSyncProtocol.unmarshal(bytes)!!
-        assertEquals(3, parsed.stratum)
-        assertEquals(1000L, parsed.timestampMs)
+    fun `unmarshal rejects wrong type`() {
+        val bad = ByteArray(26)
+        bad[0] = 0x99.toByte()
+        assertNull(TimeSyncProtocol.TimeSyncRequest.unmarshal(bad))
     }
 }

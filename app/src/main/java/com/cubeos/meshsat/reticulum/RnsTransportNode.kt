@@ -38,6 +38,18 @@ class RnsTransportNode(
         /** Maximum hop count before dropping a packet. */
         const val MAX_HOPS = 128
 
+        /** Paid interface prefixes — protocol overhead MUST NOT be broadcast to these. */
+        private val PAID_PREFIXES = listOf("iridium", "astrocast", "sms", "cellular")
+
+        /**
+         * Check if an interface ID represents a paid transport.
+         * Paid transports: Iridium SBD/IMT ($0.05+/msg), Astrocast, SMS.
+         * Protocol overhead (announces, time sync, keepalives) must NEVER
+         * be sent to paid interfaces — only user-initiated messages.
+         */
+        fun isPaidInterface(id: String): Boolean =
+            PAID_PREFIXES.any { id.startsWith(it) }
+
         /** TTL for packet dedup cache entries. */
         const val DEDUP_TTL_MS = 5 * 60 * 1000L  // 5 minutes
 
@@ -157,12 +169,13 @@ class RnsTransportNode(
         // Delegate to announce handler (handles verification, dedup, relay)
         announceHandler.handleAnnounce(raw, sourceInterface)
 
-        // Relay announce on all OTHER interfaces (transport node duty)
+        // Relay announce on all OTHER free interfaces (transport node duty)
+        // Never relay announces to paid interfaces — costs money per message.
         if (packet.hops < MAX_HOPS) {
             val relayPacket = packet.copy(hops = packet.hops + 1)
             val relayRaw = relayPacket.marshal()
             interfaceMap.forEach { (id, iface) ->
-                if (id != sourceInterface && iface.isOnline) {
+                if (id != sourceInterface && iface.isOnline && !isPaidInterface(id)) {
                     scope.launch {
                         // Random relay delay to reduce collisions
                         delay((100L..2000L).random())
@@ -330,9 +343,17 @@ class RnsTransportNode(
             return
         }
 
+        // Check if this is protocol overhead (time sync, custody, RLNC) — skip paid interfaces
+        val isProtocolOverhead = packet.context in listOf(
+            RnsConstants.CTX_TIME_SYNC_REQ, RnsConstants.CTX_TIME_SYNC_RESP,
+            RnsConstants.CTX_CUSTODY_OFFER, RnsConstants.CTX_CUSTODY_ACK,
+            RnsConstants.CTX_RLNC, RnsConstants.CTX_KEEPALIVE,
+        )
+
         val wireRaw = wirePacket.marshal()
         interfaces().forEach { (id, iface) ->
             if (id != ingressInterface && iface.isOnline) {
+                if (isProtocolOverhead && isPaidInterface(id)) return@forEach // skip paid
                 scope.launch { iface.send(wireRaw) }
             }
         }
@@ -412,12 +433,12 @@ class RnsTransportNode(
                     MeshSatAppData.CAP_MQTT.toInt() or
                     CAP_TRANSPORT_NODE.toInt()).toByte(),
         )
-        interfaces().forEach { (_, iface) ->
-            if (iface.isOnline) {
+        interfaces().forEach { (id, iface) ->
+            if (iface.isOnline && !isPaidInterface(id)) {
                 iface.send(announceRaw)
             }
         }
-        Log.d(TAG, "Announce broadcast on ${interfaces().count { it.value.isOnline }} interfaces")
+        Log.d(TAG, "Announce broadcast on free interfaces (skipped paid)")
     }
 
     // ═══════════════════════════════════════════════════════════════
