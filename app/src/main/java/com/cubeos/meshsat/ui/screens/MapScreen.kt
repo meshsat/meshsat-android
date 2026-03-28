@@ -76,54 +76,8 @@ private val TRACK_COLORS = intArrayOf(
     0xFF22C55E.toInt(), 0xFFF59E0B.toInt(), 0xFFEF4444.toInt(),
 )
 
-/**
- * Singleton MapView holder — survives Compose NavHost tab switches.
- *
- * The fundamental problem: Compose NavHost disposes the entire composable tree
- * when navigating away from a tab. Any MapView stored in `remember {}` is lost.
- * osmdroid MapView cannot be re-created cheaply — its tile provider, cache, and
- * internal state are destroyed. Holding it as a static singleton ensures the same
- * MapView instance is reused across tab switches.
- */
-private object MapViewHolder {
-    var mapView: MapView? = null
-    var configuredFile: String? = null
-    var lastTileProvider: org.osmdroid.tileprovider.MapTileProviderBase? = null
-
-    fun getOrCreate(context: android.content.Context): MapView {
-        mapView?.let { mv ->
-            // Detach from any previous parent before reusing
-            (mv.parent as? ViewGroup)?.removeView(mv)
-            // CRITICAL: onDetachedFromWindow killed the tile provider threads.
-            // Reassign the same provider to restart them.
-            lastTileProvider?.let { mv.tileProvider = it }
-            mv.onResume()
-            return mv
-        }
-
-        Configuration.getInstance().apply {
-            userAgentValue = "MeshSat-Android"
-            osmdroidBasePath = java.io.File(context.filesDir, "osmdroid")
-            osmdroidTileCache = java.io.File(context.filesDir, "osmdroid/tiles")
-        }
-
-        return MapView(context).apply {
-            setDestroyMode(false)
-            setMultiTouchControls(true)
-            clipToOutline = true
-            setBackgroundColor(android.graphics.Color.parseColor("#111827"))
-            setTileSource(TileSourceFactory.MAPNIK)
-            controller.setZoom(3.0)
-            controller.setCenter(GeoPoint(20.0, 0.0))
-            overlayManager.tilesOverlay.loadingBackgroundColor =
-                android.graphics.Color.parseColor("#111827")
-            overlayManager.tilesOverlay.loadingLineColor =
-                android.graphics.Color.parseColor("#1F2937")
-            lastTileProvider = tileProvider
-            mapView = this
-        }
-    }
-}
+/** Tracks the current MBTiles file to avoid re-creating tile provider unnecessarily. */
+private class TileState(var configuredFile: String? = null)
 
 @Composable
 fun MapScreen() {
@@ -301,14 +255,37 @@ private fun OsmdroidMap(
     darkMode: Boolean = true,
 ) {
     val context = LocalContext.current
+    val tileState = remember { TileState() }
+
+    // MapView is created once and NEVER destroyed (lives outside NavHost)
+    val mapView = remember {
+        Configuration.getInstance().apply {
+            userAgentValue = "MeshSat-Android"
+            osmdroidBasePath = java.io.File(context.filesDir, "osmdroid")
+            osmdroidTileCache = java.io.File(context.filesDir, "osmdroid/tiles")
+        }
+        MapView(context).apply {
+            setDestroyMode(false)
+            setMultiTouchControls(true)
+            clipToOutline = true
+            setBackgroundColor(android.graphics.Color.parseColor("#111827"))
+            setTileSource(TileSourceFactory.MAPNIK)
+            controller.setZoom(3.0)
+            controller.setCenter(GeoPoint(20.0, 0.0))
+            overlayManager.tilesOverlay.loadingBackgroundColor =
+                android.graphics.Color.parseColor("#111827")
+            overlayManager.tilesOverlay.loadingLineColor =
+                android.graphics.Color.parseColor("#1F2937")
+        }
+    }
 
     // Wire lifecycle for onResume/onPause
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     DisposableEffect(lifecycle) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
-                Lifecycle.Event.ON_RESUME -> MapViewHolder.mapView?.onResume()
-                Lifecycle.Event.ON_PAUSE -> MapViewHolder.mapView?.onPause()
+                Lifecycle.Event.ON_RESUME -> mapView.onResume()
+                Lifecycle.Event.ON_PAUSE -> mapView.onPause()
                 else -> {}
             }
         }
@@ -317,24 +294,13 @@ private fun OsmdroidMap(
     }
 
     AndroidView(
-        factory = { ctx ->
-            val mv = MapViewHolder.getOrCreate(ctx)
-            mv.layoutParams = ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT,
-            )
-            // Ensure tiles are loading after re-attach
-            mv.onResume()
-            mv
-        },
+        factory = { mapView },
         update = { mv ->
-            // Configure offline tile provider ONLY when file actually changes.
-            // Skip if mbtilesFile is null but we already have a configured provider
-            // (this happens during recomposition before DataStore flows emit).
+            // Configure offline tile provider only when file changes
             if (offlineEnabled && mbtilesFile != null) {
                 val newFile = mbtilesFile.absolutePath
-                if (newFile != MapViewHolder.configuredFile) {
-                    MapViewHolder.configuredFile = newFile
+                if (newFile != tileState.configuredFile) {
+                    tileState.configuredFile = newFile
                     try {
                         val archives = org.osmdroid.tileprovider.modules.ArchiveFileFactory
                             .getArchiveFile(mbtilesFile)
@@ -342,22 +308,16 @@ private fun OsmdroidMap(
                             val tileSource = XYTileSource("MBTiles", 0, 19, 256, ".png", arrayOf())
                             val receiver = SimpleRegisterReceiver(mv.context)
                             val archiveProvider = MapTileFileArchiveProvider(receiver, tileSource, arrayOf(archives))
-                            val provider = MapTileProviderArray(tileSource, receiver, arrayOf(archiveProvider))
-                            mv.tileProvider = provider
-                            MapViewHolder.lastTileProvider = provider
+                            mv.tileProvider = MapTileProviderArray(tileSource, receiver, arrayOf(archiveProvider))
                         }
                     } catch (_: Exception) {
                         mv.setTileSource(TileSourceFactory.MAPNIK)
-                        MapViewHolder.lastTileProvider = mv.tileProvider
                     }
                 }
-            } else if (!offlineEnabled && MapViewHolder.configuredFile != null) {
-                // User explicitly disabled offline maps
-                MapViewHolder.configuredFile = null
+            } else if (!offlineEnabled && tileState.configuredFile != null) {
+                tileState.configuredFile = null
                 mv.setTileSource(TileSourceFactory.MAPNIK)
-                MapViewHolder.lastTileProvider = mv.tileProvider
             }
-            // else: offlineEnabled=true but mbtilesFile=null (still loading) — do nothing, keep current tiles
 
             // Dark mode
             mv.overlayManager.tilesOverlay.setColorFilter(if (darkMode) DARK_INVERT else null)

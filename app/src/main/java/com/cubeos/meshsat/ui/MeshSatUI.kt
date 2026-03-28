@@ -3,11 +3,15 @@ package com.cubeos.meshsat.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
@@ -118,27 +122,47 @@ fun MeshSatUI() {
             }
         }
     ) { padding ->
-        NavHost(
-            navController = navController,
-            startDestination = "dashboard",
-            modifier = Modifier.padding(padding),
-        ) {
-            composable("dashboard") { DashboardScreen() }
-            composable("messages") { MessagesScreen() }
-            composable("map") { MapScreen() }
-            composable("rules") { RulesScreen() }
-            composable("settings") { SettingsScreen(navController) }
-            composable("more") { MoreScreen(navController) }
-            composable("about") { AboutScreen() }
-            composable("topology") { TopologyScreen() }
-            composable("deliveries") { DeliveryScreen() }
-            composable("geofence") { GeofenceScreen() }
-            composable("interfaces") { InterfacesScreen() }
-            composable("radio-config") { RadioConfigScreen() }
-            composable("passes") { PassPredictorScreen() }
-            composable("peers") { PeersScreen() }
-            composable("audit") { AuditScreen() }
-            composable("credentials") { CredentialsScreen() }
+        Box(modifier = Modifier.padding(padding)) {
+            // MapScreen lives OUTSIDE NavHost — always in the view tree, never
+            // destroyed by navigation. Shown/hidden via alpha + input blocking.
+            // This is the only reliable way to keep osmdroid's MapView alive
+            // across tab switches (its tile provider threads die on detach).
+            Box(
+                modifier = if (currentRoute == "map") {
+                    Modifier.fillMaxSize()
+                } else {
+                    Modifier.fillMaxSize()
+                        .alpha(0f)
+                        .pointerInput(Unit) {} // block touch when hidden
+                },
+            ) {
+                MapScreen()
+            }
+
+            // All other screens via NavHost (map route shows empty placeholder)
+            if (currentRoute != "map") {
+                NavHost(
+                    navController = navController,
+                    startDestination = "dashboard",
+                ) {
+                    composable("dashboard") { DashboardScreen() }
+                    composable("messages") { MessagesScreen() }
+                    composable("map") { /* handled above */ }
+                    composable("rules") { RulesScreen() }
+                    composable("settings") { SettingsScreen(navController) }
+                    composable("more") { MoreScreen(navController) }
+                    composable("about") { AboutScreen() }
+                    composable("topology") { TopologyScreen() }
+                    composable("deliveries") { DeliveryScreen() }
+                    composable("geofence") { GeofenceScreen() }
+                    composable("interfaces") { InterfacesScreen() }
+                    composable("radio-config") { RadioConfigScreen() }
+                    composable("passes") { PassPredictorScreen() }
+                    composable("peers") { PeersScreen() }
+                    composable("audit") { AuditScreen() }
+                    composable("credentials") { CredentialsScreen() }
+                }
+            }
         }
     }
 }
