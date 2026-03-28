@@ -63,6 +63,9 @@ class MqttTransport(
         password: String = "",
         certPin: String = "",
         certPinBackup: String = "",
+        clientCertPem: String = "",
+        clientKeyPem: String = "",
+        caCertPem: String = "",
     ) {
         if (brokerUrl.isBlank() || deviceId.isBlank()) {
             Log.w(TAG, "Cannot connect: broker URL or device ID is blank")
@@ -85,14 +88,29 @@ class MqttTransport(
                         userName = username
                         this.password = password.toCharArray()
                     }
-                    // Certificate pinning for SSL connections
-                    val pinBuilder = CertificatePinner.Builder()
-                        .addPin(certPin)
-                        .addPin(certPinBackup)
-                    if (pinBuilder.hasPins() && brokerUrl.startsWith("ssl://")) {
-                        val (sslFactory, _) = pinBuilder.build().createSSLSocketFactory()
-                        socketFactory = sslFactory
-                        Log.i(TAG, "Certificate pinning enabled for Hub MQTT")
+                    // TLS: prefer mTLS (client cert), fall back to cert pinning
+                    val isTls = brokerUrl.startsWith("ssl://") || brokerUrl.startsWith("tls://") || brokerUrl.startsWith("wss://")
+                    if (isTls && clientCertPem.isNotBlank() && clientKeyPem.isNotBlank()) {
+                        try {
+                            socketFactory = CertificatePinner.createMtlsSSLSocketFactory(
+                                clientCertPem = clientCertPem,
+                                clientKeyPem = clientKeyPem,
+                                caCertPem = caCertPem.ifBlank { null },
+                            )
+                            Log.i(TAG, "mTLS enabled for Hub MQTT")
+                        } catch (e: Exception) {
+                            Log.w(TAG, "mTLS setup failed, falling back to cert pinning: ${e.message}")
+                        }
+                    }
+                    if (socketFactory == null && isTls) {
+                        val pinBuilder = CertificatePinner.Builder()
+                            .addPin(certPin)
+                            .addPin(certPinBackup)
+                        if (pinBuilder.hasPins()) {
+                            val (sslFactory, _) = pinBuilder.build().createSSLSocketFactory()
+                            socketFactory = sslFactory
+                            Log.i(TAG, "Certificate pinning enabled for Hub MQTT")
+                        }
                     }
                 }
 
@@ -243,6 +261,8 @@ class MqttTransport(
             topicTAKInbound(),
             topicConfigUpdate(),
             topicSmsOutbound(),
+            topicReticulumRx(),     // Reticulum packets from Hub (MESHSAT-354)
+            topicReticulumRoutes(), // Route hints from Hub
         )
         val qos = IntArray(topics.size) { QOS_AT_LEAST_ONCE }
         try {
@@ -284,4 +304,6 @@ class MqttTransport(
     private fun topicConfigUpdate() = "meshsat/$deviceId/config/update"
     private fun topicSmsInbound() = "meshsat/$deviceId/sms/inbound"
     private fun topicSmsOutbound() = "meshsat/$deviceId/sms/outbound"
+    private fun topicReticulumRx() = "meshsat/$deviceId/reticulum/rx"
+    private fun topicReticulumRoutes() = "meshsat/reticulum/routes"
 }

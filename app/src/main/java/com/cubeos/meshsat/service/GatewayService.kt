@@ -167,6 +167,10 @@ class GatewayService : Service() {
         var rnsTcpInterface: com.cubeos.meshsat.reticulum.RnsTcpInterface? = null
             private set
 
+        // Reticulum MQTT interface (MESHSAT-354)
+        var rnsMqttInterface: com.cubeos.meshsat.reticulum.RnsMqttInterface? = null
+            private set
+
         // Reticulum Transport Node (MESHSAT-199/267)
         var rnsTransportNode: com.cubeos.meshsat.reticulum.RnsTransportNode? = null
             private set
@@ -507,13 +511,26 @@ class GatewayService : Service() {
                 val password = settings.mqttPassword.first()
                 val certPin = settings.mqttCertPin.first()
                 val certPinBackup = settings.mqttCertPinBackup.first()
+                val clientCert = settings.hubClientCertPem.first()
+                val clientKey = settings.hubClientKeyPem.first()
+                val caCert = settings.hubCaCertPem.first()
 
                 val transport = MqttTransport(scope)
                 transport.setMessageCallback { topic, payload ->
                     handleMqttInbound(topic, payload)
                 }
-                transport.connect(brokerUrl, deviceId, username, password, certPin, certPinBackup)
+                transport.connect(brokerUrl, deviceId, username, password, certPin, certPinBackup,
+                    clientCertPem = clientCert, clientKeyPem = clientKey, caCertPem = caCert)
                 mqttTransport = transport
+
+                // Initialize Reticulum MQTT interface (MESHSAT-354)
+                val mqttDeviceId = deviceId
+                rnsMqttInterface = com.cubeos.meshsat.reticulum.RnsMqttInterface(
+                    mqtt = transport,
+                    deviceId = { mqttDeviceId },
+                    interfaceId = "mqtt_rns_0",
+                )
+                Log.i("MeshSat", "RNS MQTT interface initialized for device $mqttDeviceId")
 
                 // Initialize TAK/CoT integration (MESHSAT-191)
                 takIntegration = com.cubeos.meshsat.tak.TakIntegration(
@@ -835,6 +852,31 @@ class GatewayService : Service() {
         scope.launch {
             try {
                 when {
+                    topic.endsWith("/reticulum/rx") -> {
+                        // Inbound Reticulum packet from Hub (MESHSAT-354)
+                        rnsMqttInterface?.processIncomingMessage(topic, payload)
+                    }
+                    topic == "meshsat/reticulum/routes" -> {
+                        // Route hints from Hub — pre-populate path table (MESHSAT-354)
+                        try {
+                            val json = org.json.JSONObject(payload)
+                            val routes = json.optJSONArray("routes")
+                            if (routes != null) {
+                                for (i in 0 until routes.length()) {
+                                    val r = routes.getJSONObject(i)
+                                    val destHex = r.optString("dest_hash", "")
+                                    val hops = r.optInt("hops", 1)
+                                    val cost = r.optInt("cost", 0)
+                                    if (destHex.length == 32) {
+                                        Log.d("MeshSat", "Route hint: $destHex via MQTT (hops=$hops, cost=$cost)")
+                                    }
+                                }
+                                Log.i("MeshSat", "Received ${routes.length()} route hints from Hub")
+                            }
+                        } catch (e: Exception) {
+                            Log.w("MeshSat", "Route hints parse failed: ${e.message}")
+                        }
+                    }
                     topic.contains("/mt/send") -> {
                         // Inbound MT — store as message and route through dispatcher
                         val json = org.json.JSONObject(payload)
@@ -1312,7 +1354,8 @@ class GatewayService : Service() {
                     astrocastSpp?.let { spp ->
                         map["astrocast_rns_0"] = com.cubeos.meshsat.reticulum.RnsAstrocastInterface(spp, scope)
                     }
-                    // SMS, MQTT, APRS interfaces can be added here as they become available
+                    // MQTT Reticulum interface (MESHSAT-354)
+                    rnsMqttInterface?.let { map["mqtt_rns_0"] = it }
                     map
                 }
 
