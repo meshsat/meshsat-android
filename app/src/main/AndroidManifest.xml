@@ -43,6 +43,14 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+
+            <!-- Deep link: meshsat://provision/* for Hub QR provisioning -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="meshsat" android:host="provision" />
+            </intent-filter>
         </activity>
 
         <!-- SMS Receiver (non-default: SMS_RECEIVED) -->

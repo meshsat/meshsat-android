@@ -171,6 +171,10 @@ fun SettingsScreen(navController: NavController? = null) {
     var hubPasswordInput by remember(hubPassword) { mutableStateOf(hubPassword) }
     var hubHealthIntervalInput by remember(hubHealthInterval) { mutableStateOf(hubHealthInterval) }
     var showHubPassword by remember { mutableStateOf(false) }
+
+    // QR provisioning state
+    var provisionBundle by remember { mutableStateOf<com.cubeos.meshsat.crypto.ProvisionImporter.ProvisionBundle?>(null) }
+    var showProvisionDialog by remember { mutableStateOf(false) }
     val hubReporterState = GatewayService.hubReporter?.state?.collectAsState()
 
     // BLE state
@@ -192,7 +196,16 @@ fun SettingsScreen(navController: NavController? = null) {
             result.resultCode, result.data
         )
         val scanned = scanResult.contents
-        if (scanned != null && scanned.startsWith("meshsat://key/")) {
+        if (scanned != null && scanned.startsWith("meshsat://provision/")) {
+            // Hub provisioning QR — auto-fill all Hub settings + certs
+            try {
+                val bundle = com.cubeos.meshsat.crypto.ProvisionImporter.parse(scanned)
+                provisionBundle = bundle
+                showProvisionDialog = true
+            } catch (e: Exception) {
+                Toast.makeText(context, "Provision QR failed: ${e.message}", Toast.LENGTH_LONG).show()
+            }
+        } else if (scanned != null && scanned.startsWith("meshsat://key/")) {
             // MeshSat key bundle URL — contains signed multi-channel key bundle
             scope.launch {
                 try {
@@ -1450,7 +1463,77 @@ fun SettingsScreen(navController: NavController? = null) {
             )
         }
 
+        // Provision confirmation dialog
+        if (showProvisionDialog && provisionBundle != null) {
+            val bundle = provisionBundle!!
+            AlertDialog(
+                onDismissRequest = { showProvisionDialog = false },
+                title = { Text("Provision Hub Connection") },
+                text = {
+                    Column {
+                        Text(
+                            "Provision Hub connection for bridge \"${bundle.bridgeId}\"?\n\n" +
+                                "This will overwrite existing Hub settings.",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("Hub: ${bundle.mqttUrl}", style = MaterialTheme.typography.bodySmall, color = MeshSatTextMuted)
+                        if (bundle.certExpiry.isNotBlank()) {
+                            Text("Cert expires: ${bundle.certExpiry}", style = MaterialTheme.typography.bodySmall, color = MeshSatTextMuted)
+                        }
+                        if (bundle.reticulumTcp.isNotBlank()) {
+                            Text("Reticulum: ${bundle.reticulumTcp}", style = MaterialTheme.typography.bodySmall, color = MeshSatTextMuted)
+                        }
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            showProvisionDialog = false
+                            scope.launch {
+                                try {
+                                    val msg = com.cubeos.meshsat.crypto.ProvisionImporter.apply(bundle, context)
+                                    Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                                    // Update local state to reflect new values
+                                    hubUrlInput = bundle.mqttUrl
+                                    hubBridgeIdInput = bundle.bridgeId
+                                    hubUsernameInput = bundle.username
+                                    hubPasswordInput = bundle.password
+                                } catch (e: Exception) {
+                                    Toast.makeText(context, "Provision failed: ${e.message}", Toast.LENGTH_LONG).show()
+                                }
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = MeshSatTeal),
+                    ) { Text("Provision") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showProvisionDialog = false }) { Text("Cancel") }
+                },
+            )
+        }
+
         SectionCard("Hub Reporter") {
+            // Scan Provision QR button
+            OutlinedButton(
+                onClick = {
+                    val scanIntent = com.journeyapps.barcodescanner.ScanContract().createIntent(
+                        context,
+                        com.journeyapps.barcodescanner.ScanOptions().apply {
+                            setDesiredBarcodeFormats(com.journeyapps.barcodescanner.ScanOptions.QR_CODE)
+                            setPrompt("Scan Hub Provision QR code")
+                            setBeepEnabled(false)
+                            setOrientationLocked(true)
+                        },
+                    )
+                    qrScanLauncher.launch(scanIntent)
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Scan Hub Provision QR")
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
