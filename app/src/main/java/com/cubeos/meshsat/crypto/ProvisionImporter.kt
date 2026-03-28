@@ -48,22 +48,45 @@ object ProvisionImporter {
     fun isProvisionUrl(url: String): Boolean = url.startsWith(URL_PREFIX)
 
     /**
-     * Parse a meshsat://provision/{bid}/{nonce}?hub={host} URL.
-     * @throws IllegalArgumentException if format is invalid
+     * Detect QR format and return the bundle.
+     *
+     * Two formats supported:
+     * 1. Inline: meshsat://provision/<base64url-encoded-json> (v2.2.0 — full bundle in QR)
+     * 2. Nonce: meshsat://provision/{bid}/{nonce}?hub={host} (v2.2.1+ — fetch via HTTPS)
      */
-    fun parseQr(url: String): ProvisionRequest {
+    suspend fun processQr(url: String): ProvisionBundle {
         require(url.startsWith(URL_PREFIX)) { "Not a MeshSat provisioning QR code" }
 
-        val withoutPrefix = url.substring(URL_PREFIX.length)
-        // Parse: {bid}/{nonce}?hub={host}
-        val queryIdx = withoutPrefix.indexOf('?')
+        val payload = url.substring(URL_PREFIX.length)
+
+        // Detect format: nonce URLs have ?hub= and slashes, inline is pure base64
+        return if (payload.contains("?hub=")) {
+            // Nonce format: {bid}/{nonce}?hub={host}
+            val request = parseNonceUrl(payload)
+            claimBundle(request)
+        } else {
+            // Inline format: base64url-encoded JSON
+            parseInlineBundle(payload)
+        }
+    }
+
+    /** Parse inline base64url-encoded JSON bundle (v2.2.0 format). */
+    private fun parseInlineBundle(encoded: String): ProvisionBundle {
+        val jsonBytes = android.util.Base64.decode(encoded,
+            android.util.Base64.URL_SAFE or android.util.Base64.NO_PADDING or android.util.Base64.NO_WRAP)
+        return parseBundle(String(jsonBytes, Charsets.UTF_8))
+    }
+
+    /** Parse nonce URL: {bid}/{nonce}?hub={host} */
+    private fun parseNonceUrl(payload: String): ProvisionRequest {
+        val queryIdx = payload.indexOf('?')
         require(queryIdx > 0) { "Missing ?hub= parameter" }
 
-        val path = withoutPrefix.substring(0, queryIdx)
-        val query = withoutPrefix.substring(queryIdx + 1)
+        val path = payload.substring(0, queryIdx)
+        val query = payload.substring(queryIdx + 1)
 
         val parts = path.split("/")
-        require(parts.size == 2) { "Expected meshsat://provision/{bid}/{nonce}" }
+        require(parts.size == 2) { "Expected {bid}/{nonce}" }
 
         val bid = parts[0]
         val nonce = parts[1]

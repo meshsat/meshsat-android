@@ -197,23 +197,20 @@ fun SettingsScreen(navController: NavController? = null) {
         )
         val scanned = scanResult.contents
         if (scanned != null && com.cubeos.meshsat.crypto.ProvisionImporter.isProvisionUrl(scanned)) {
-            // Hub provisioning QR — two-step: parse URL then fetch bundle from Hub
+            // Hub provisioning QR — supports both inline (base64) and nonce (HTTPS fetch) formats
             scope.launch {
                 try {
-                    val request = com.cubeos.meshsat.crypto.ProvisionImporter.parseQr(scanned)
-                    val bundle = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                        com.cubeos.meshsat.crypto.ProvisionImporter.claimBundle(request)
+                    Toast.makeText(context, "Processing provision QR...", Toast.LENGTH_SHORT).show()
+                    val bundle = withContext(Dispatchers.IO) {
+                        com.cubeos.meshsat.crypto.ProvisionImporter.processQr(scanned)
                     }
                     provisionBundle = bundle
                     showProvisionDialog = true
                 } catch (e: com.cubeos.meshsat.crypto.ProvisionImporter.ProvisionException) {
-                    withContext(kotlinx.coroutines.Dispatchers.Main) {
-                        Toast.makeText(context, e.message, Toast.LENGTH_LONG).show()
-                    }
+                    Toast.makeText(context, e.message, Toast.LENGTH_LONG).show()
                 } catch (e: Exception) {
-                    withContext(kotlinx.coroutines.Dispatchers.Main) {
-                        Toast.makeText(context, "Provision failed: ${e.message}", Toast.LENGTH_LONG).show()
-                    }
+                    android.util.Log.e("SettingsScreen", "Provision failed", e)
+                    Toast.makeText(context, "Provision failed: ${e.message}", Toast.LENGTH_LONG).show()
                 }
             }
         } else if (scanned != null && scanned.startsWith("meshsat://key/")) {
