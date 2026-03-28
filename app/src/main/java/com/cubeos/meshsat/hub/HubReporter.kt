@@ -270,11 +270,19 @@ class HubReporter(
 
     private fun publishBirth() {
         val birth = buildBirthCertificate()
+        val birthJson = birth.toJson()
+
+        // Sign the birth message with the bridge's mTLS private key
+        if (config.clientCertPem.isNotBlank() && config.clientKeyPem.isNotBlank()) {
+            val signed = BirthSigner.sign(birthJson, config.clientCertPem, config.clientKeyPem)
+            Log.i(TAG, "Birth ${if (signed) "signed" else "unsigned"}: ${config.bridgeId}")
+        }
+
         publish(
             HubTopics.bridgeBirth(config.bridgeId),
             QOS_AT_LEAST_ONCE,
             retained = true,
-            birth.toJson().toString(),
+            birthJson.toString(),
         )
         Log.i(TAG, "Published bridge birth: ${config.bridgeId}")
     }
