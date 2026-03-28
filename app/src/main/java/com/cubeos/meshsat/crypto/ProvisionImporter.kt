@@ -1,29 +1,36 @@
 package com.cubeos.meshsat.crypto
 
 import android.content.Context
-import android.util.Base64
 import android.util.Log
 import com.cubeos.meshsat.data.AppDatabase
 import com.cubeos.meshsat.data.ProviderCredential
 import com.cubeos.meshsat.data.SettingsRepository
 import org.json.JSONObject
+import java.io.BufferedReader
+import java.io.InputStreamReader
+import java.net.HttpURLConnection
+import java.net.URL
 
 /**
- * Imports Hub provisioning bundles from meshsat://provision/ URLs.
+ * Two-step Hub provisioning via QR code.
  *
- * The Hub generates these via POST /api/bridges/{id}/provision/qr.
- * Contains MQTT credentials, mTLS cert+key, CA cert, and Reticulum TCP peer.
+ * Step 1: QR contains a short URL: meshsat://provision/{bid}/{nonce}?hub={host}
+ * Step 2: App fetches full credentials: GET https://{hub}/api/bridges/{bid}/provision/{nonce}
  *
- * Security: each POST generates fresh credentials (new password, new cert+key).
- * Previous credentials are overwritten — old QR codes auto-invalidate.
+ * The nonce is single-use (Hub deletes after claim) with 30-minute TTL.
  */
 object ProvisionImporter {
     private const val TAG = "ProvisionImporter"
     private const val URL_PREFIX = "meshsat://provision/"
 
-    /**
-     * Parsed provisioning bundle.
-     */
+    /** Parsed QR code content — just the claim parameters, no credentials yet. */
+    data class ProvisionRequest(
+        val bridgeId: String,
+        val nonce: String,
+        val hubHost: String,
+    )
+
+    /** Full credential bundle fetched from Hub. */
     data class ProvisionBundle(
         val version: String,
         val bridgeId: String,
@@ -37,41 +44,103 @@ object ProvisionImporter {
         val reticulumTcp: String,
     )
 
+    /** Check if a scanned string is a provisioning URL. */
+    fun isProvisionUrl(url: String): Boolean = url.startsWith(URL_PREFIX)
+
     /**
-     * Parse a meshsat://provision/ URL into a ProvisionBundle.
-     * @throws IllegalArgumentException if URL format is invalid
+     * Parse a meshsat://provision/{bid}/{nonce}?hub={host} URL.
+     * @throws IllegalArgumentException if format is invalid
      */
-    fun parse(url: String): ProvisionBundle {
-        require(url.startsWith(URL_PREFIX)) { "Not a meshsat provision URL" }
+    fun parseQr(url: String): ProvisionRequest {
+        require(url.startsWith(URL_PREFIX)) { "Not a MeshSat provisioning QR code" }
 
-        val encoded = url.substring(URL_PREFIX.length)
-        val jsonBytes = Base64.decode(encoded, Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)
-        val json = JSONObject(String(jsonBytes, Charsets.UTF_8))
+        val withoutPrefix = url.substring(URL_PREFIX.length)
+        // Parse: {bid}/{nonce}?hub={host}
+        val queryIdx = withoutPrefix.indexOf('?')
+        require(queryIdx > 0) { "Missing ?hub= parameter" }
 
-        val version = json.optString("v", "")
-        require(version == "1") { "Unsupported provision version: $version" }
+        val path = withoutPrefix.substring(0, queryIdx)
+        val query = withoutPrefix.substring(queryIdx + 1)
 
-        val bid = json.optString("bid", "")
-        require(bid.isNotBlank()) { "Missing bridge ID (bid)" }
+        val parts = path.split("/")
+        require(parts.size == 2) { "Expected meshsat://provision/{bid}/{nonce}" }
 
-        val mqtt = json.optString("mqtt", "")
-        require(mqtt.startsWith("wss://") || mqtt.startsWith("ssl://") || mqtt.startsWith("tcp://")) {
-            "Invalid MQTT URL: $mqtt"
+        val bid = parts[0]
+        val nonce = parts[1]
+        require(bid.isNotBlank()) { "Empty bridge ID" }
+        require(nonce.length == 32 && nonce.all { it in "0123456789abcdef" }) {
+            "Invalid nonce: must be 32 hex chars"
         }
 
-        val cert = json.optString("cert", "")
-        val key = json.optString("key", "")
-        require(cert.contains("BEGIN CERTIFICATE")) { "Missing client certificate" }
-        require(key.contains("BEGIN") && key.contains("KEY")) { "Missing client private key" }
+        var hubHost = ""
+        query.split("&").forEach { param ->
+            val kv = param.split("=", limit = 2)
+            if (kv.size == 2 && kv[0] == "hub") hubHost = kv[1]
+        }
+        require(hubHost.isNotBlank()) { "Missing hub host" }
 
+        return ProvisionRequest(bid, nonce, hubHost)
+    }
+
+    /**
+     * Claim the provision bundle from the Hub.
+     * GET https://{hub}/api/bridges/{bid}/provision/{nonce}
+     *
+     * No auth header — the nonce IS the authentication.
+     * Hub deletes the stash after this call (single-use).
+     *
+     * @throws ProvisionException with user-friendly message on failure
+     */
+    suspend fun claimBundle(request: ProvisionRequest): ProvisionBundle {
+        val claimUrl = "https://${request.hubHost}/api/bridges/${request.bridgeId}/provision/${request.nonce}"
+        Log.i(TAG, "Claiming provision: $claimUrl")
+
+        val conn = URL(claimUrl).openConnection() as HttpURLConnection
+        try {
+            conn.requestMethod = "GET"
+            conn.connectTimeout = 10_000
+            conn.readTimeout = 10_000
+            conn.setRequestProperty("Accept", "application/json")
+
+            val code = conn.responseCode
+            when {
+                code == 200 -> {
+                    val body = BufferedReader(InputStreamReader(conn.inputStream)).readText()
+                    return parseBundle(body)
+                }
+                code == 404 -> throw ProvisionException(
+                    "Provisioning token expired or already used. Generate a new QR from the Hub."
+                )
+                code == 410 -> throw ProvisionException(
+                    "Provisioning token expired (>30 minutes). Generate a new QR."
+                )
+                else -> throw ProvisionException(
+                    "Hub returned HTTP $code. Try again or generate a new QR."
+                )
+            }
+        } catch (e: ProvisionException) {
+            throw e
+        } catch (e: Exception) {
+            throw ProvisionException(
+                "Cannot reach Hub at ${request.hubHost}. Check network connectivity."
+            )
+        } finally {
+            conn.disconnect()
+        }
+    }
+
+    /** Parse the JSON bundle returned by the claim endpoint. */
+    private fun parseBundle(jsonStr: String): ProvisionBundle {
+        val json = JSONObject(jsonStr)
+        val v = json.optString("v", "1")
         return ProvisionBundle(
-            version = version,
-            bridgeId = bid,
-            mqttUrl = mqtt,
-            username = json.optString("user", bid),
+            version = v,
+            bridgeId = json.optString("bid", ""),
+            mqttUrl = json.optString("mqtt", ""),
+            username = json.optString("user", ""),
             password = json.optString("pass", ""),
-            clientCertPem = cert,
-            clientKeyPem = key,
+            clientCertPem = json.optString("cert", ""),
+            clientKeyPem = json.optString("key", ""),
             caCertPem = json.optString("ca", ""),
             certExpiry = json.optString("cert_exp", ""),
             reticulumTcp = json.optString("ret_tcp", ""),
@@ -80,7 +149,6 @@ object ProvisionImporter {
 
     /**
      * Apply a provisioning bundle — writes all settings and stores credentials.
-     *
      * @return Summary string for toast notification
      */
     suspend fun apply(bundle: ProvisionBundle, context: Context): String {
@@ -94,8 +162,12 @@ object ProvisionImporter {
         settings.setHubEnabled(true)
 
         // mTLS certificates
-        settings.setHubClientCertPem(bundle.clientCertPem)
-        settings.setHubClientKeyPem(bundle.clientKeyPem)
+        if (bundle.clientCertPem.isNotBlank()) {
+            settings.setHubClientCertPem(bundle.clientCertPem)
+        }
+        if (bundle.clientKeyPem.isNotBlank()) {
+            settings.setHubClientKeyPem(bundle.clientKeyPem)
+        }
         if (bundle.caCertPem.isNotBlank()) {
             settings.setHubCaCertPem(bundle.caCertPem)
         }
@@ -112,25 +184,26 @@ object ProvisionImporter {
         }
 
         // Store cert as ProviderCredential for credential management UI
-        val db = AppDatabase.getInstance(context)
-        db.providerCredentialDao().upsert(
-            ProviderCredential(
-                id = "hub_mtls_${bundle.bridgeId}",
-                provider = "hub_mqtt",
-                name = "Hub mTLS (${bundle.bridgeId})",
-                credType = "mtls_bundle",
-                encryptedData = (bundle.clientCertPem + "\n" + bundle.clientKeyPem).toByteArray(),
-                certNotAfter = bundle.certExpiry.ifBlank { null },
-                certSubject = "CN=${bundle.bridgeId}",
-                source = "qr",
-                version = 1,
+        if (bundle.clientCertPem.isNotBlank() && bundle.clientKeyPem.isNotBlank()) {
+            val db = AppDatabase.getInstance(context)
+            db.providerCredentialDao().upsert(
+                ProviderCredential(
+                    id = "hub_mtls_${bundle.bridgeId}",
+                    provider = "hub_mqtt",
+                    name = "Hub mTLS (${bundle.bridgeId})",
+                    credType = "mtls_bundle",
+                    encryptedData = (bundle.clientCertPem + "\n" + bundle.clientKeyPem).toByteArray(),
+                    certNotAfter = bundle.certExpiry.ifBlank { null },
+                    certSubject = "CN=${bundle.bridgeId}",
+                    source = "qr",
+                    version = 1,
+                )
             )
-        )
+        }
 
         Log.i(TAG, "Hub provisioned: ${bundle.bridgeId} → ${bundle.mqttUrl}")
         return "Hub provisioned: ${bundle.bridgeId}"
     }
 
-    /** Check if a URL is a provisioning URL. */
-    fun isProvisionUrl(url: String): Boolean = url.startsWith(URL_PREFIX)
+    class ProvisionException(message: String) : Exception(message)
 }

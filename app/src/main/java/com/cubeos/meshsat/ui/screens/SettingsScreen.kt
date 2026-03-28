@@ -196,14 +196,25 @@ fun SettingsScreen(navController: NavController? = null) {
             result.resultCode, result.data
         )
         val scanned = scanResult.contents
-        if (scanned != null && scanned.startsWith("meshsat://provision/")) {
-            // Hub provisioning QR — auto-fill all Hub settings + certs
-            try {
-                val bundle = com.cubeos.meshsat.crypto.ProvisionImporter.parse(scanned)
-                provisionBundle = bundle
-                showProvisionDialog = true
-            } catch (e: Exception) {
-                Toast.makeText(context, "Provision QR failed: ${e.message}", Toast.LENGTH_LONG).show()
+        if (scanned != null && com.cubeos.meshsat.crypto.ProvisionImporter.isProvisionUrl(scanned)) {
+            // Hub provisioning QR — two-step: parse URL then fetch bundle from Hub
+            scope.launch {
+                try {
+                    val request = com.cubeos.meshsat.crypto.ProvisionImporter.parseQr(scanned)
+                    val bundle = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        com.cubeos.meshsat.crypto.ProvisionImporter.claimBundle(request)
+                    }
+                    provisionBundle = bundle
+                    showProvisionDialog = true
+                } catch (e: com.cubeos.meshsat.crypto.ProvisionImporter.ProvisionException) {
+                    withContext(kotlinx.coroutines.Dispatchers.Main) {
+                        Toast.makeText(context, e.message, Toast.LENGTH_LONG).show()
+                    }
+                } catch (e: Exception) {
+                    withContext(kotlinx.coroutines.Dispatchers.Main) {
+                        Toast.makeText(context, "Provision failed: ${e.message}", Toast.LENGTH_LONG).show()
+                    }
+                }
             }
         } else if (scanned != null && scanned.startsWith("meshsat://key/")) {
             // MeshSat key bundle URL — contains signed multi-channel key bundle
