@@ -55,6 +55,15 @@ object MeshClock {
         Log.i(TAG, "Clock updated from $source: offset=${newOffset}ms")
     }
 
+    /**
+     * Update from cellular NITZ (Android system clock when cellular connected).
+     * On Android, the system clock IS NITZ-corrected when the phone has signal.
+     * Call this when cellular connectivity is detected.
+     */
+    fun updateFromCellular() {
+        updateFromSource(TimeSource.CellularNITZ, System.currentTimeMillis())
+    }
+
     /** Update from GPS fix timestamp. */
     fun updateFromGps(gpsTimeMs: Long) {
         updateFromSource(TimeSource.GPS, gpsTimeMs)

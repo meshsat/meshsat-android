@@ -5,7 +5,16 @@ package com.cubeos.meshsat.timesync
  * Lower stratum = more authoritative. Mirrors NTP stratum concept.
  */
 sealed class TimeSource(val stratum: Int, val name: String) {
-    /** GPS receiver fix — most accurate, stratum 1. */
+    /**
+     * Cellular NITZ — cell tower time via Network Identity and Time Zone.
+     * On Android, System.currentTimeMillis() uses NITZ when cellular is
+     * connected. Stratum 0 because it's automatic and always-on when
+     * the phone has signal — no GPS sky view needed. Sub-second accuracy
+     * from the carrier's NTP-synced infrastructure.
+     */
+    data object CellularNITZ : TimeSource(0, "Cellular NITZ")
+
+    /** GPS receiver fix — most accurate standalone source, stratum 1. */
     data object GPS : TimeSource(1, "GPS")
 
     /** Iridium MSSTM epoch counter — satellite-derived, stratum 1. */
@@ -17,7 +26,7 @@ sealed class TimeSource(val stratum: Int, val name: String) {
     /** Mesh consensus — derived from peer with best stratum. */
     class MeshConsensus(parentStratum: Int) : TimeSource(parentStratum + 1, "Mesh (s${parentStratum + 1})")
 
-    /** Local RTC — free-running hardware clock, drifts ~2 ppm. */
+    /** Local RTC — free-running, no external sync. Only used when fully offline. */
     data object LocalRTC : TimeSource(16, "Local RTC")
 
     override fun toString(): String = "$name (stratum $stratum)"
