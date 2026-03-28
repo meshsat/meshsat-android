@@ -62,6 +62,13 @@ class SettingsRepository(private val context: Context) {
         val KEY_OFFLINE_MAP_ENABLED = booleanPreferencesKey("offline_map_enabled")
         val KEY_OFFLINE_MAP_FILE = stringPreferencesKey("offline_map_file")
 
+        // Protocol enhancements (MESHSAT-407)
+        val KEY_DTN_CUSTODY_ENABLED = booleanPreferencesKey("dtn_custody_enabled")
+        val KEY_FEC_LORA_PERCENT = stringPreferencesKey("fec_lora_percent")
+        val KEY_FEC_SBD_PERCENT = stringPreferencesKey("fec_sbd_percent")
+        val KEY_TIME_SYNC_ENABLED = booleanPreferencesKey("time_sync_enabled")
+        val KEY_RLNC_ENABLED = booleanPreferencesKey("rlnc_enabled")
+
         // Reticulum Routing settings (MESHSAT-394)
         val KEY_RNS_ANNOUNCE_INTERVAL = stringPreferencesKey("rns_announce_interval_min")
         val KEY_RNS_TCP_LISTEN_PORT = stringPreferencesKey("rns_tcp_listen_port")
@@ -547,6 +554,20 @@ class SettingsRepository(private val context: Context) {
     suspend fun setHubClientCertPem(pem: String) { context.dataStore.edit { it[KEY_HUB_CLIENT_CERT] = pem } }
     suspend fun setHubClientKeyPem(pem: String) { secureStore.set("hub_client_key_pem", pem) }
     suspend fun setHubCaCertPem(pem: String) { context.dataStore.edit { it[KEY_HUB_CA_CERT] = pem } }
+
+    // --- Protocol enhancements (MESHSAT-407) ---
+
+    val dtnCustodyEnabled: Flow<Boolean> = context.dataStore.data.map { it[KEY_DTN_CUSTODY_ENABLED] ?: false }
+    val fecLoraPercent: Flow<String> = context.dataStore.data.map { it[KEY_FEC_LORA_PERCENT] ?: "30" }
+    val fecSbdPercent: Flow<String> = context.dataStore.data.map { it[KEY_FEC_SBD_PERCENT] ?: "20" }
+    val timeSyncEnabled: Flow<Boolean> = context.dataStore.data.map { it[KEY_TIME_SYNC_ENABLED] ?: true }
+    val rlncEnabled: Flow<Boolean> = context.dataStore.data.map { it[KEY_RLNC_ENABLED] ?: false }
+
+    suspend fun setDtnCustodyEnabled(enabled: Boolean) { context.dataStore.edit { it[KEY_DTN_CUSTODY_ENABLED] = enabled } }
+    suspend fun setFecLoraPercent(pct: String) { context.dataStore.edit { it[KEY_FEC_LORA_PERCENT] = pct } }
+    suspend fun setFecSbdPercent(pct: String) { context.dataStore.edit { it[KEY_FEC_SBD_PERCENT] = pct } }
+    suspend fun setTimeSyncEnabled(enabled: Boolean) { context.dataStore.edit { it[KEY_TIME_SYNC_ENABLED] = enabled } }
+    suspend fun setRlncEnabled(enabled: Boolean) { context.dataStore.edit { it[KEY_RLNC_ENABLED] = enabled } }
 
     // --- Offline map settings ---
 

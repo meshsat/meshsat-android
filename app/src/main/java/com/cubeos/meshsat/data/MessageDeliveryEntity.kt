@@ -36,6 +36,10 @@ data class MessageDeliveryEntity(
     @ColumnInfo(name = "ack_timestamp") val ackTimestamp: Long? = null, // epoch millis
     @ColumnInfo(name = "created_at") val createdAt: Long = System.currentTimeMillis(),
     @ColumnInfo(name = "updated_at") val updatedAt: Long = System.currentTimeMillis(),
+    // DTN custody transfer (MESHSAT-408)
+    @ColumnInfo(name = "custody_status") val custodyStatus: String? = null,  // null, "offered", "accepted", "transferred"
+    @ColumnInfo(name = "custodian_hash") val custodianHash: String? = null,  // hex of custody-accepting node
+    @ColumnInfo(name = "bundle_id") val bundleId: String? = null,            // DTN bundle ID for fragmentation
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
