@@ -76,9 +76,6 @@ private val TRACK_COLORS = intArrayOf(
     0xFF22C55E.toInt(), 0xFFF59E0B.toInt(), 0xFFEF4444.toInt(),
 )
 
-/** Tracks the current MBTiles file to avoid re-creating tile provider unnecessarily. */
-private class TileState(var configuredFile: String? = null)
-
 @Composable
 fun MapScreen() {
     val context = LocalContext.current
@@ -89,20 +86,6 @@ fun MapScreen() {
     var trackPositions by remember { mutableStateOf<List<NodePosition>>(emptyList()) }
     LaunchedEffect(Unit) {
         trackPositions = db.nodePositionDao().getAllRecentByNode(500)
-    }
-
-    val settings = remember { SettingsRepository(context) }
-    val offlineEnabled by settings.offlineMapEnabled.collectAsState(initial = true)
-    val offlineFile by settings.offlineMapFile.collectAsState(initial = "")
-
-    // Extract bundled map synchronously on first composition, then resolve file
-    val effectiveFile = offlineFile.ifBlank { MBTilesManager.BUNDLED_WORLD_MAP }
-    val bundledReady = remember {
-        MBTilesManager.ensureBundledMapSync(context)
-        true
-    }
-    val mbtilesFile = remember(offlineEnabled, effectiveFile, bundledReady) {
-        if (offlineEnabled) MBTilesManager.getMBTilesFile(context, effectiveFile) else null
     }
 
     val meshNodes = nodes.filter { it.nodeId != 0L }
@@ -140,8 +123,6 @@ fun MapScreen() {
                 nodes = filteredMeshNodes,
                 phoneLocation = effectivePhoneLocation,
                 trackPositions = filteredTrackPositions,
-                mbtilesFile = mbtilesFile,
-                offlineEnabled = offlineEnabled,
                 darkMode = isDark,
             )
         }
@@ -249,12 +230,9 @@ private fun OsmdroidMap(
     nodes: List<NodePosition>,
     phoneLocation: android.location.Location?,
     trackPositions: List<NodePosition>,
-    mbtilesFile: java.io.File?,
-    offlineEnabled: Boolean,
     darkMode: Boolean = true,
 ) {
     val context = LocalContext.current
-    val tileState = remember { TileState() }
 
     // MapView is created once and NEVER destroyed (lives outside NavHost)
     val mapView = remember {
@@ -262,12 +240,16 @@ private fun OsmdroidMap(
             userAgentValue = "MeshSat-Android"
             osmdroidBasePath = java.io.File(context.filesDir, "osmdroid")
             osmdroidTileCache = java.io.File(context.filesDir, "osmdroid/tiles")
+            osmdroidBasePath.mkdirs()
+            osmdroidTileCache.mkdirs()
         }
+
         MapView(context).apply {
             setDestroyMode(false)
             setMultiTouchControls(true)
             clipToOutline = true
             setBackgroundColor(android.graphics.Color.parseColor("#111827"))
+            // Online OpenStreetMap tiles — works immediately, cached for offline use
             setTileSource(TileSourceFactory.MAPNIK)
             controller.setZoom(3.0)
             controller.setCenter(GeoPoint(20.0, 0.0))
@@ -295,30 +277,6 @@ private fun OsmdroidMap(
     AndroidView(
         factory = { mapView },
         update = { mv ->
-            // Copy MBTiles to osmdroid's base path — osmdroid auto-detects archives there
-            if (offlineEnabled && mbtilesFile != null) {
-                val newFile = mbtilesFile.absolutePath
-                if (newFile != tileState.configuredFile) {
-                    tileState.configuredFile = newFile
-                    try {
-                        val osmdroidDir = Configuration.getInstance().osmdroidBasePath
-                        val destFile = java.io.File(osmdroidDir, mbtilesFile.name)
-                        if (!destFile.exists() || destFile.length() != mbtilesFile.length()) {
-                            mbtilesFile.copyTo(destFile, overwrite = true)
-                        }
-                        // Use default provider which auto-scans osmdroid base path for archives
-                        mv.setTileSource(TileSourceFactory.DEFAULT_TILE_SOURCE)
-                        mv.setUseDataConnection(false)
-                    } catch (e: Exception) {
-                        android.util.Log.w("MeshSatMap", "MBTiles setup failed: ${e.message}")
-                        mv.setTileSource(TileSourceFactory.MAPNIK)
-                    }
-                }
-            } else if (!offlineEnabled && tileState.configuredFile != null) {
-                tileState.configuredFile = null
-                mv.setUseDataConnection(true)
-                mv.setTileSource(TileSourceFactory.MAPNIK)
-            }
 
             // Dark mode
             mv.overlayManager.tilesOverlay.setColorFilter(if (darkMode) DARK_INVERT else null)
