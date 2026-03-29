@@ -782,6 +782,43 @@ class GatewayService : Service() {
                         Log.i("MeshSat", "Hub reboot command received, scheduling restart")
                         scheduleRestart(this@GatewayService)
                     }
+                    "hemb_bond_create" -> {
+                        val json = org.json.JSONObject(cmd.payload)
+                        val bondId = json.optString("bond_id", "")
+                        val label = json.optString("label", "")
+                        val membersArr = json.optJSONArray("members")
+                        val members = if (membersArr != null) {
+                            (0 until membersArr.length()).map { membersArr.getString(it) }
+                        } else emptyList()
+                        val costBudget = json.optDouble("cost_budget", 0.0)
+                        val db = com.cubeos.meshsat.data.AppDatabase.getInstance(this@GatewayService)
+                        db.hembBondGroupDao().insert(
+                            com.cubeos.meshsat.data.HembBondGroupEntity(
+                                id = bondId,
+                                label = label,
+                                members = org.json.JSONArray(members).toString(),
+                                costBudget = costBudget,
+                            )
+                        )
+                        Log.i("MeshSat", "HeMB bond group created from Hub: $bondId ($label)")
+                        hubReporter?.publishCommandResponse(
+                            com.cubeos.meshsat.hub.CommandResponse(
+                                requestId = cmd.requestId, cmd = cmd.cmd, status = "ok",
+                            )
+                        )
+                    }
+                    "hemb_bond_delete" -> {
+                        val json = org.json.JSONObject(cmd.payload)
+                        val bondId = json.optString("bond_id", "")
+                        val db = com.cubeos.meshsat.data.AppDatabase.getInstance(this@GatewayService)
+                        db.hembBondGroupDao().delete(bondId)
+                        Log.i("MeshSat", "HeMB bond group deleted by Hub: $bondId")
+                        hubReporter?.publishCommandResponse(
+                            com.cubeos.meshsat.hub.CommandResponse(
+                                requestId = cmd.requestId, cmd = cmd.cmd, status = "ok",
+                            )
+                        )
+                    }
                     else -> {
                         hubReporter?.publishCommandResponse(
                             com.cubeos.meshsat.hub.CommandResponse(

@@ -24,8 +24,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         ProviderCredential::class,
         RnsTcpPeer::class,
         IridiumCreditEntry::class,
+        HembBondGroupEntity::class,
     ],
-    version = 11,
+    version = 12,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -44,6 +45,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun providerCredentialDao(): ProviderCredentialDao
     abstract fun rnsTcpPeerDao(): RnsTcpPeerDao
     abstract fun iridiumCreditDao(): IridiumCreditDao
+    abstract fun hembBondGroupDao(): HembBondGroupDao
 
     companion object {
         @Volatile
@@ -152,6 +154,21 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /** Migration 11→12: HeMB bond group table [MESHSAT-431]. */
+        val MIGRATION_11_12 = object : Migration(11, 12) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS hemb_bond_groups (
+                        id TEXT NOT NULL PRIMARY KEY,
+                        label TEXT NOT NULL DEFAULT '',
+                        members TEXT NOT NULL DEFAULT '[]',
+                        costBudget REAL NOT NULL DEFAULT 0.0,
+                        createdAt INTEGER NOT NULL DEFAULT 0
+                    )
+                """.trimIndent())
+            }
+        }
+
         fun getInstance(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
@@ -159,7 +176,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "meshsat.db"
                 )
-                    .addMigrations(MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11)
+                    .addMigrations(MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12)
                     .fallbackToDestructiveMigration()
                     .build()
                     .also { INSTANCE = it }
