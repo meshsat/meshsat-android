@@ -171,6 +171,8 @@ object BirthSigner {
      * Load an EC private key from PEM. Handles both SEC1 (BEGIN EC PRIVATE KEY)
      * and PKCS#8 (BEGIN PRIVATE KEY) formats.
      */
+    fun loadEcPrivateKeyFromPem(pem: String): ECPrivateKey = loadEcPrivateKey(pem)
+
     private fun loadEcPrivateKey(pem: String): ECPrivateKey {
         val isSec1 = pem.contains("BEGIN EC PRIVATE KEY")
 

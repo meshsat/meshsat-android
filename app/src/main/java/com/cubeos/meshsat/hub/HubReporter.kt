@@ -83,6 +83,7 @@ class HubReporter(
         scope.launch {
             try {
                 val clientId = "meshsat-android-${config.bridgeId.takeLast(12)}"
+                Log.i(TAG, "Connecting to ${config.hubUrl} as $clientId (cert=${config.clientCertPem.length > 0})")
                 val mqttClient = MqttClient(config.hubUrl, clientId, MemoryPersistence())
 
                 val opts = MqttConnectOptions().apply {
@@ -106,7 +107,7 @@ class HubReporter(
                         false,
                     )
 
-                    // mTLS client certificates (preferred) or certificate pinning
+                    // mTLS client certificates — system default trust + client cert
                     if (config.clientCertPem.isNotBlank() && config.clientKeyPem.isNotBlank()) {
                         try {
                             socketFactory = com.cubeos.meshsat.mqtt.CertificatePinner.createMtlsSSLSocketFactory(
@@ -114,10 +115,12 @@ class HubReporter(
                                 clientKeyPem = config.clientKeyPem,
                                 caCertPem = config.caCertPem.ifBlank { null },
                             )
-                            Log.i(TAG, "mTLS client certificate configured for Hub MQTT")
+                            Log.i(TAG, "mTLS configured: cert=${config.clientCertPem.length}B key=${config.clientKeyPem.length}B ca=${config.caCertPem.length}B")
                         } catch (e: Exception) {
-                            Log.e(TAG, "mTLS setup failed, falling back to pinning: ${e.message}")
+                            Log.e(TAG, "mTLS setup failed: ${e.message}", e)
                         }
+                    } else {
+                        Log.w(TAG, "No mTLS certs: cert=${config.clientCertPem.length} key=${config.clientKeyPem.length}")
                     }
                     if (socketFactory == null) {
                         val pinBuilder = CertificatePinner.Builder()
