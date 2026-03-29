@@ -1266,9 +1266,29 @@ class GatewayService : Service() {
                 }
                 val port = settings.rnsTcpPort.first().toIntOrNull()
                     ?: com.cubeos.meshsat.reticulum.RnsTcpInterface.DEFAULT_PORT
+                val useTls = settings.rnsTcpTls.first() || port == 443
+
+                // Build mTLS SSLSocketFactory from Hub certs if available
+                val sslFactory = if (useTls) {
+                    val clientCert = settings.hubClientCertPem.first()
+                    val clientKey = settings.hubClientKeyPem.first()
+                    val caCert = settings.hubCaCertPem.first()
+                    if (clientCert.isNotBlank() && clientKey.isNotBlank()) {
+                        try {
+                            com.cubeos.meshsat.mqtt.CertificatePinner.createMtlsSSLSocketFactory(
+                                clientCertPem = clientCert,
+                                clientKeyPem = clientKey,
+                                caCertPem = caCert.ifBlank { null },
+                            ).also { Log.i("MeshSat", "RNS TCP: mTLS enabled with Hub certs") }
+                        } catch (e: Exception) {
+                            Log.w("MeshSat", "RNS TCP: mTLS cert setup failed, using default TLS: ${e.message}")
+                            null
+                        }
+                    } else null
+                } else null
 
                 val tcp = com.cubeos.meshsat.reticulum.RnsTcpInterface(scope)
-                tcp.connect(host, port)
+                tcp.connect(host, port, tls = useTls, sslSocketFactory = sslFactory)
                 rnsTcpInterface = tcp
                 scope.launch {
                     tcp.state.collect { state ->
@@ -1524,9 +1544,18 @@ class GatewayService : Service() {
                     }
                     val port = settings.rnsTcpPort.first().toIntOrNull()
                         ?: com.cubeos.meshsat.reticulum.RnsTcpInterface.DEFAULT_PORT
+                    val useTls = settings.rnsTcpTls.first() || port == 443
+                    val sslFactory = if (useTls) {
+                        val cc = settings.hubClientCertPem.first()
+                        val ck = settings.hubClientKeyPem.first()
+                        val ca = settings.hubCaCertPem.first()
+                        if (cc.isNotBlank() && ck.isNotBlank()) try {
+                            com.cubeos.meshsat.mqtt.CertificatePinner.createMtlsSSLSocketFactory(cc, ck, ca.ifBlank { null })
+                        } catch (_: Exception) { null } else null
+                    } else null
                     val tcp = rnsTcpInterface
                         ?: com.cubeos.meshsat.reticulum.RnsTcpInterface(scope).also { rnsTcpInterface = it }
-                    tcp.connect(host, port)
+                    tcp.connect(host, port, tls = useTls, sslSocketFactory = sslFactory)
                     null
                 }
                 else -> null

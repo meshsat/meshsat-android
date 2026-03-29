@@ -57,6 +57,7 @@ class SettingsRepository(private val context: Context) {
         val KEY_RNS_TCP_ENABLED = booleanPreferencesKey("rns_tcp_enabled")
         val KEY_RNS_TCP_HOST = stringPreferencesKey("rns_tcp_host")
         val KEY_RNS_TCP_PORT = stringPreferencesKey("rns_tcp_port")
+        val KEY_RNS_TCP_TLS = booleanPreferencesKey("rns_tcp_tls")
 
         // Offline map settings
         val KEY_OFFLINE_MAP_ENABLED = booleanPreferencesKey("offline_map_enabled")
@@ -454,6 +455,14 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setRnsTcpPort(port: String) {
         context.dataStore.edit { it[KEY_RNS_TCP_PORT] = port }
+    }
+
+    val rnsTcpTls: Flow<Boolean> = context.dataStore.data.map {
+        it[KEY_RNS_TCP_TLS] ?: false
+    }
+
+    suspend fun setRnsTcpTls(enabled: Boolean) {
+        context.dataStore.edit { it[KEY_RNS_TCP_TLS] = enabled }
     }
 
     // --- Reticulum Routing settings (MESHSAT-394) ---

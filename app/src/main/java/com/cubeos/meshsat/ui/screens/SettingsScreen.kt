@@ -131,6 +131,7 @@ fun SettingsScreen(navController: NavController? = null) {
     val rnsTcpEnabled by settings.rnsTcpEnabled.collectAsState(initial = false)
     val rnsTcpHost by settings.rnsTcpHost.collectAsState(initial = "")
     val rnsTcpPort by settings.rnsTcpPort.collectAsState(initial = "4242")
+    val rnsTcpTls by settings.rnsTcpTls.collectAsState(initial = false)
 
     // Hub Reporter settings (MESHSAT-292)
     val hubEnabled by settings.hubEnabled.collectAsState(initial = false)
@@ -1452,6 +1453,19 @@ fun SettingsScreen(navController: NavController? = null) {
                 )
             }
 
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("TLS", style = MaterialTheme.typography.bodyMedium)
+                Switch(
+                    checked = rnsTcpTls,
+                    onCheckedChange = { scope.launch { settings.setRnsTcpTls(it) } },
+                    colors = SwitchDefaults.colors(checkedTrackColor = MeshSatTeal),
+                )
+            }
+
             Button(
                 onClick = {
                     scope.launch {
@@ -1467,6 +1481,7 @@ fun SettingsScreen(navController: NavController? = null) {
 
             Text(
                 text = "Connect to a stock Reticulum (Python RNS) node over TCP/IP. " +
+                    "Enable TLS for public endpoints (e.g. port 443 via HAProxy/stunnel). " +
                     "Default port 4242. Uses HDLC framing for wire compatibility.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MeshSatTextMuted,

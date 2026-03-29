@@ -105,7 +105,20 @@ class Identity private constructor(
             }
         }
 
-        /** Generate a fresh identity with new keypairs. */
+        /**
+         * Generate a fresh identity with new keypairs.
+         *
+         * Android 16 (API 36) only exposes Ed25519/X25519 KeyPairGenerator via
+         * AndroidKeyStore, which requires KeyGenParameterSpec and won't export raw
+         * private keys. We generate 32-byte seeds, wrap them in RFC 8410 PKCS#8
+         * DER, and load via KeyFactory (which works on Conscrypt).
+         * The JCA re-encoding includes the public key in PKCS#8 v2 format.
+         */
+        /**
+         * Generate a fresh identity with new keypairs.
+         * BouncyCastle is registered as the primary JCA provider in MeshSatApp,
+         * providing software Ed25519/X25519 on all Android versions including 16+.
+         */
         fun generate(): Identity {
             val sigKp = KeyPairGenerator.getInstance("Ed25519").generateKeyPair()
             val encKp = KeyPairGenerator.getInstance("X25519").generateKeyPair()

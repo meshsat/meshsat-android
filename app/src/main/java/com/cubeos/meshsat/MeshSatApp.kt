@@ -3,6 +3,8 @@ package com.cubeos.meshsat
 import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import org.bouncycastle.jce.provider.BouncyCastleProvider
+import java.security.Security
 
 class MeshSatApp : Application() {
 
@@ -13,6 +15,11 @@ class MeshSatApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // Android 16 removed Ed25519/X25519 from Conscrypt (only AndroidKeyStore
+        // has them, but it won't export raw private keys). Register BouncyCastle
+        // as the highest-priority provider so standard JCA calls use it.
+        Security.removeProvider("BC")  // Remove Android's stripped BC
+        Security.insertProviderAt(BouncyCastleProvider(), 1)
         createNotificationChannels()
     }
 

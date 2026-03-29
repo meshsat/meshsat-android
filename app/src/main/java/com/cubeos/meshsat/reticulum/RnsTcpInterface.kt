@@ -13,6 +13,8 @@ import java.io.InputStream
 import java.io.OutputStream
 import java.net.InetSocketAddress
 import java.net.Socket
+import javax.net.ssl.SSLSocket
+import javax.net.ssl.SSLSocketFactory
 
 /**
  * Reticulum interface over TCP with HDLC framing.
@@ -121,13 +123,22 @@ class RnsTcpInterface(
         receiveCallback = callback
     }
 
+    @Volatile var useTls: Boolean = false
+        private set
+    private var sslFactory: SSLSocketFactory? = null
+
     /**
      * Connect to a remote Reticulum node.
      * Starts a background read loop with auto-reconnect.
+     * Set [tls] to true for TLS-wrapped connections (e.g. port 443 via HAProxy/stunnel).
+     * Provide [sslSocketFactory] for mTLS (client certificate authentication).
      */
-    fun connect(host: String, port: Int = DEFAULT_PORT) {
+    fun connect(host: String, port: Int = DEFAULT_PORT, tls: Boolean = false,
+                sslSocketFactory: SSLSocketFactory? = null) {
         this.host = host
         this.port = port
+        this.useTls = tls
+        this.sslFactory = sslSocketFactory
         running = true
         _error.value = ""
         scope.launch(Dispatchers.IO) { connectionLoop() }
@@ -173,15 +184,28 @@ class RnsTcpInterface(
         while (running && scope.isActive) {
             try {
                 _state.value = State.Connecting
-                val s = Socket()
+                val s: Socket = if (useTls) {
+                    // TLS: connect plain socket first (for timeout control), then wrap with SSL
+                    val plain = Socket()
+                    plain.connect(InetSocketAddress(host, port), CONNECT_TIMEOUT_MS)
+                    val factory = sslFactory ?: SSLSocketFactory.getDefault() as SSLSocketFactory
+                    val ssl = factory.createSocket(plain, host, port, true) as SSLSocket
+                    ssl.startHandshake()
+                    ssl
+                } else {
+                    val plain = Socket()
+                    plain.tcpNoDelay = true
+                    plain.keepAlive = true
+                    plain.connect(InetSocketAddress(host, port), CONNECT_TIMEOUT_MS)
+                    plain
+                }
                 s.tcpNoDelay = true
                 s.keepAlive = true
-                s.connect(InetSocketAddress(host, port), CONNECT_TIMEOUT_MS)
 
                 socket = s
                 outputStream = s.getOutputStream()
                 _state.value = State.Connected
-                Log.i(TAG, "Connected to $host:$port")
+                Log.i(TAG, "Connected to $host:$port${if (useTls) " (TLS)" else ""}")
 
                 readLoop(s.getInputStream())
             } catch (e: IOException) {

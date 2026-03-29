@@ -96,6 +96,11 @@ dependencies {
     // Security — EncryptedSharedPreferences backed by Android Keystore (MESHSAT-194)
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
 
+    // BouncyCastle — software Ed25519/X25519 for Android 16+ (MESHSAT-354)
+    // Android 16 removed Ed25519 from Conscrypt; only AndroidKeyStore has it,
+    // but AndroidKeyStore won't export raw private keys for Reticulum wire format.
+    implementation("org.bouncycastle:bcprov-jdk18on:1.78.1")
+
     // Protobuf (Meshtastic official bindings — MESHSAT-241)
     implementation("com.google.protobuf:protobuf-javalite:3.25.5")
 

@@ -433,12 +433,14 @@ class RnsTransportNode(
                     MeshSatAppData.CAP_MQTT.toInt() or
                     CAP_TRANSPORT_NODE.toInt()).toByte(),
         )
+        var sent = 0
         interfaces().forEach { (id, iface) ->
             if (iface.isOnline && !isPaidInterface(id)) {
-                iface.send(announceRaw)
+                val err = iface.send(announceRaw)
+                if (err == null) sent++ else Log.w(TAG, "Announce send failed on $id: $err")
             }
         }
-        Log.d(TAG, "Announce broadcast on free interfaces (skipped paid)")
+        Log.i(TAG, "Announce broadcast on $sent/${interfaces().size} interfaces")
     }
 
     // ═══════════════════════════════════════════════════════════════
