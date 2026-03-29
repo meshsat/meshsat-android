@@ -1574,27 +1574,19 @@ fun SettingsScreen(navController: NavController? = null) {
             ) {
                 OutlinedButton(
                     onClick = {
-                        val mqttClient = GatewayService.mqttTransport
-                        if (mqttClient == null || !mqttClient.isConnected) {
+                        val hub = GatewayService.hubReporter
+                        if (hub == null || !hub.isConnected) {
                             pingResult = "Not connected"
                             return@OutlinedButton
                         }
                         pinging = true
                         pingResult = "..."
                         scope.launch {
-                            val start = System.currentTimeMillis()
                             try {
-                                withContext(Dispatchers.IO) {
-                                    mqttClient.publishRaw(
-                                        "meshsat/${hubBridgeIdInput.ifBlank { "android" }}/ping",
-                                        qos = 1, retained = false,
-                                        payload = start.toString(),
-                                    )
-                                }
-                                val elapsed = System.currentTimeMillis() - start
+                                val elapsed = withContext(Dispatchers.IO) { hub.ping() }
                                 pingResult = "${elapsed}ms"
                             } catch (e: Exception) {
-                                pingResult = "failed"
+                                pingResult = "failed: ${e.message?.take(30)}"
                             }
                             pinging = false
                         }

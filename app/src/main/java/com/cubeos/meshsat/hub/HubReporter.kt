@@ -208,6 +208,17 @@ class HubReporter(
     val isConnected: Boolean
         get() = client?.isConnected == true
 
+    /** Publish a ping message and return delivery time in ms. Throws on failure. */
+    fun ping(): Long {
+        val c = client ?: throw IllegalStateException("Not connected")
+        val topic = HubTopics.bridgeHealth(config.bridgeId)
+        val start = System.currentTimeMillis()
+        val msg = org.eclipse.paho.client.mqttv3.MqttMessage("{\"ping\":true}".toByteArray())
+        msg.qos = 1
+        c.publish(topic, msg) // blocks until delivery confirmed (QoS 1)
+        return System.currentTimeMillis() - start
+    }
+
     // --- Device lifecycle ---
 
     /** Publish a device birth certificate. */
