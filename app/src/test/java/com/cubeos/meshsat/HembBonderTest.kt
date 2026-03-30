@@ -79,6 +79,19 @@ class HembBonderTest {
     }
 
     @Test
+    fun `generation cleanup after decode`() {
+        var delivered = 0
+        val buf = HembReassemblyBuffer(deliverFn = { delivered++ })
+        // K=1: single identity symbol decodes immediately
+        buf.addSymbol(5, 0, HembCodedSymbol(0, 0, 1, byteArrayOf(1), byteArrayOf(0xAA.toByte())))
+        assertEquals(1, delivered)
+        assertEquals(0, buf.activeStreamCount) // cleaned up after decode
+        // Reuse same stream+gen ID — must NOT hit "already decoded"
+        buf.addSymbol(5, 0, HembCodedSymbol(0, 0, 1, byteArrayOf(1), byteArrayOf(0xBB.toByte())))
+        assertEquals(2, delivered)
+    }
+
+    @Test
     fun `reassembly buffer reap`() {
         val buf = HembReassemblyBuffer()
         val sym = HembCodedSymbol(0, 0, 2, byteArrayOf(1, 0), byteArrayOf(0x01, 0x02))

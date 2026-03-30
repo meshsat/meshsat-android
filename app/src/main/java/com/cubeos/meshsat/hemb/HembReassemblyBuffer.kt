@@ -79,6 +79,13 @@ class HembReassemblyBuffer(
             ))
 
             deliverFn?.invoke(payload)
+
+            // Remove decoded generation to free stream+gen ID for reuse.
+            stream.generations.remove(sym.genId)
+            if (stream.generations.isEmpty()) {
+                streams.remove(streamId)
+            }
+
             return payload
         }
 

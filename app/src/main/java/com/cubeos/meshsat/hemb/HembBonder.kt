@@ -16,10 +16,15 @@ class HembBonder(
     private val deliverFn: ((ByteArray) -> Unit)? = null,
     private val eventListener: HembEventListener? = null,
 ) {
+    companion object {
+        /** Global stream ID counter — shared across all bonder instances to prevent collisions. */
+        private val globalStreamSeq = AtomicInteger(0)
+    }
     private val reassembly: HembReassemblyBuffer? =
         if (bearers.size > 1) HembReassemblyBuffer(deliverFn, eventListener) else null
 
-    private val streamSeq = AtomicInteger(0)
+    // Per-instance counter removed — use global companion object counter
+    // to prevent stream ID collisions across ephemeral bonder instances.
 
     // Stats counters (thread-safe).
     private val _symbolsSent = AtomicLong(0)
@@ -77,7 +82,7 @@ class HembBonder(
             return
         }
 
-        val streamId = streamSeq.incrementAndGet() and 0x0F
+        val streamId = globalStreamSeq.incrementAndGet() and 0xFF
 
         // Step 1: compute minimum data capacity across bearer set.
         val minMtu = online.minOf { it.mtu - HembFrame.headerOverhead(it.headerMode) }
