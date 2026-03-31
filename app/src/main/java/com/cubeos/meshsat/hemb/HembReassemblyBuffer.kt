@@ -39,6 +39,7 @@ class HembReassemblyBuffer(
     /**
      * Process a coded symbol. Returns decoded payload when K symbols collected.
      */
+    @Synchronized
     fun addSymbol(streamId: Int, bearerIndex: Int, sym: HembCodedSymbol): ByteArray? {
         val stream = streams.getOrPut(streamId) { StreamState() }
         val gen = stream.generations.getOrPut(sym.genId) {

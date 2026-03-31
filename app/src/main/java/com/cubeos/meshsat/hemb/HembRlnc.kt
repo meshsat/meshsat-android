@@ -118,10 +118,10 @@ class HembRlncDecoder(
     /**
      * Feed a coded symbol. Returns true if it was linearly independent (increased rank).
      */
+    @Synchronized
     fun feed(sym: HembCodedSymbol): Boolean {
         if (_rank >= k) return false
-        require(sym.k == k) { "Symbol K=${sym.k} != decoder K=$k" }
-        require(sym.data.size == symSize) { "Symbol size ${sym.data.size} != $symSize" }
+        if (sym.k != k || sym.data.size != symSize) return false // reject mismatched symbols
 
         // Build augmented row.
         val row = IntArray(k + symSize)
