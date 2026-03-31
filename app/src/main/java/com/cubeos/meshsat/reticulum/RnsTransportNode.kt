@@ -70,6 +70,13 @@ class RnsTransportNode(
 
     var localDeliveryCallback: LocalDeliveryCallback? = null
 
+    /** Callback for HeMB frames detected inside Reticulum data packets. */
+    fun interface HembFrameCallback {
+        fun onHembFrame(sourceInterface: String, frameData: ByteArray)
+    }
+
+    var hembCallback: HembFrameCallback? = null
+
     // Public accessors for dashboard/settings widgets (MESHSAT-394/396)
     val destHashHex: String get() = localDestHash.joinToString("") { "%02x".format(it) }
     fun interfaceCount(): Int = interfaces().size
@@ -122,6 +129,20 @@ class RnsTransportNode(
      */
     fun onPacketReceived(sourceInterface: String, raw: ByteArray) {
         if (!running) return
+
+        // Log all incoming packets for debugging (WARN level for visibility)
+        if (raw.size >= 2) {
+            val h0 = raw[0].toInt() and 0xFF
+            val h1 = raw[1].toInt() and 0xFF
+            Log.w(TAG, "RECV: iface=$sourceInterface len=${raw.size} head=${String.format("%02x%02x", h0, h1)}")
+        }
+
+        // HeMB frame detection — check BEFORE Reticulum unmarshal.
+        if (raw.isNotEmpty() && com.cubeos.meshsat.hemb.HembFrame.isHembFrame(raw)) {
+            Log.i(TAG, "hemb: HeMB frame detected from $sourceInterface (${raw.size}B)")
+            hembCallback?.onHembFrame(sourceInterface, raw)
+            return
+        }
 
         val packet = try {
             RnsPacket.unmarshal(raw)
@@ -218,6 +239,12 @@ class RnsTransportNode(
     // ═══════════════════════════════════════════════════════════════
 
     private fun handleData(packet: RnsPacket, raw: ByteArray, sourceInterface: String) {
+        // HeMB frame detection — check inner payload before routing.
+        if (packet.data.isNotEmpty() && com.cubeos.meshsat.hemb.HembFrame.isHembFrame(packet.data)) {
+            hembCallback?.onHembFrame(sourceInterface, packet.data)
+            return
+        }
+
         // Check if addressed to us
         if (isLocalDest(packet.destHash)) {
             handleLocalData(packet, sourceInterface)

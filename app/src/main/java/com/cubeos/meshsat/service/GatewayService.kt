@@ -1350,6 +1350,13 @@ class GatewayService : Service() {
                     for (peer in peers) {
                         // Each additional peer gets its own RnsTcpInterface instance
                         val peerTcp = com.cubeos.meshsat.reticulum.RnsTcpInterface(scope, "tcp_rns_${peer.id}")
+                        // Wire receive callback immediately — transport node start()
+                        // may not have run yet (async coroutine race).
+                        peerTcp.setReceiveCallback(com.cubeos.meshsat.reticulum.RnsReceiveCallback { ifaceId, raw ->
+                            rnsTransportNode?.let { node ->
+                                scope.launch { node.onPacketReceived(ifaceId, raw) }
+                            }
+                        })
                         peerTcp.connect(peer.host, peer.port)
                         registry.register("tcp_rns_${peer.id}", peerTcp)
                     }
@@ -1448,6 +1455,15 @@ class GatewayService : Service() {
                             )
                         )
                     }
+                }
+
+                // HeMB inbound: persistent reassembly buffer for cross-bearer decode
+                val hembReassembly = com.cubeos.meshsat.hemb.HembReassemblyBuffer(deliverFn = { payload ->
+                    Log.i("MeshSat", "hemb: DECODED payload ${payload.size}B")
+                })
+                node.hembCallback = com.cubeos.meshsat.reticulum.RnsTransportNode.HembFrameCallback { sourceInterface, frameData ->
+                    Log.i("MeshSat", "hemb: received HeMB frame via $sourceInterface (${frameData.size}B)")
+                    hembReassembly.addFrame(frameData)
                 }
 
                 node.start()
