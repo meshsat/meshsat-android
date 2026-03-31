@@ -189,7 +189,16 @@ class SmsReceiver : BroadcastReceiver() {
             }
         }
 
-        // Step 2: Check if payload is MSVQ-SC wire format
+        // Step 2a: Try SMAZ2 decompression (bridge/Hub compress with SMAZ2) [MESHSAT-447]
+        if (wasEncrypted || rawBytes.contentEquals(payload).not()) {
+            val smaz2Text = com.cubeos.meshsat.codec.Smaz2.decompress(payload)
+            if (smaz2Text != null && smaz2Text.all { it.code in 0x20..0x7E || it == '\n' || it == '\r' || it == '\t' }) {
+                Log.d(TAG, "SMS SMAZ2 decompressed from $sender: ${payload.size}B → \"$smaz2Text\"")
+                return ProcessResult(smaz2Text, text, wasEncrypted, wasCompressed = true)
+            }
+        }
+
+        // Step 2b: Check if payload is MSVQ-SC wire format
         if (codebook != null && MsvqscWire.looksLikeMsvqsc(payload)) {
             try {
                 val decoded = codebook.decode(payload)
