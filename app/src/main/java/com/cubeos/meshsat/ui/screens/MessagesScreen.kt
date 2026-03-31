@@ -671,8 +671,11 @@ private fun ChatBubble(msg: Message, activeKey: String?) {
         "mesh" -> ColorMesh; "iridium" -> ColorIridium; "sms" -> ColorCellular; else -> MeshSatTextMuted
     }
 
-    // Decrypt on-the-fly for encrypted messages
-    val displayText = if (msg.encrypted && msg.rawText.isNotEmpty()) {
+    // Show decrypted text if SmsReceiver already decrypted it (stored in msg.text).
+    // Only re-decrypt from rawText if msg.text still contains ciphertext. [MESHSAT-447]
+    val displayText = if (msg.encrypted && msg.text.isNotEmpty() && msg.text != msg.rawText) {
+        msg.text // already decrypted by SmsReceiver
+    } else if (msg.encrypted && msg.rawText.isNotEmpty()) {
         if (activeKey != null) {
             try {
                 AesGcmCrypto.decryptFromBase64(msg.rawText.trim(), activeKey)
@@ -912,8 +915,10 @@ private fun MessageCard(msg: Message) {
         "mesh" -> ColorMesh; "iridium" -> ColorIridium; "sms" -> ColorCellular; else -> MeshSatTextMuted
     }
 
-    // Decrypt on-the-fly
-    val displayText = if (msg.encrypted && msg.rawText.isNotEmpty()) {
+    // Show decrypted text if SmsReceiver already decrypted it. [MESHSAT-447]
+    val displayText = if (msg.encrypted && msg.text.isNotEmpty() && msg.text != msg.rawText) {
+        msg.text
+    } else if (msg.encrypted && msg.rawText.isNotEmpty()) {
         if (activeKey != null) {
             try { AesGcmCrypto.decryptFromBase64(msg.rawText.trim(), activeKey) } catch (_: Exception) { msg.rawText }
         } else {

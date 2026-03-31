@@ -65,6 +65,8 @@ class SmsReceiver : BroadcastReceiver() {
                 // Lazy-load codebook (cached in companion)
                 val codebook = getCodebook(context)
 
+                val secureStore = com.cubeos.meshsat.crypto.SecureKeyStore.getInstance(context)
+
                 for ((sender, body) in grouped) {
                     val text = body.toString()
                     val result = processIncoming(
@@ -74,6 +76,7 @@ class SmsReceiver : BroadcastReceiver() {
                         autoDecrypt = autoDecrypt,
                         codebook = codebook,
                         db = db,
+                        secureKeyStore = secureStore,
                     )
 
                     db.messageDao().insert(
@@ -127,6 +130,7 @@ class SmsReceiver : BroadcastReceiver() {
         autoDecrypt: Boolean,
         codebook: MsvqscCodebook?,
         db: AppDatabase,
+        secureKeyStore: com.cubeos.meshsat.crypto.SecureKeyStore? = null,
     ): ProcessResult {
         // Try to decode as base64 (all encrypted/compressed messages are base64)
         val rawBytes = try {
@@ -153,8 +157,16 @@ class SmsReceiver : BroadcastReceiver() {
         // Step 1: Try AES-GCM decrypt (if looks encrypted and auto-decrypt enabled)
         if (autoDecrypt && AesGcmCrypto.looksEncrypted(text)) {
             // Key resolution order: per-sender → Hub wildcard (sms:*) → global settings key [MESHSAT-447]
-            val convKey = db.conversationKeyDao().getBySender(sender)?.hexKey
-            val wildcardKey = db.conversationKeyDao().getBySender("*")?.hexKey
+            // Keys in Room are SecureKeyStore references ("convkey:X") — resolve via store.
+            fun resolveKey(raw: String?): String? {
+                if (raw == null || raw.isEmpty()) return null
+                if (raw.startsWith("convkey:") && secureKeyStore != null) {
+                    return secureKeyStore.get(raw)
+                }
+                return raw // legacy plaintext key
+            }
+            val convKey = resolveKey(db.conversationKeyDao().getBySender(sender)?.hexKey)
+            val wildcardKey = resolveKey(db.conversationKeyDao().getBySender("*")?.hexKey)
             val keyToUse = convKey?.ifEmpty { null }
                 ?: wildcardKey?.ifEmpty { null }
                 ?: globalKey
@@ -192,6 +204,7 @@ class SmsReceiver : BroadcastReceiver() {
         // Step 3: If decrypted but not compressed, return as text
         if (wasEncrypted) {
             val decryptedText = String(payload, Charsets.UTF_8)
+            Log.i(TAG, "SMS decrypted result from $sender: \"$decryptedText\" (${payload.size}B)")
             return ProcessResult(decryptedText, text, wasEncrypted = true, wasCompressed = false)
         }
 
