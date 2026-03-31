@@ -819,6 +819,28 @@ class GatewayService : Service() {
                             )
                         )
                     }
+                    "key_rotate" -> {
+                        val json = org.json.JSONObject(cmd.payload)
+                        val channelType = json.optString("channel_type", "")
+                        val address = json.optString("address", "")
+                        val keyHex = json.optString("key_hex", "")
+                        val version = json.optInt("version", 1)
+                        val secureStore = com.cubeos.meshsat.crypto.SecureKeyStore.getInstance(this@GatewayService)
+                        secureStore.set("hub_key:${channelType}:${address}", keyHex)
+                        if (address.isNotBlank()) {
+                            val db = com.cubeos.meshsat.data.AppDatabase.getInstance(this@GatewayService)
+                            val convKeyRepo = com.cubeos.meshsat.data.ConversationKeyRepository(
+                                db.conversationKeyDao(), secureStore,
+                            )
+                            convKeyRepo.upsert(address, keyHex, "hub-rotated-v$version")
+                        }
+                        Log.i("MeshSat", "Key rotated from Hub: $channelType:$address v$version")
+                        hubReporter?.publishCommandResponse(
+                            com.cubeos.meshsat.hub.CommandResponse(
+                                requestId = cmd.requestId, cmd = cmd.cmd, status = "ok",
+                            )
+                        )
+                    }
                     else -> {
                         hubReporter?.publishCommandResponse(
                             com.cubeos.meshsat.hub.CommandResponse(
@@ -2655,13 +2677,16 @@ class GatewayService : Service() {
 
     /** Send SMS message to a specific recipient (called from conversation compose). */
     private suspend fun sendSmsMessage(text: String, recipient: String) {
-        // Check if we should encrypt for this recipient
+        // Key resolution: per-recipient → Hub wildcard (sms:*) → global key [MESHSAT-447]
         val convKeyRepo = com.cubeos.meshsat.data.ConversationKeyRepository(db.conversationKeyDao(), com.cubeos.meshsat.crypto.SecureKeyStore.getInstance(this))
         val convKey = convKeyRepo.getBySender(recipient)?.hexKey
+        val wildcardKey = convKeyRepo.getBySender("*")?.hexKey
         val globalKey = settings.encryptionKey.first()
         val encEnabled = settings.encryptionEnabled.first()
 
-        val keyToUse = convKey?.ifEmpty { null } ?: if (encEnabled) globalKey.ifEmpty { null } else null
+        val keyToUse = convKey?.ifEmpty { null }
+            ?: wildcardKey?.ifEmpty { null }
+            ?: if (encEnabled) globalKey.ifEmpty { null } else null
 
         val compressMode = settings.compressSms.first()
         val stages = settings.msvqscStages.first().toIntOrNull() ?: 3
@@ -2671,6 +2696,7 @@ class GatewayService : Service() {
             to = recipient,
             text = text,
             encryptionKey = keyToUse,
+            smaz2 = compressMode == "smaz2" || (keyToUse != null && compressMode != "msvqsc"),
             msvqscEncoder = if (compressMode == "msvqsc") msvqscEncoder else null,
             msvqscStages = stages,
         )

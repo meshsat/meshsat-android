@@ -34,14 +34,27 @@ object SmsSender {
         to: String,
         text: String,
         encryptionKey: String? = null,
+        smaz2: Boolean = false,
         msvqscEncoder: MsvqscEncoder? = null,
         msvqscStages: Int = 3,
     ) {
         var payload: ByteArray = text.toByteArray(Charsets.UTF_8)
         var compressed = false
 
-        // Step 1: MSVQ-SC lossy compression (if enabled)
-        if (msvqscEncoder != null) {
+        // Step 0: SMAZ2 lossless compression (if enabled) [MESHSAT-447]
+        if (smaz2) {
+            val smaz2Bytes = com.cubeos.meshsat.codec.Smaz2.compress(text)
+            if (smaz2Bytes.size < payload.size) {
+                Log.d(TAG, "SMAZ2: ${payload.size}B → ${smaz2Bytes.size}B")
+                payload = smaz2Bytes
+                compressed = true
+            } else {
+                Log.d(TAG, "SMAZ2: no gain (${payload.size}B → ${smaz2Bytes.size}B), skipping")
+            }
+        }
+
+        // Step 1: MSVQ-SC lossy compression (if enabled, overrides SMAZ2)
+        if (msvqscEncoder != null && !compressed) {
             val wire = msvqscEncoder.encode(text, msvqscStages)
             if (wire != null) {
                 Log.d(TAG, "MSVQ-SC: ${payload.size}B → ${wire.size}B ($msvqscStages stages)")
