@@ -152,14 +152,23 @@ class SmsReceiver : BroadcastReceiver() {
 
         // Step 1: Try AES-GCM decrypt (if looks encrypted and auto-decrypt enabled)
         if (autoDecrypt && AesGcmCrypto.looksEncrypted(text)) {
+            // Key resolution order: per-sender → Hub wildcard (sms:*) → global settings key [MESHSAT-447]
             val convKey = db.conversationKeyDao().getBySender(sender)?.hexKey
-            val keyToUse = convKey?.ifEmpty { null } ?: globalKey
+            val wildcardKey = db.conversationKeyDao().getBySender("*")?.hexKey
+            val keyToUse = convKey?.ifEmpty { null }
+                ?: wildcardKey?.ifEmpty { null }
+                ?: globalKey
 
             if (keyToUse.isNotEmpty()) {
                 try {
                     payload = AesGcmCrypto.decrypt(payload, keyToUse)
                     wasEncrypted = true
-                    Log.d(TAG, "SMS decrypted from $sender (${if (convKey != null) "conv key" else "global key"})")
+                    val keySource = when {
+                        convKey != null && convKey.isNotEmpty() -> "conv key"
+                        wildcardKey != null && wildcardKey.isNotEmpty() -> "hub wildcard sms:*"
+                        else -> "global key"
+                    }
+                    Log.d(TAG, "SMS decrypted from $sender ($keySource)")
                 } catch (e: Exception) {
                     Log.w(TAG, "SMS decrypt failed from $sender: ${e.message}")
                     // Decrypt failed — might not actually be encrypted
