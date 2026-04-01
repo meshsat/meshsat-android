@@ -462,6 +462,9 @@ class GatewayService : Service() {
                             scheduleRestart(this@GatewayService)
                         }
                     },
+                    smsSendCallback = { to, text ->
+                        scope.launch { sendSmsMessage(text, to) }
+                    },
                 )
                 server.start()
                 localApiServer = server

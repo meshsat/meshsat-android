@@ -36,6 +36,7 @@ class LocalApiServer(
     private val signingService: SigningService?,
     private val configManager: ConfigManager?,
     private val restartCallback: (() -> Unit)? = null,
+    private val smsSendCallback: ((to: String, text: String) -> Unit)? = null,
 ) : NanoHTTPD("127.0.0.1", port) {
 
     override fun serve(session: IHTTPSession): Response {
@@ -78,6 +79,9 @@ class LocalApiServer(
             method == Method.GET && uri == "/api/config/export" -> handleConfigExport()
             method == Method.POST && uri == "/api/config/import" -> handleConfigImport(session)
             method == Method.POST && uri == "/api/config/diff" -> handleConfigDiff(session)
+
+            // SMS
+            method == Method.POST && uri == "/api/sms/send" -> handleSmsSend(session)
 
             // System
             method == Method.POST && uri == "/api/system/restart" -> handleRestart()
@@ -314,6 +318,25 @@ class LocalApiServer(
         }
         return String(buf, 0, read, Charsets.UTF_8)
     }
+
+    // --- SMS Send --- [MESHSAT-447]
+
+    private fun handleSmsSend(session: IHTTPSession): Response {
+        if (smsSendCallback == null) {
+            return jsonError(Response.Status.SERVICE_UNAVAILABLE, "SMS not available")
+        }
+        val body = readBody(session) ?: return jsonError(Response.Status.BAD_REQUEST, "empty body")
+        val json = JSONObject(body)
+        val to = json.optString("to", "")
+        val text = json.optString("text", "")
+        if (to.isBlank() || text.isBlank()) {
+            return jsonError(Response.Status.BAD_REQUEST, "to and text are required")
+        }
+        smsSendCallback.invoke(to, text)
+        return jsonOk(JSONObject().put("status", "sent").put("to", to))
+    }
+
+    // --- Helpers ---
 
     private fun jsonOk(json: JSONObject): Response {
         return newFixedLengthResponse(Response.Status.OK, "application/json", json.toString())
