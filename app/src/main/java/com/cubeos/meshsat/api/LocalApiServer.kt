@@ -82,6 +82,8 @@ class LocalApiServer(
 
             // SMS
             method == Method.POST && uri == "/api/sms/send" -> handleSmsSend(session)
+            method == Method.POST && uri == "/api/sms/auto-forward" -> handleSmsAutoForward(session)
+            method == Method.GET && uri == "/api/sms/auto-forward" -> jsonOk(JSONObject().put("forward_to", com.cubeos.meshsat.sms.SmsReceiver.autoForwardTo))
 
             // System
             method == Method.POST && uri == "/api/system/restart" -> handleRestart()
@@ -334,6 +336,14 @@ class LocalApiServer(
         }
         smsSendCallback.invoke(to, text)
         return jsonOk(JSONObject().put("status", "sent").put("to", to))
+    }
+
+    private fun handleSmsAutoForward(session: IHTTPSession): Response {
+        val body = readBody(session) ?: return jsonError(Response.Status.BAD_REQUEST, "empty body")
+        val json = JSONObject(body)
+        val forwardTo = json.optString("forward_to", "")
+        com.cubeos.meshsat.sms.SmsReceiver.autoForwardTo = forwardTo
+        return jsonOk(JSONObject().put("status", "ok").put("forward_to", forwardTo))
     }
 
     // --- Helpers ---
