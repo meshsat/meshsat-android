@@ -127,6 +127,12 @@ fun SettingsScreen(navController: NavController? = null) {
     val aprsIsBeaconEnabled by settings.aprsIsBeaconEnabled.collectAsState(initial = false)
     val aprsIsBeaconInterval by settings.aprsIsBeaconInterval.collectAsState(initial = "10")
 
+    // TAK settings (MESHSAT-451)
+    val takEnabled by settings.takEnabled.collectAsState(initial = false)
+    val takCallsignPrefix by settings.takCallsignPrefix.collectAsState(initial = "MESHSAT")
+    val takAtakBroadcast by settings.takAtakBroadcast.collectAsState(initial = true)
+    val takMqttExport by settings.takMqttExport.collectAsState(initial = true)
+
     // RNS TCP settings (MESHSAT-268)
     val rnsTcpEnabled by settings.rnsTcpEnabled.collectAsState(initial = false)
     val rnsTcpHost by settings.rnsTcpHost.collectAsState(initial = "")
@@ -160,6 +166,9 @@ fun SettingsScreen(navController: NavController? = null) {
     var aprsIsFilterRangeInput by remember(aprsIsFilterRange) { mutableStateOf(aprsIsFilterRange) }
     var aprsIsBeaconIntervalInput by remember(aprsIsBeaconInterval) { mutableStateOf(aprsIsBeaconInterval) }
     val aprsIsState = GatewayService.aprsIsClient?.state?.collectAsState()
+
+    // TAK state (MESHSAT-451)
+    var takCallsignPrefixInput by remember(takCallsignPrefix) { mutableStateOf(takCallsignPrefix) }
 
     // RNS TCP state (MESHSAT-268)
     var rnsTcpHostInput by remember(rnsTcpHost) { mutableStateOf(rnsTcpHost) }
@@ -1393,6 +1402,81 @@ fun SettingsScreen(navController: NavController? = null) {
                         "No APRSDroid or radio needed. Use passcode -1 for receive-only, or Auto to calculate from callsign. " +
                         "Position beacon sends GPS location at the configured interval."
                 },
+                style = MaterialTheme.typography.bodySmall,
+                color = MeshSatTextMuted,
+            )
+        }
+
+        // --- TAK / CoT Section (MESHSAT-451) ---
+        SectionCard("TAK / CoT") {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Enable TAK", style = MaterialTheme.typography.bodyMedium)
+                Switch(
+                    checked = takEnabled,
+                    onCheckedChange = { scope.launch { settings.setTakEnabled(it) } },
+                    colors = SwitchDefaults.colors(checkedTrackColor = MeshSatTeal),
+                )
+            }
+
+            OutlinedTextField(
+                value = takCallsignPrefixInput,
+                onValueChange = { takCallsignPrefixInput = it.uppercase().take(10) },
+                label = { Text("Callsign Prefix", style = MaterialTheme.typography.bodySmall) },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = MeshSatTeal,
+                    unfocusedBorderColor = MeshSatBorder,
+                ),
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("ATAK Broadcast", style = MaterialTheme.typography.bodySmall)
+                Switch(
+                    checked = takAtakBroadcast,
+                    onCheckedChange = { scope.launch { settings.setTakAtakBroadcast(it) } },
+                    colors = SwitchDefaults.colors(checkedTrackColor = MeshSatTeal),
+                )
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("MQTT Export to Hub", style = MaterialTheme.typography.bodySmall)
+                Switch(
+                    checked = takMqttExport,
+                    onCheckedChange = { scope.launch { settings.setTakMqttExport(it) } },
+                    colors = SwitchDefaults.colors(checkedTrackColor = MeshSatTeal),
+                )
+            }
+
+            Button(
+                onClick = {
+                    scope.launch {
+                        settings.setTakCallsignPrefix(takCallsignPrefixInput)
+                    }
+                    GatewayService.takIntegration?.updateOutputFlags(takAtakBroadcast, takMqttExport)
+                    android.widget.Toast.makeText(context, "TAK settings saved", android.widget.Toast.LENGTH_SHORT).show()
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = MeshSatTeal),
+            ) {
+                Text("Save", style = MaterialTheme.typography.bodySmall)
+            }
+
+            Text(
+                text = "Generates CoT (Cursor on Target) events for positions, SOS, telemetry, and chat. " +
+                    "ATAK Broadcast sends locally to ATAK if installed. MQTT Export sends to Hub for relay to a TAK server. " +
+                    "Callsign format: PREFIX-XXXX (last 4 hex of device ID). Restart service after changing prefix.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MeshSatTextMuted,
             )

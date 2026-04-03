@@ -88,6 +88,12 @@ class SettingsRepository(private val context: Context) {
         val KEY_HUB_CLIENT_KEY = stringPreferencesKey("hub_client_key_pem")
         val KEY_HUB_CA_CERT = stringPreferencesKey("hub_ca_cert_pem")
 
+        // TAK settings (MESHSAT-451)
+        val KEY_TAK_ENABLED = booleanPreferencesKey("tak_enabled")
+        val KEY_TAK_CALLSIGN_PREFIX = stringPreferencesKey("tak_callsign_prefix")
+        val KEY_TAK_ATAK_BROADCAST = booleanPreferencesKey("tak_atak_broadcast")
+        val KEY_TAK_MQTT_EXPORT = booleanPreferencesKey("tak_mqtt_export")
+
         // APRS-IS settings (MESHSAT-230)
         val KEY_APRS_MODE = stringPreferencesKey("aprs_mode") // "kiss" or "is"
         val KEY_APRS_IS_SERVER = stringPreferencesKey("aprs_is_server")
@@ -429,6 +435,40 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setAprsIsBeaconInterval(interval: String) {
         context.dataStore.edit { it[KEY_APRS_IS_BEACON_INTERVAL] = interval }
+    }
+
+    // --- TAK settings (MESHSAT-451) ---
+
+    val takEnabled: Flow<Boolean> = context.dataStore.data.map {
+        it[KEY_TAK_ENABLED] ?: false
+    }
+
+    val takCallsignPrefix: Flow<String> = context.dataStore.data.map {
+        it[KEY_TAK_CALLSIGN_PREFIX] ?: "MESHSAT"
+    }
+
+    val takAtakBroadcast: Flow<Boolean> = context.dataStore.data.map {
+        it[KEY_TAK_ATAK_BROADCAST] ?: true
+    }
+
+    val takMqttExport: Flow<Boolean> = context.dataStore.data.map {
+        it[KEY_TAK_MQTT_EXPORT] ?: true
+    }
+
+    suspend fun setTakEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[KEY_TAK_ENABLED] = enabled }
+    }
+
+    suspend fun setTakCallsignPrefix(prefix: String) {
+        context.dataStore.edit { it[KEY_TAK_CALLSIGN_PREFIX] = prefix }
+    }
+
+    suspend fun setTakAtakBroadcast(enabled: Boolean) {
+        context.dataStore.edit { it[KEY_TAK_ATAK_BROADCAST] = enabled }
+    }
+
+    suspend fun setTakMqttExport(enabled: Boolean) {
+        context.dataStore.edit { it[KEY_TAK_MQTT_EXPORT] = enabled }
     }
 
     // --- Reticulum TCP settings (MESHSAT-268) ---

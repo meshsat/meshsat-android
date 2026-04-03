@@ -535,13 +535,24 @@ class GatewayService : Service() {
                 )
                 Log.i("MeshSat", "RNS MQTT interface initialized for device $mqttDeviceId")
 
-                // Initialize TAK/CoT integration (MESHSAT-191)
+                // Initialize TAK/CoT integration (MESHSAT-191, MESHSAT-451)
+                val takEn = settings.takEnabled.first()
+                val takPrefix = settings.takCallsignPrefix.first().ifBlank { "MESHSAT" }
+                val takAtak = settings.takAtakBroadcast.first()
+                val takMqtt = settings.takMqttExport.first()
                 takIntegration = com.cubeos.meshsat.tak.TakIntegration(
                     context = this@GatewayService,
-                    mqtt = transport,
+                    mqtt = if (takEn) transport else null,
                     deviceId = deviceId,
+                    callsignPrefix = takPrefix,
+                    atakBroadcastEnabled = takAtak,
+                    mqttExportEnabled = takMqtt,
                 )
-                Log.i("MeshSat", "TAK/CoT integration initialized: callsign=${takIntegration?.callsign}")
+                if (!takEn) {
+                    Log.d("MeshSat", "TAK/CoT disabled in settings")
+                } else {
+                    Log.i("MeshSat", "TAK/CoT integration initialized: callsign=${takIntegration?.callsign} atak=$takAtak mqtt=$takMqtt")
+                }
 
                 // Observe state for InterfaceManager
                 scope.launch {

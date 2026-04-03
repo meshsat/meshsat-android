@@ -19,6 +19,8 @@ class TakIntegration(
     private val mqtt: MqttTransport?,
     private val deviceId: String,
     callsignPrefix: String = "MESHSAT",
+    private var atakBroadcastEnabled: Boolean = true,
+    private var mqttExportEnabled: Boolean = true,
 ) {
     companion object {
         private const val TAG = "TakIntegration"
@@ -90,19 +92,27 @@ class TakIntegration(
         }
     }
 
+    /** Update output toggles at runtime (called from Settings). */
+    fun updateOutputFlags(atakBroadcast: Boolean, mqttExport: Boolean) {
+        atakBroadcastEnabled = atakBroadcast
+        mqttExportEnabled = mqttExport
+    }
+
     private fun emit(ev: CotEvent) {
         val xml = CotXml.marshal(ev)
 
-        // Broadcast to ATAK if installed
-        broadcastToAtak(xml)
+        // Broadcast to ATAK if installed and enabled
+        if (atakBroadcastEnabled) broadcastToAtak(xml)
 
-        // Publish to Hub via MQTT
-        mqtt?.publishRaw(
-            "meshsat/$deviceId/tak/cot/out",
-            1, // QoS at-least-once
-            false,
-            xml,
-        )
+        // Publish to Hub via MQTT if enabled
+        if (mqttExportEnabled) {
+            mqtt?.publishRaw(
+                "meshsat/$deviceId/tak/cot/out",
+                1, // QoS at-least-once
+                false,
+                xml,
+            )
+        }
 
         Log.d(TAG, "CoT emitted: type=${ev.type} uid=${ev.uid}")
     }
