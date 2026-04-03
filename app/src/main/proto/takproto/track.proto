@@ -1,0 +1,10 @@
+syntax = "proto3";
+option optimize_for = LITE_RUNTIME;
+option java_package = "com.cubeos.meshsat.takproto";
+option java_multiple_files = true;
+package atakmap.commoncommo.protobuf.v1;
+
+message Track {
+     double speed = 1;
+     double course = 2;
+}

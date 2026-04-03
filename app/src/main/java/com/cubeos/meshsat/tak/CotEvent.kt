@@ -74,6 +74,10 @@ object CotType {
     const val ALARM = "b-a"
     /** GeoChat/freetext message. */
     const val CHAT = "b-t-f"
+    /** Waypoint/map marker. */
+    const val WAYPOINT = "b-m-p-s-p-loc"
+    /** Circle drawing (geofence). */
+    const val CIRCLE = "u-d-c-c"
 }
 
 /** CoT "how" field constants. */

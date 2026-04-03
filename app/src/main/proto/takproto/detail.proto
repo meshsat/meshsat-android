@@ -1,0 +1,22 @@
+syntax = "proto3";
+option optimize_for = LITE_RUNTIME;
+option java_package = "com.cubeos.meshsat.takproto";
+option java_multiple_files = true;
+package atakmap.commoncommo.protobuf.v1;
+
+import "takproto/contact.proto";
+import "takproto/group.proto";
+import "takproto/precisionlocation.proto";
+import "takproto/status.proto";
+import "takproto/takv.proto";
+import "takproto/track.proto";
+
+message Detail {
+ string xmlDetail = 1;
+ Contact contact = 2;
+ Group group = 3;
+ PrecisionLocation precisionLocation = 4;
+ Status status = 5;
+ Takv takv = 6;
+ Track track = 7;
+}

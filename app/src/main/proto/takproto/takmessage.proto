@@ -1,0 +1,13 @@
+syntax = "proto3";
+option optimize_for = LITE_RUNTIME;
+option java_package = "com.cubeos.meshsat.takproto";
+option java_multiple_files = true;
+package atakmap.commoncommo.protobuf.v1;
+
+import "takproto/cotevent.proto";
+import "takproto/takcontrol.proto";
+
+message TakMessage {
+  TakControl takControl = 1;
+  CotEvent cotEvent = 2;
+}

@@ -178,4 +178,54 @@ object CotBuilder {
             ),
         )
     }
+
+    /** Build a waypoint/marker CoT event. */
+    fun waypoint(
+        uid: String,
+        callsign: String,
+        lat: Double,
+        lon: Double,
+        name: String,
+        description: String = "",
+        staleSec: Int = DEFAULT_STALE_SEC,
+    ): CotEvent {
+        val now = nowUtc()
+        val ts = formatTime(now)
+        return CotEvent(
+            type = CotType.WAYPOINT,
+            uid = "$uid-WP-${System.currentTimeMillis().toString(36)}",
+            how = CotHow.HUMAN_ENTERED,
+            time = ts,
+            start = ts,
+            stale = staleTime(now, staleSec),
+            point = CotPoint(lat = lat, lon = lon, hae = 0.0, ce = 10.0, le = 10.0),
+            detail = CotDetail(
+                contact = CotContact(callsign = name),
+                remarks = CotRemarks(source = callsign, text = description),
+            ),
+        )
+    }
+
+    /** Build an enriched position with real GPS quality data. */
+    fun enrichedPosition(
+        uid: String,
+        callsign: String,
+        lat: Double,
+        lon: Double,
+        alt: Double = 0.0,
+        course: Double = 0.0,
+        speed: Double = 0.0,
+        battery: String = "",
+        hdop: Double = 0.0,
+        pdop: Double = 0.0,
+        staleSec: Int = DEFAULT_STALE_SEC,
+    ): CotEvent {
+        val ev = position(uid, callsign, lat, lon, alt, course, speed, battery, staleSec)
+        // CE from HDOP (CE ~ HDOP * 5)
+        val ce = if (hdop > 0) hdop * 5.0 else if (pdop > 0) pdop * 3.0 else 10.0
+        val le = if (pdop > 0) pdop * 4.0 else 10.0
+        return ev.copy(
+            point = ev.point.copy(ce = ce, le = le),
+        )
+    }
 }
