@@ -1,14 +1,14 @@
 package com.cubeos.meshsat.tak
 
-import atakmap.commoncommo.protobuf.v1.CotEvent as PbCotEvent
-import atakmap.commoncommo.protobuf.v1.Detail as PbDetail
-import atakmap.commoncommo.protobuf.v1.TakMessage as PbTakMessage
-import atakmap.commoncommo.protobuf.v1.Contact as PbContact
-import atakmap.commoncommo.protobuf.v1.Group as PbGroup
-import atakmap.commoncommo.protobuf.v1.Track as PbTrack
-import atakmap.commoncommo.protobuf.v1.Status as PbStatus
-import atakmap.commoncommo.protobuf.v1.Takv as PbTakv
-import atakmap.commoncommo.protobuf.v1.PrecisionLocation as PbPrecision
+import com.cubeos.meshsat.takproto.CotEvent as PbCotEvent
+import com.cubeos.meshsat.takproto.Detail as PbDetail
+import com.cubeos.meshsat.takproto.TakMessage as PbTakMessage
+import com.cubeos.meshsat.takproto.Contact as PbContact
+import com.cubeos.meshsat.takproto.Group as PbGroup
+import com.cubeos.meshsat.takproto.Track as PbTrack
+import com.cubeos.meshsat.takproto.Status as PbStatus
+import com.cubeos.meshsat.takproto.Takv as PbTakv
+import com.cubeos.meshsat.takproto.PrecisionLocation as PbPrecision
 import java.text.SimpleDateFormat
 import java.util.*
 
