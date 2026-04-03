@@ -101,7 +101,8 @@ object TakProto {
 
             val contact = if (d != null && d.contact != null && d.contact.callsign.isNotEmpty()) CotContact(d.contact.callsign) else null
             val group = if (d != null && d.group != null && d.group.name.isNotEmpty()) CotGroup(d.group.name, d.group.role) else null
-            val precision = if (d != null && d.precisionLocation != null && d.precisionLocation.geopointsrc.isNotEmpty()) CotPrecision(d.precisionLocation.geopointsrc, d.precisionLocation.altsrc) else null
+            val pl = d?.precisionLocation
+            val precision = if (pl != null && pl.getGeopointsrc().isNotEmpty()) CotPrecision(pl.getGeopointsrc(), pl.getAltsrc()) else null
             val track = if (d != null && d.track != null && (d.track.speed != 0.0 || d.track.course != 0.0)) CotTrack(d.track.speed, d.track.course) else null
             val status = if (d != null && d.status != null && d.status.battery > 0) CotStatus(d.status.battery.toString()) else null
 
