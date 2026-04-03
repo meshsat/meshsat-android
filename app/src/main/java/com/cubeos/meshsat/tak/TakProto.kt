@@ -1,15 +1,14 @@
 package com.cubeos.meshsat.tak
 
-import atakmap.commoncommo.protobuf.v1.CoteventOuterClass
-import atakmap.commoncommo.protobuf.v1.DetailOuterClass
-import atakmap.commoncommo.protobuf.v1.TakmessageOuterClass
+import atakmap.commoncommo.protobuf.v1.CotEvent as PbCotEvent
+import atakmap.commoncommo.protobuf.v1.Detail as PbDetail
+import atakmap.commoncommo.protobuf.v1.TakMessage as PbTakMessage
 import atakmap.commoncommo.protobuf.v1.Contact as PbContact
 import atakmap.commoncommo.protobuf.v1.Group as PbGroup
 import atakmap.commoncommo.protobuf.v1.Track as PbTrack
 import atakmap.commoncommo.protobuf.v1.Status as PbStatus
 import atakmap.commoncommo.protobuf.v1.Takv as PbTakv
-import atakmap.commoncommo.protobuf.v1.Precisionlocation.PrecisionLocation as PbPrecision
-import atakmap.commoncommo.protobuf.v1.TakcontrolOuterClass.TakControl as PbTakControl
+import atakmap.commoncommo.protobuf.v1.PrecisionLocation as PbPrecision
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -35,7 +34,7 @@ object TakProto {
         val startTime = parseTime(ev.start)
         val staleTime = parseTime(ev.stale)
 
-        val cotBuilder = CoteventOuterClass.CotEvent.newBuilder()
+        val cotBuilder = PbCotEvent.newBuilder()
             .setType(ev.type)
             .setUid(ev.uid)
             .setHow(ev.how)
@@ -48,7 +47,7 @@ object TakProto {
             .setCe(ev.point.ce)
             .setLe(ev.point.le)
 
-        val detailBuilder = DetailOuterClass.Detail.newBuilder()
+        val detailBuilder = PbDetail.newBuilder()
         ev.detail?.contact?.let {
             detailBuilder.setContact(PbContact.newBuilder().setCallsign(it.callsign))
         }
@@ -75,7 +74,7 @@ object TakProto {
 
         cotBuilder.setDetail(detailBuilder)
 
-        val takMsg = TakmessageOuterClass.TakMessage.newBuilder()
+        val takMsg = PbTakMessage.newBuilder()
             .setCotEvent(cotBuilder)
             .build()
 
@@ -96,15 +95,15 @@ object TakProto {
     /** Parse a TAK protobuf TakMessage back to CotEvent. */
     fun protoToCotEvent(data: ByteArray): CotEvent? {
         return try {
-            val msg = TakmessageOuterClass.TakMessage.parseFrom(data)
+            val msg = PbTakMessage.parseFrom(data)
             val c = msg.cotEvent ?: return null
             val d = c.detail
 
-            val contact = if (d != null && d.hasContact()) CotContact(d.contact.callsign) else null
-            val group = if (d != null && d.hasGroup()) CotGroup(d.group.name, d.group.role) else null
-            val precision = if (d != null && d.hasPrecisionLocation()) CotPrecision(d.precisionLocation.geopointsrc, d.precisionLocation.altsrc) else null
-            val track = if (d != null && d.hasTrack()) CotTrack(d.track.speed, d.track.course) else null
-            val status = if (d != null && d.hasStatus() && d.status.battery > 0) CotStatus(d.status.battery.toString()) else null
+            val contact = if (d != null && d.contact != null && d.contact.callsign.isNotEmpty()) CotContact(d.contact.callsign) else null
+            val group = if (d != null && d.group != null && d.group.name.isNotEmpty()) CotGroup(d.group.name, d.group.role) else null
+            val precision = if (d != null && d.precisionLocation != null && d.precisionLocation.geopointsrc.isNotEmpty()) CotPrecision(d.precisionLocation.geopointsrc, d.precisionLocation.altsrc) else null
+            val track = if (d != null && d.track != null && (d.track.speed != 0.0 || d.track.course != 0.0)) CotTrack(d.track.speed, d.track.course) else null
+            val status = if (d != null && d.status != null && d.status.battery > 0) CotStatus(d.status.battery.toString()) else null
 
             CotEvent(
                 type = c.type,
