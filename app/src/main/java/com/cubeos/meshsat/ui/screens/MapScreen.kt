@@ -303,16 +303,17 @@ private fun OsmdroidMap(
                 }
             }
 
-            // Mesh node markers
+            // Mesh node markers — TAK/CoT-compliant icons
             nodes.forEach { node ->
                 val marker = Marker(mv)
                 marker.position = GeoPoint(node.latitude, node.longitude)
                 val name = node.nodeName.ifBlank { MeshtasticProtocol.formatNodeId(node.nodeId) }
                 val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(node.timestamp))
+                val stale = (System.currentTimeMillis() - node.timestamp) > 300_000 // 5 min
                 marker.title = name
-                marker.snippet = "Alt: ${node.altitude}m  ${time}"
-                marker.icon = createDotDrawable(mv, 0xFF06B6D4.toInt(), 0xFF0D9488.toInt(), 16)
-                marker.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                marker.snippet = "Alt: ${node.altitude}m  ${time}" + if (stale) " (stale)" else ""
+                marker.icon = createCotDrawable(mv, 0xFF4A90D9.toInt(), 0xFFFFFFFF.toInt(), 20, "diamond", name, stale)
+                marker.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
                 mv.overlays.add(marker)
             }
 
@@ -355,17 +356,81 @@ private fun OsmdroidMap(
 }
 
 private fun createDotDrawable(mapView: MapView, fillColor: Int, strokeColor: Int, sizeDp: Int): BitmapDrawable {
+    return createCotDrawable(mapView, fillColor, strokeColor, sizeDp, "diamond", null, false)
+}
+
+/**
+ * Create a TAK/CoT-compliant marker drawable.
+ * Shapes: "diamond" (friendly unit), "square" (infrastructure), "pushpin" (waypoint),
+ * "emergency" (SOS), "circle" (sensor/self).
+ */
+private fun createCotDrawable(
+    mapView: MapView,
+    fillColor: Int,
+    strokeColor: Int,
+    sizeDp: Int,
+    shape: String = "diamond",
+    callsign: String? = null,
+    stale: Boolean = false,
+): BitmapDrawable {
     val density = mapView.resources.displayMetrics.density
     val sizePx = (sizeDp * density).toInt()
-    val bitmap = android.graphics.Bitmap.createBitmap(sizePx, sizePx, android.graphics.Bitmap.Config.ARGB_8888)
+    val heightPx = if (callsign != null) (sizePx * 1.4f).toInt() else sizePx
+    val bitmap = android.graphics.Bitmap.createBitmap(sizePx, heightPx, android.graphics.Bitmap.Config.ARGB_8888)
     val canvas = Canvas(bitmap)
     val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     val cx = sizePx / 2f
+    val cy = sizePx / 2f
     val r = sizePx / 2f - 2 * density
-    paint.style = Paint.Style.FILL; paint.color = fillColor
-    canvas.drawCircle(cx, cx, r, paint)
-    paint.style = Paint.Style.STROKE; paint.color = strokeColor; paint.strokeWidth = 2 * density
-    canvas.drawCircle(cx, cx, r, paint)
+
+    val alpha = if (stale) 115 else 255 // 45% or 100%
+
+    when (shape) {
+        "diamond" -> {
+            val path = android.graphics.Path()
+            path.moveTo(cx, 2 * density)
+            path.lineTo(sizePx - 2 * density, cy)
+            path.lineTo(cx, sizePx - 2 * density)
+            path.lineTo(2 * density, cy)
+            path.close()
+            paint.style = Paint.Style.FILL; paint.color = fillColor; paint.alpha = alpha
+            canvas.drawPath(path, paint)
+            paint.style = Paint.Style.STROKE; paint.color = strokeColor; paint.strokeWidth = 2 * density; paint.alpha = 255
+            canvas.drawPath(path, paint)
+        }
+        "square" -> {
+            paint.style = Paint.Style.FILL; paint.color = fillColor; paint.alpha = alpha
+            canvas.drawRoundRect(3 * density, 3 * density, sizePx - 3 * density, sizePx - 3 * density, 3 * density, 3 * density, paint)
+            paint.style = Paint.Style.STROKE; paint.color = strokeColor; paint.strokeWidth = 2 * density; paint.alpha = 255
+            canvas.drawRoundRect(3 * density, 3 * density, sizePx - 3 * density, sizePx - 3 * density, 3 * density, 3 * density, paint)
+        }
+        "emergency" -> {
+            paint.style = Paint.Style.FILL; paint.color = fillColor; paint.alpha = alpha
+            canvas.drawCircle(cx, cy, r, paint)
+            paint.style = Paint.Style.STROKE; paint.color = 0xFFFFFFFF.toInt(); paint.strokeWidth = 3 * density
+            canvas.drawLine(cx - r * 0.5f, cy - r * 0.5f, cx + r * 0.5f, cy + r * 0.5f, paint)
+            canvas.drawLine(cx + r * 0.5f, cy - r * 0.5f, cx - r * 0.5f, cy + r * 0.5f, paint)
+        }
+        else -> { // "circle" or default
+            paint.style = Paint.Style.FILL; paint.color = fillColor; paint.alpha = alpha
+            canvas.drawCircle(cx, cy, r, paint)
+            paint.style = Paint.Style.STROKE; paint.color = strokeColor; paint.strokeWidth = 2 * density; paint.alpha = 255
+            canvas.drawCircle(cx, cy, r, paint)
+        }
+    }
+
+    // Callsign label
+    if (callsign != null) {
+        paint.reset()
+        paint.isAntiAlias = true
+        paint.color = 0xFFFFFFFF.toInt()
+        paint.textSize = 9 * density
+        paint.textAlign = Paint.Align.CENTER
+        paint.setShadowLayer(2 * density, 0f, 1 * density, 0xFF000000.toInt())
+        val label = if (callsign.length > 8) callsign.takeLast(6) else callsign
+        canvas.drawText(label, cx, sizePx + 10 * density, paint)
+    }
+
     return BitmapDrawable(mapView.resources, bitmap)
 }
 
