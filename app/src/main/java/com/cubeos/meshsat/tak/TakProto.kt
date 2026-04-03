@@ -55,7 +55,7 @@ object TakProto {
             detailBuilder.setGroup(PbGroup.newBuilder().setName(it.name).setRole(it.role))
         }
         ev.detail?.precision?.let {
-            detailBuilder.setPrecisionLocation(PbPrecision.newBuilder().setGeopointsrc(it.geopointsrc).setAltsrc(it.altsrc))
+            detailBuilder.setPrecisionLocation(PbPrecision.newBuilder().setGeopointsrc(it.geoPointSrc).setAltsrc(it.altSrc))
         }
         ev.detail?.track?.let {
             detailBuilder.setTrack(PbTrack.newBuilder().setSpeed(it.speed).setCourse(it.course))
