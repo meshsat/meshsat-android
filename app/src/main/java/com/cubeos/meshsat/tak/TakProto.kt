@@ -98,6 +98,13 @@ object TakProto {
         return try {
             val msg = TakmessageOuterClass.TakMessage.parseFrom(data)
             val c = msg.cotEvent ?: return null
+            val d = c.detail
+
+            val contact = if (d != null && d.hasContact()) CotContact(d.contact.callsign) else null
+            val group = if (d != null && d.hasGroup()) CotGroup(d.group.name, d.group.role) else null
+            val precision = if (d != null && d.hasPrecisionLocation()) CotPrecision(d.precisionLocation.geopointsrc, d.precisionLocation.altsrc) else null
+            val track = if (d != null && d.hasTrack()) CotTrack(d.track.speed, d.track.course) else null
+            val status = if (d != null && d.hasStatus() && d.status.battery > 0) CotStatus(d.status.battery.toString()) else null
 
             CotEvent(
                 type = c.type,
@@ -114,11 +121,11 @@ object TakProto {
                     le = c.le,
                 ),
                 detail = CotDetail(
-                    contact = c.detail?.contact?.let { CotContact(it.callsign) },
-                    group = c.detail?.group?.let { CotGroup(it.name, it.role) },
-                    precision = c.detail?.precisionLocation?.let { CotPrecision(it.geopointsrc, it.altsrc) },
-                    track = c.detail?.track?.let { CotTrack(it.speed, it.course) },
-                    status = c.detail?.status?.let { CotStatus(it.battery.toString()) },
+                    contact = contact,
+                    group = group,
+                    precision = precision,
+                    track = track,
+                    status = status,
                 ),
             )
         } catch (e: Exception) {
