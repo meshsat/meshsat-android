@@ -234,6 +234,9 @@ private fun OsmdroidMap(
 ) {
     val context = LocalContext.current
 
+    // Track whether we've done the initial zoom-to-fit (only do it once)
+    val hasFittedBounds = remember { mutableStateOf(false) }
+
     // MapView is created once and NEVER destroyed (lives outside NavHost)
     val mapView = remember {
         Configuration.getInstance().apply {
@@ -338,16 +341,19 @@ private fun OsmdroidMap(
                 mv.overlays.add(phoneMarker)
             }
 
-            // Auto-fit bounds
-            val allPoints = mutableListOf<GeoPoint>()
-            nodes.forEach { allPoints.add(GeoPoint(it.latitude, it.longitude)) }
-            phoneLocation?.let { allPoints.add(GeoPoint(it.latitude, it.longitude)) }
-            if (allPoints.size >= 2) {
-                val bbox = BoundingBox.fromGeoPoints(allPoints)
-                mv.post { mv.zoomToBoundingBox(bbox, true, 60) }
-            } else if (allPoints.size == 1) {
-                mv.controller.setCenter(allPoints[0])
-                mv.controller.setZoom(13.0)
+            // Auto-fit bounds (only on first load to avoid ANR from repeated zoomToBoundingBox)
+            if (!hasFittedBounds.value && nodes.isNotEmpty()) {
+                hasFittedBounds.value = true
+                val allPoints = mutableListOf<GeoPoint>()
+                nodes.forEach { allPoints.add(GeoPoint(it.latitude, it.longitude)) }
+                phoneLocation?.let { allPoints.add(GeoPoint(it.latitude, it.longitude)) }
+                if (allPoints.size >= 2) {
+                    val bbox = BoundingBox.fromGeoPoints(allPoints)
+                    mv.post { mv.zoomToBoundingBox(bbox, true, 60) }
+                } else if (allPoints.size == 1) {
+                    mv.controller.setCenter(allPoints[0])
+                    mv.controller.setZoom(13.0)
+                }
             }
 
             mv.invalidate()
