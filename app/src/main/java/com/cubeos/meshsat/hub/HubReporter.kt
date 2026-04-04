@@ -154,10 +154,13 @@ class HubReporter(
                 _state.value = State.Connected
                 Log.i(TAG, "Connected to Hub at ${config.hubUrl}")
 
-                // Subscribe to command topic
+                // Subscribe to command topic + TAK broadcast
                 mqttClient.subscribe(
-                    HubTopics.bridgeCmd(config.bridgeId),
-                    QOS_AT_LEAST_ONCE,
+                    arrayOf(
+                        HubTopics.bridgeCmd(config.bridgeId),
+                        "meshsat/broadcast/tak/cot/in",
+                    ),
+                    intArrayOf(QOS_AT_LEAST_ONCE, QOS_AT_LEAST_ONCE),
                 )
 
                 // Publish birth certificate
@@ -359,7 +362,15 @@ class HubReporter(
         )
     }
 
+    /** External handler for TAK CoT XML received via Hub broadcast. */
+    var onTakCot: ((String) -> Unit)? = null
+
     private fun handleInbound(topic: String, payload: String) {
+        // TAK CoT broadcast from Hub OTS poller
+        if (topic.contains("/tak/cot/in")) {
+            onTakCot?.invoke(payload)
+            return
+        }
         if (!topic.endsWith("/cmd")) return
         try {
             val json = JSONObject(payload)

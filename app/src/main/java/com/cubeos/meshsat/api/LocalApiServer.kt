@@ -37,6 +37,7 @@ class LocalApiServer(
     private val configManager: ConfigManager?,
     private val restartCallback: (() -> Unit)? = null,
     private val smsSendCallback: ((to: String, text: String) -> Unit)? = null,
+    private val hubSettingsCallback: ((Map<String, String>) -> Unit)? = null,
 ) : NanoHTTPD("127.0.0.1", port) {
 
     override fun serve(session: IHTTPSession): Response {
@@ -84,6 +85,9 @@ class LocalApiServer(
             method == Method.POST && uri == "/api/sms/send" -> handleSmsSend(session)
             method == Method.POST && uri == "/api/sms/auto-forward" -> handleSmsAutoForward(session)
             method == Method.GET && uri == "/api/sms/auto-forward" -> jsonOk(JSONObject().put("forward_to", com.cubeos.meshsat.sms.SmsReceiver.autoForwardTo))
+
+            // Settings (localhost only, for E2E automation)
+            method == Method.POST && uri == "/api/settings/hub" -> handleHubSettings(session)
 
             // System
             method == Method.POST && uri == "/api/system/restart" -> handleRestart()
@@ -296,6 +300,19 @@ class LocalApiServer(
         val body = readBody(session)
         val diff = runBlocking { mgr.diff(body) }
         return jsonOk(diff.toJson())
+    }
+
+    // --- Settings ---
+
+    private fun handleHubSettings(session: IHTTPSession): Response {
+        val cb = hubSettingsCallback
+            ?: return jsonError(Response.Status.SERVICE_UNAVAILABLE, "settings not available")
+        val body = readBody(session)
+        val json = JSONObject(body)
+        val settings = mutableMapOf<String, String>()
+        json.keys().forEach { key -> settings[key] = json.optString(key, "") }
+        cb(settings)
+        return jsonOk(JSONObject().apply { put("status", "ok"); put("keys", settings.size) })
     }
 
     // --- System ---

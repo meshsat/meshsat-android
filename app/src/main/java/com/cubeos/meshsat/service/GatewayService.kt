@@ -465,6 +465,21 @@ class GatewayService : Service() {
                     smsSendCallback = { to, text ->
                         scope.launch { sendSmsMessage(text, to) }
                     },
+                    hubSettingsCallback = { settings ->
+                        scope.launch {
+                            val s = com.cubeos.meshsat.data.SettingsRepository(this@GatewayService)
+                            settings["hub_enabled"]?.let { s.setHubEnabled(it.toBoolean()) }
+                            settings["hub_url"]?.let { s.setHubUrl(it) }
+                            settings["hub_bridge_id"]?.let { s.setHubBridgeId(it) }
+                            settings["hub_callsign"]?.let { s.setHubCallsign(it) }
+                            settings["hub_username"]?.let { s.setHubUsername(it) }
+                            settings["hub_password"]?.let { s.setHubPassword(it) }
+                            settings["tak_enabled"]?.let { s.setTakEnabled(it.toBoolean()) }
+                            settings["tak_callsign_prefix"]?.let { s.setTakCallsignPrefix(it) }
+                            settings["tak_mqtt_export"]?.let { s.setTakMqttExport(it.toBoolean()) }
+                            Log.i("MeshSat", "Hub settings updated via API (${settings.size} keys)")
+                        }
+                    },
                 )
                 server.start()
                 localApiServer = server
@@ -627,6 +642,51 @@ class GatewayService : Service() {
                 )
                 reporter.setCommandCallback { cmd ->
                     handleHubCommand(cmd)
+                }
+                // TAK CoT broadcast: parse and store positions in Room DB for map display
+                reporter.onTakCot = { cotXml ->
+                    scope.launch {
+                        try {
+                            // Try TakIntegration first, fall back to direct XML parsing
+                            val tak = takIntegration
+                            val cotEvent = tak?.parseInbound(cotXml)
+                            val lat: Double
+                            val lon: Double
+                            val alt: Int
+                            val sender: String
+                            if (cotEvent != null) {
+                                lat = cotEvent.point.lat
+                                lon = cotEvent.point.lon
+                                alt = cotEvent.point.hae.toInt()
+                                sender = cotEvent.detail?.contact?.callsign ?: cotEvent.uid
+                            } else {
+                                // Direct XML extraction when TakIntegration not initialized
+                                val latM = Regex("""lat="([^"]+)"""").find(cotXml)
+                                val lonM = Regex("""lon="([^"]+)"""").find(cotXml)
+                                val csM = Regex("""callsign="([^"]+)"""").find(cotXml)
+                                val uidM = Regex("""uid="([^"]+)"""").find(cotXml)
+                                lat = latM?.groupValues?.get(1)?.toDoubleOrNull() ?: 0.0
+                                lon = lonM?.groupValues?.get(1)?.toDoubleOrNull() ?: 0.0
+                                alt = 0
+                                sender = csM?.groupValues?.get(1) ?: uidM?.groupValues?.get(1) ?: "unknown"
+                            }
+                            if (lat != 0.0 && lon != 0.0) {
+                                val nodeHash = sender.hashCode().toLong() and 0xFFFFFFFFL
+                                db.nodePositionDao().insert(
+                                    com.cubeos.meshsat.data.NodePosition(
+                                        nodeId = nodeHash,
+                                        nodeName = sender,
+                                        latitude = lat,
+                                        longitude = lon,
+                                        altitude = alt,
+                                    )
+                                )
+                                Log.i("MeshSat", "TAK position stored from Hub: $sender $lat,$lon")
+                            }
+                        } catch (e: Exception) {
+                            Log.w("MeshSat", "TAK CoT parse failed: ${e.message}")
+                        }
+                    }
                 }
                 reporter.start()
                 hubReporter = reporter
