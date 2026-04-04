@@ -259,6 +259,7 @@ class MqttTransport(
         val topics = arrayOf(
             topicMTSend(),
             topicTAKInbound(),
+            topicTAKBroadcast(),    // TAK positions from all bridges via Hub OTS poller
             topicConfigUpdate(),
             topicSmsOutbound(),
             topicReticulumRx(),     // Reticulum packets from Hub (MESHSAT-354)
@@ -301,6 +302,7 @@ class MqttTransport(
     private fun topicHealth() = "meshsat/$deviceId/status/health"
     private fun topicMTSend() = "meshsat/$deviceId/mt/send"
     private fun topicTAKInbound() = "meshsat/$deviceId/tak/cot/in"
+    private fun topicTAKBroadcast() = "meshsat/broadcast/tak/cot/in"
     private fun topicConfigUpdate() = "meshsat/$deviceId/config/update"
     private fun topicSmsInbound() = "meshsat/$deviceId/sms/inbound"
     private fun topicSmsOutbound() = "meshsat/$deviceId/sms/outbound"
