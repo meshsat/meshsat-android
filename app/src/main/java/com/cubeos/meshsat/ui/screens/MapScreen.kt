@@ -1,6 +1,8 @@
 package com.cubeos.meshsat.ui.screens
 
 import android.graphics.Canvas
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.flow.debounce
 import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
 import android.graphics.Paint
@@ -76,11 +78,14 @@ private val TRACK_COLORS = intArrayOf(
     0xFF22C55E.toInt(), 0xFFF59E0B.toInt(), 0xFFEF4444.toInt(),
 )
 
+@OptIn(kotlinx.coroutines.FlowPreview::class)
 @Composable
 fun MapScreen() {
     val context = LocalContext.current
     val db = AppDatabase.getInstance(context)
-    val nodes by db.nodePositionDao().getLatestPerNode().collectAsState(initial = emptyList())
+    // Debounce Room Flow to batch rapid TAK position inserts (prevents ANR from 13+ rebuilds)
+    val nodes by remember { db.nodePositionDao().getLatestPerNode().debounce(500) }
+        .collectAsState(initial = emptyList())
     val phoneLocation by GatewayService.phoneLocation.collectAsState()
 
     var trackPositions by remember { mutableStateOf<List<NodePosition>>(emptyList()) }
