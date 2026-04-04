@@ -346,19 +346,34 @@ private fun OsmdroidMap(
                 mv.overlays.add(phoneMarker)
             }
 
-            // Auto-fit bounds (only on first load to avoid ANR from repeated zoomToBoundingBox)
+            // Auto-fit bounds (only on first load — use direct center+zoom to avoid
+            // osmdroid zoomToBoundingBox ANR from heavy Projection.getCloserPixel math)
             if (!hasFittedBounds.value && nodes.isNotEmpty()) {
                 hasFittedBounds.value = true
-                val allPoints = mutableListOf<GeoPoint>()
-                nodes.forEach { allPoints.add(GeoPoint(it.latitude, it.longitude)) }
-                phoneLocation?.let { allPoints.add(GeoPoint(it.latitude, it.longitude)) }
-                if (allPoints.size >= 2) {
-                    val bbox = BoundingBox.fromGeoPoints(allPoints)
-                    mv.post { mv.zoomToBoundingBox(bbox, true, 60) }
-                } else if (allPoints.size == 1) {
-                    mv.controller.setCenter(allPoints[0])
-                    mv.controller.setZoom(13.0)
+                var minLat = 90.0; var maxLat = -90.0; var minLon = 180.0; var maxLon = -180.0
+                nodes.forEach {
+                    if (it.latitude < minLat) minLat = it.latitude
+                    if (it.latitude > maxLat) maxLat = it.latitude
+                    if (it.longitude < minLon) minLon = it.longitude
+                    if (it.longitude > maxLon) maxLon = it.longitude
                 }
+                phoneLocation?.let {
+                    if (it.latitude < minLat) minLat = it.latitude
+                    if (it.latitude > maxLat) maxLat = it.latitude
+                    if (it.longitude < minLon) minLon = it.longitude
+                    if (it.longitude > maxLon) maxLon = it.longitude
+                }
+                val center = GeoPoint((minLat + maxLat) / 2, (minLon + maxLon) / 2)
+                val span = maxOf(maxLat - minLat, maxLon - minLon)
+                val zoom = when {
+                    span < 0.005 -> 16.0
+                    span < 0.05 -> 14.0
+                    span < 0.5 -> 11.0
+                    span < 5.0 -> 8.0
+                    else -> 5.0
+                }
+                mv.controller.setCenter(center)
+                mv.controller.setZoom(zoom)
             }
 
             mv.invalidate()
