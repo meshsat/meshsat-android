@@ -5,6 +5,8 @@ import com.cubeos.meshsat.channel.ChannelRegistry
 import com.cubeos.meshsat.config.ConfigManager
 import com.cubeos.meshsat.data.AuditLogDao
 import com.cubeos.meshsat.data.MessageDeliveryDao
+import com.cubeos.meshsat.data.TelemetryDao
+import com.cubeos.meshsat.data.TelemetryEntity
 import com.cubeos.meshsat.engine.DeadManSwitch
 import com.cubeos.meshsat.engine.GeofenceMonitor
 import com.cubeos.meshsat.engine.HealthScorer
@@ -31,6 +33,7 @@ class LocalApiServer(
     private val healthScorer: HealthScorer?,
     private val deliveryDao: MessageDeliveryDao?,
     private val auditLogDao: AuditLogDao?,
+    private val telemetryDao: TelemetryDao? = null,
     private val geofenceMonitor: GeofenceMonitor?,
     private val deadManSwitch: DeadManSwitch?,
     private val signingService: SigningService?,
@@ -91,6 +94,14 @@ class LocalApiServer(
 
             // System
             method == Method.POST && uri == "/api/system/restart" -> handleRestart()
+
+            // Telemetry (MESHSAT-494)
+            method == Method.GET && uri == "/api/telemetry/crashes" -> handleTelemetry(session, "crash")
+            method == Method.GET && uri == "/api/telemetry/heap" -> handleTelemetry(session, "heap")
+            method == Method.GET && uri == "/api/telemetry/health" -> handleTelemetry(session, "health")
+            method == Method.GET && uri == "/api/telemetry/events" -> handleTelemetry(session, "event")
+            method == Method.GET && uri == "/api/telemetry" -> handleTelemetryAll(session)
+            method == Method.DELETE && uri == "/api/telemetry" -> handleTelemetryClear()
 
             else -> jsonError(Response.Status.NOT_FOUND, "not found: $uri")
         }
@@ -313,6 +324,57 @@ class LocalApiServer(
         json.keys().forEach { key -> settings[key] = json.optString(key, "") }
         cb(settings)
         return jsonOk(JSONObject().apply { put("status", "ok"); put("keys", settings.size) })
+    }
+
+    // --- Telemetry (MESHSAT-494) ---
+
+    private fun handleTelemetry(session: IHTTPSession, type: String): Response {
+        val dao = telemetryDao ?: return jsonError(Response.Status.SERVICE_UNAVAILABLE, "telemetry not available")
+        val limit = session.parms["limit"]?.toIntOrNull()?.coerceIn(1, 2000) ?: 100
+        val entries = runBlocking { dao.getByType(type, limit) }
+        return jsonOk(telemetryToJson(entries))
+    }
+
+    private fun handleTelemetryAll(session: IHTTPSession): Response {
+        val dao = telemetryDao ?: return jsonError(Response.Status.SERVICE_UNAVAILABLE, "telemetry not available")
+        val limit = session.parms["limit"]?.toIntOrNull()?.coerceIn(1, 2000) ?: 200
+        val entries = runBlocking { dao.getRecent(limit) }
+        val counts = runBlocking {
+            mapOf(
+                "crash" to dao.countByType("crash"),
+                "heap" to dao.countByType("heap"),
+                "health" to dao.countByType("health"),
+                "event" to dao.countByType("event"),
+            )
+        }
+        val json = JSONObject().apply {
+            put("counts", JSONObject(counts as Map<*, *>))
+            put("entries", telemetryToJson(entries))
+        }
+        return jsonOk(json)
+    }
+
+    private fun handleTelemetryClear(): Response {
+        val dao = telemetryDao ?: return jsonError(Response.Status.SERVICE_UNAVAILABLE, "telemetry not available")
+        runBlocking { dao.deleteAll() }
+        return jsonOk(JSONObject().put("status", "cleared"))
+    }
+
+    private fun telemetryToJson(entries: List<TelemetryEntity>): JSONArray {
+        val arr = JSONArray()
+        for (e in entries) {
+            arr.put(JSONObject().apply {
+                put("id", e.id)
+                put("timestamp", e.timestamp)
+                put("type", e.type)
+                put("tag", e.tag)
+                put("severity", e.severity)
+                put("message", e.message)
+                // detail is already a JSON string — parse it so clients don't get doubly-encoded
+                put("detail", try { JSONObject(e.detail) } catch (_: Exception) { e.detail })
+            })
+        }
+        return arr
     }
 
     // --- System ---

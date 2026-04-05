@@ -2092,6 +2092,26 @@ fun SettingsScreen(navController: NavController? = null) {
             }
         }
 
+        // --- Telemetry (MESHSAT-494) ---
+        SectionCard("Release Telemetry") {
+            val telemetryEnabled by settings.telemetryEnabled.collectAsState(initial = true)
+
+            SettingRow("Enable local telemetry") {
+                Switch(
+                    checked = telemetryEnabled,
+                    onCheckedChange = { scope.launch { settings.setTelemetryEnabled(it) } },
+                    colors = SwitchDefaults.colors(checkedTrackColor = MeshSatTeal),
+                )
+            }
+
+            Text(
+                "Captures crashes, heap samples, and health heartbeats locally on this device. " +
+                    "Nothing is sent externally. Retrievable via localhost:6051/api/telemetry.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MeshSatTextMuted,
+            )
+        }
+
         // --- Service ---
         SectionCard("Service") {
             var showRestartDialog by remember { mutableStateOf(false) }

@@ -646,4 +646,20 @@ class SettingsRepository(private val context: Context) {
     suspend fun setDashboardOrder(order: String) {
         context.dataStore.edit { it[stringPreferencesKey("dashboard_card_order")] = order }
     }
+
+    // --- Release telemetry (MESHSAT-494) ---
+
+    /**
+     * Master switch for local release telemetry (crash capture, heap samples,
+     * health heartbeats, explicit events). When disabled, `TelemetryLogger`
+     * writes nothing. Retrievable via the `/api/telemetry` endpoints on localhost.
+     * Defaults to ON — privacy-preserving because nothing leaves the device.
+     */
+    val telemetryEnabled: Flow<Boolean> = context.dataStore.data.map {
+        it[booleanPreferencesKey("telemetry_enabled")] ?: true
+    }
+
+    suspend fun setTelemetryEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[booleanPreferencesKey("telemetry_enabled")] = enabled }
+    }
 }

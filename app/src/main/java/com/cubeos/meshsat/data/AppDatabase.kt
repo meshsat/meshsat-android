@@ -26,8 +26,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         IridiumCreditEntry::class,
         HembBondGroupEntity::class,
         BridgeTrustEntity::class,
+        TelemetryEntity::class,
     ],
-    version = 13,
+    version = 14,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -48,6 +49,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun iridiumCreditDao(): IridiumCreditDao
     abstract fun hembBondGroupDao(): HembBondGroupDao
     abstract fun bridgeTrustDao(): BridgeTrustDao
+    abstract fun telemetryDao(): TelemetryDao
 
     companion object {
         @Volatile
@@ -187,6 +189,25 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /** Migration 13→14: Release telemetry ring buffer [MESHSAT-494]. */
+        val MIGRATION_13_14 = object : Migration(13, 14) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS telemetry (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        timestamp INTEGER NOT NULL,
+                        type TEXT NOT NULL,
+                        tag TEXT NOT NULL,
+                        severity TEXT NOT NULL,
+                        message TEXT NOT NULL,
+                        detail TEXT NOT NULL
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_telemetry_timestamp ON telemetry(timestamp)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_telemetry_type ON telemetry(type)")
+            }
+        }
+
         fun getInstance(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
@@ -197,6 +218,7 @@ abstract class AppDatabase : RoomDatabase() {
                     .addMigrations(
                         MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9,
                         MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13,
+                        MIGRATION_13_14,
                     )
                     .fallbackToDestructiveMigration()
                     .build()

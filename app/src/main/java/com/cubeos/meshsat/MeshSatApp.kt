@@ -3,6 +3,7 @@ package com.cubeos.meshsat
 import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import com.cubeos.meshsat.engine.TelemetryLogger
 import org.bouncycastle.jce.provider.BouncyCastleProvider
 import java.security.Security
 
@@ -15,6 +16,14 @@ class MeshSatApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // Install the uncaught exception handler FIRST so any crash during
+        // later init (BC registration, notification channels, etc.) is still
+        // captured to pending_crash.json for next-startup recovery. See
+        // TelemetryLogger.installCrashHandler for the ACRA-style pattern —
+        // this intentionally does NOT touch Room or coroutines because the
+        // process may be dying when it fires (MESHSAT-494).
+        TelemetryLogger.installCrashHandler(this)
+
         // Android 16 only exposes Ed25519/X25519 via AndroidKeyStore, which won't
         // export raw private keys. Register BouncyCastle so callers can request
         // it explicitly by name (see Identity.kt / SigningService.kt).

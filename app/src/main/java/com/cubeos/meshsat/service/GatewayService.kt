@@ -63,6 +63,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
@@ -183,6 +184,10 @@ class GatewayService : Service() {
         var passScheduler: com.cubeos.meshsat.satellite.PassScheduler? = null
             private set
 
+        // Release telemetry ring buffer (MESHSAT-494)
+        var telemetryLogger: com.cubeos.meshsat.engine.TelemetryLogger? = null
+            private set
+
         private var notificationId = 100
 
         /**
@@ -257,6 +262,7 @@ class GatewayService : Service() {
             loadRulesFromDb()
             deduplicator.startPruner(scope)
             initInterfaceManager()
+            initTelemetry()
             initDispatcher()
             initFieldIntelligence()
             initSigningAndApi()
@@ -424,6 +430,69 @@ class GatewayService : Service() {
     }
 
     /**
+     * Initialize release telemetry ring buffer (MESHSAT-494): recover any
+     * pending crash dump from the previous launch, install the periodic heap
+     * and health samplers, and record a service-start event.
+     */
+    private fun initTelemetry() {
+        val logger = com.cubeos.meshsat.engine.TelemetryLogger(
+            dao = db.telemetryDao(),
+            scope = scope,
+            enabledProvider = { settings.telemetryEnabled.first() },
+        )
+        telemetryLogger = logger
+
+        scope.launch {
+            // 1. Recover any crash from the previous launch (must come before
+            //    the heap sampler fires so the crash is earlier in the timeline)
+            logger.recoverPendingCrashes(this@GatewayService)
+
+            // 2. Service-start event
+            logger.recordEvent(
+                tag = "GatewayService",
+                message = "Service started (v${com.cubeos.meshsat.BuildConfig.VERSION_NAME})",
+                detail = mapOf(
+                    "versionCode" to com.cubeos.meshsat.BuildConfig.VERSION_CODE,
+                    "versionName" to com.cubeos.meshsat.BuildConfig.VERSION_NAME,
+                    "deviceModel" to "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}",
+                    "osVersion" to "${android.os.Build.VERSION.RELEASE} (API ${android.os.Build.VERSION.SDK_INT})",
+                ),
+            )
+
+            // 3. Heap sampler — every 5 minutes
+            scope.launch {
+                while (isActive) {
+                    logger.recordHeap()
+                    delay(5 * 60 * 1000L)
+                }
+            }
+
+            // 4. Health heartbeat — every 60 seconds
+            scope.launch {
+                while (isActive) {
+                    val ifaces = interfaceManager?.getAllStatus() ?: emptyList()
+                    val online = ifaces.count { it.state.isAvailable }
+                    val mode = passScheduler?.mode?.value?.name ?: "none"
+                    logger.recordHealth(
+                        message = "iface ${online}/${ifaces.size} online, pass mode $mode",
+                        detail = mapOf(
+                            "interfacesOnline" to online,
+                            "interfacesTotal" to ifaces.size,
+                            "passMode" to mode,
+                            "deadManTriggered" to (deadManSwitch?.isTriggered() ?: false),
+                            "sosActive" to _sosActive.value,
+                            "foregroundService" to true,
+                        ),
+                    )
+                    delay(60 * 1000L)
+                }
+            }
+
+            Log.i("MeshSat", "Telemetry initialized (heap+health samplers started)")
+        }
+    }
+
+    /**
      * Initialize Phase F: signing service, config manager, and local REST API server.
      * Uses SharedPreferences as KeyValueStore for Ed25519 keypair persistence.
      */
@@ -452,6 +521,7 @@ class GatewayService : Service() {
                     healthScorer = healthScorer,
                     deliveryDao = db.messageDeliveryDao(),
                     auditLogDao = db.auditLogDao(),
+                    telemetryDao = db.telemetryDao(),
                     geofenceMonitor = geofenceMonitor,
                     deadManSwitch = deadManSwitch,
                     signingService = signing,
