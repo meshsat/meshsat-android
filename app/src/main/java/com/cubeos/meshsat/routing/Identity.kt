@@ -53,7 +53,7 @@ class Identity private constructor(
 
     /** Sign data with Ed25519. Returns 64-byte signature. */
     fun sign(data: ByteArray): ByteArray = lock.read {
-        val sig = Signature.getInstance("Ed25519")
+        val sig = Signature.getInstance("Ed25519", "BC")
         sig.initSign(signingPrivate)
         sig.update(data)
         sig.sign()
@@ -120,8 +120,8 @@ class Identity private constructor(
          * providing software Ed25519/X25519 on all Android versions including 16+.
          */
         fun generate(): Identity {
-            val sigKp = KeyPairGenerator.getInstance("Ed25519").generateKeyPair()
-            val encKp = KeyPairGenerator.getInstance("X25519").generateKeyPair()
+            val sigKp = KeyPairGenerator.getInstance("Ed25519", "BC").generateKeyPair()
+            val encKp = KeyPairGenerator.getInstance("X25519", "BC").generateKeyPair()
             return Identity(sigKp.private, sigKp.public, encKp.private, encKp.public)
         }
 
@@ -131,11 +131,11 @@ class Identity private constructor(
             encPrivHex: String,
             encPubHex: String,
         ): Identity {
-            val edFactory = KeyFactory.getInstance("Ed25519")
+            val edFactory = KeyFactory.getInstance("Ed25519", "BC")
             val sigPriv = edFactory.generatePrivate(PKCS8EncodedKeySpec(sigPrivHex.hexToBytes()))
             val sigPub = edFactory.generatePublic(X509EncodedKeySpec(sigPubHex.hexToBytes()))
 
-            val xFactory = KeyFactory.getInstance("X25519")
+            val xFactory = KeyFactory.getInstance("X25519", "BC")
             val encPriv = xFactory.generatePrivate(PKCS8EncodedKeySpec(encPrivHex.hexToBytes()))
             val encPub = xFactory.generatePublic(X509EncodedKeySpec(encPubHex.hexToBytes()))
 
@@ -153,7 +153,7 @@ class Identity private constructor(
         /** Verify an Ed25519 signature against an arbitrary public key. */
         fun verifyWith(publicKey: PublicKey, data: ByteArray, signature: ByteArray): Boolean {
             return try {
-                val sig = Signature.getInstance("Ed25519")
+                val sig = Signature.getInstance("Ed25519", "BC")
                 sig.initVerify(publicKey)
                 sig.update(data)
                 sig.verify(signature)
@@ -179,11 +179,11 @@ class Identity private constructor(
 
 /** Generate a fresh X25519 ephemeral keypair. */
 internal fun generateX25519KeyPair(): KeyPair =
-    KeyPairGenerator.getInstance("X25519").generateKeyPair()
+    KeyPairGenerator.getInstance("X25519", "BC").generateKeyPair()
 
 /** Perform X25519 ECDH. Returns 32-byte shared secret. */
 internal fun performEcdh(privateKey: PrivateKey, remotePublic: PublicKey): ByteArray {
-    val ka = KeyAgreement.getInstance("X25519")
+    val ka = KeyAgreement.getInstance("X25519", "BC")
     ka.init(privateKey)
     ka.doPhase(remotePublic, true)
     return ka.generateSecret()
@@ -193,14 +193,14 @@ internal fun performEcdh(privateKey: PrivateKey, remotePublic: PublicKey): ByteA
 internal fun rawToEd25519Public(raw: ByteArray): PublicKey {
     require(raw.size == 32) { "Ed25519 public key must be 32 bytes" }
     val der = ED25519_X509_PREFIX + raw
-    return KeyFactory.getInstance("Ed25519").generatePublic(X509EncodedKeySpec(der))
+    return KeyFactory.getInstance("Ed25519", "BC").generatePublic(X509EncodedKeySpec(der))
 }
 
 /** Reconstruct an X25519 PublicKey from raw 32 bytes. */
 internal fun rawToX25519Public(raw: ByteArray): PublicKey {
     require(raw.size == 32) { "X25519 public key must be 32 bytes" }
     val der = X25519_X509_PREFIX + raw
-    return KeyFactory.getInstance("X25519").generatePublic(X509EncodedKeySpec(der))
+    return KeyFactory.getInstance("X25519", "BC").generatePublic(X509EncodedKeySpec(der))
 }
 
 /** Extract raw 32-byte key from X.509 DER-encoded public key. */

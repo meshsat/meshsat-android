@@ -15,11 +15,16 @@ class MeshSatApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        // Android 16 removed Ed25519/X25519 from Conscrypt (only AndroidKeyStore
-        // has them, but it won't export raw private keys). Register BouncyCastle
-        // as the highest-priority provider so standard JCA calls use it.
+        // Android 16 only exposes Ed25519/X25519 via AndroidKeyStore, which won't
+        // export raw private keys. Register BouncyCastle so callers can request
+        // it explicitly by name (see Identity.kt / SigningService.kt).
+        //
+        // IMPORTANT: BC must be appended at the END of the provider chain, NOT
+        // inserted at position 1. Putting BC at position 1 hijacks
+        // SSLContext.getInstance("Default") and breaks Conscrypt's HTTPS stack
+        // (blank map tiles, Hub TLS failure, etc. — see MESHSAT-497).
         Security.removeProvider("BC")  // Remove Android's stripped BC
-        Security.insertProviderAt(BouncyCastleProvider(), 1)
+        Security.addProvider(BouncyCastleProvider())  // Append at lowest priority
         createNotificationChannels()
     }
 

@@ -46,11 +46,11 @@ class SigningService(
         val pubHex = store.get(KEY_PUBLIC)
 
         if (privHex != null && pubHex != null) {
-            val factory = KeyFactory.getInstance("Ed25519")
+            val factory = KeyFactory.getInstance("Ed25519", "BC")
             signingPrivate = factory.generatePrivate(PKCS8EncodedKeySpec(privHex.hexToBytes()))
             signingPublic = factory.generatePublic(X509EncodedKeySpec(pubHex.hexToBytes()))
         } else {
-            val kp = KeyPairGenerator.getInstance("Ed25519").generateKeyPair()
+            val kp = KeyPairGenerator.getInstance("Ed25519", "BC").generateKeyPair()
             signingPrivate = kp.private
             signingPublic = kp.public
             store.set(KEY_PRIVATE, signingPrivate.encoded.toHex())
@@ -67,7 +67,7 @@ class SigningService(
 
     /** Sign data with Ed25519. Returns 64-byte signature. */
     fun sign(data: ByteArray): ByteArray {
-        val sig = Signature.getInstance("Ed25519")
+        val sig = Signature.getInstance("Ed25519", "BC")
         sig.initSign(signingPrivate)
         sig.update(data)
         return sig.sign()
@@ -179,9 +179,9 @@ class SigningService(
                 } else {
                     pubBytes
                 }
-                val pubKey = KeyFactory.getInstance("Ed25519")
+                val pubKey = KeyFactory.getInstance("Ed25519", "BC")
                     .generatePublic(X509EncodedKeySpec(der))
-                val sig = Signature.getInstance("Ed25519")
+                val sig = Signature.getInstance("Ed25519", "BC")
                 sig.initVerify(pubKey)
                 sig.update(data)
                 sig.verify(signature)

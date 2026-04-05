@@ -18,6 +18,12 @@
 -keep class ai.onnxruntime.** { *; }
 -keep class com.microsoft.onnxruntime.** { *; }
 
+# BouncyCastle JCA provider (Ed25519/X25519 — MESHSAT-497)
+# BC registers crypto algorithms via JCA reflection; R8 must not strip provider classes.
+-keep class org.bouncycastle.jce.provider.BouncyCastleProvider { *; }
+-keep class org.bouncycastle.jcajce.** { *; }
+-dontwarn org.bouncycastle.**
+
 # AndroidX Security — EncryptedSharedPreferences (MESHSAT-194)
 -keep class androidx.security.crypto.** { *; }
 -keep class com.cubeos.meshsat.crypto.SecureKeyStore { *; }
