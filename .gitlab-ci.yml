@@ -1,9 +1,9 @@
 # =============================================================================
 # MeshSat Android CI/CD Pipeline
 # =============================================================================
-# - Push to main: build APK (verify)
-# - Tag push (v*): build APK → upload to GitLab Package Registry →
-#                  create GitLab Release → create GitHub Release with APK
+# - Push to main: build debug APK (verify)
+# - Tag push (v*): build signed release APK + AAB → upload to GitLab Package
+#                  Registry → create GitLab Release → create GitHub Release
 # =============================================================================
 
 stages:
@@ -12,36 +12,121 @@ stages:
 
 variables:
   GITHUB_REPO: "cubeos-app/meshsat-android"
+  BAO_ADDR: "https://openbao.nuclearlighters.net:8200"
 
 # =============================================================================
-# Build APK (every push to main + every tag)
+# Build debug APK (every push to main — verification only)
 # =============================================================================
-build:
+build-debug:
   stage: build
   image: cimg/android:2024.10.1
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
-    - if: '$CI_COMMIT_TAG =~ /^v/'
   script:
     - bash ./gradlew assembleDebug
     - |
       APK_PATH=$(find app/build/outputs/apk/debug -name "*.apk" | head -1)
-      VERSION="${CI_COMMIT_TAG:-dev-${CI_COMMIT_SHORT_SHA}}"
-      VERSION="${VERSION#v}"
+      VERSION="dev-${CI_COMMIT_SHORT_SHA}"
       APK_NAME="meshsat-android-${VERSION}-debug.apk"
       cp "$APK_PATH" "$APK_NAME"
-      echo "APK_NAME=${APK_NAME}" >> build.env
-      echo "VERSION=${VERSION}" >> build.env
       echo "Built: ${APK_NAME} ($(du -h ${APK_NAME} | cut -f1))"
   artifacts:
     paths:
-      - "meshsat-android-*.apk"
+      - "meshsat-android-*-debug.apk"
+    expire_in: 7 days
+
+# =============================================================================
+# Build signed release APK + AAB (tag push only)
+# Authenticates to OpenBao via GitLab JWT, fetches signing secrets, builds
+# signed release artifacts for Play Store (AAB) and sideload (APK).
+# =============================================================================
+build-release:
+  stage: build
+  image: cimg/android:2024.10.1
+  id_tokens:
+    BAO_ID_TOKEN:
+      aud: https://gitlab.nuclearlighters.net
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v/'
+  script:
+    - |
+      set -euo pipefail
+      VERSION="${CI_COMMIT_TAG#v}"
+
+      # ── Install CA certificate for OpenBao TLS ──
+      if [ -n "${BAO_CA_CERT:-}" ]; then
+        sudo mkdir -p /usr/local/share/ca-certificates
+        echo "$BAO_CA_CERT" | sudo tee /usr/local/share/ca-certificates/openbao-ca.crt > /dev/null
+        sudo update-ca-certificates
+      fi
+
+      # ── Authenticate to OpenBao via JWT ──
+      echo "Authenticating to OpenBao..."
+      BAO_RESPONSE=$(curl -sf \
+        --request POST \
+        --data "{\"role\": \"gitlab-ci\", \"jwt\": \"${BAO_ID_TOKEN}\"}" \
+        "${BAO_ADDR}/v1/auth/jwt/login")
+      BAO_TOKEN=$(echo "$BAO_RESPONSE" | jq -r '.auth.client_token')
+      if [ -z "$BAO_TOKEN" ] || [ "$BAO_TOKEN" = "null" ]; then
+        echo "ERROR: OpenBao JWT authentication failed."
+        exit 1
+      fi
+      echo "  Authenticated."
+
+      # ── Fetch signing secrets ──
+      echo "Fetching signing secrets..."
+      SECRETS=$(curl -sf \
+        --header "X-Vault-Token: ${BAO_TOKEN}" \
+        "${BAO_ADDR}/v1/secret/data/ci/android-signing")
+      KEYSTORE_B64=$(echo "$SECRETS" | jq -r '.data.data.keystore_b64')
+      export ANDROID_STORE_PASSWORD=$(echo "$SECRETS" | jq -r '.data.data.store_password')
+      export ANDROID_KEY_PASSWORD=$(echo "$SECRETS" | jq -r '.data.data.key_password')
+      export ANDROID_KEY_ALIAS=$(echo "$SECRETS" | jq -r '.data.data.key_alias')
+      if [ -z "$KEYSTORE_B64" ] || [ "$KEYSTORE_B64" = "null" ]; then
+        echo "ERROR: Failed to fetch keystore from OpenBao."
+        exit 1
+      fi
+      echo "  Secrets fetched."
+
+      # ── Decode keystore to temp file ──
+      echo "$KEYSTORE_B64" | base64 -d > /tmp/meshsat-upload.p12
+      export ANDROID_KEYSTORE_FILE="/tmp/meshsat-upload.p12"
+
+      # ── Build signed release APK + AAB ──
+      echo "Building signed release APK + AAB..."
+      bash ./gradlew assembleRelease bundleRelease
+
+      # ── Collect artifacts ──
+      APK_PATH=$(find app/build/outputs/apk/release -name "*.apk" | head -1)
+      AAB_PATH=$(find app/build/outputs/bundle/release -name "*.aab" | head -1)
+      APK_NAME="meshsat-android-${VERSION}-release.apk"
+      AAB_NAME="meshsat-android-${VERSION}-release.aab"
+      cp "$APK_PATH" "$APK_NAME"
+      cp "$AAB_PATH" "$AAB_NAME"
+      echo "APK_NAME=${APK_NAME}" >> build.env
+      echo "AAB_NAME=${AAB_NAME}" >> build.env
+      echo "VERSION=${VERSION}" >> build.env
+      echo "Built: ${APK_NAME} ($(du -h ${APK_NAME} | cut -f1))"
+      echo "Built: ${AAB_NAME} ($(du -h ${AAB_NAME} | cut -f1))"
+
+      # ── Clean up keystore ──
+      rm -f /tmp/meshsat-upload.p12
+
+      # ── Revoke OpenBao token ──
+      curl -sf \
+        --header "X-Vault-Token: ${BAO_TOKEN}" \
+        --request POST \
+        "${BAO_ADDR}/v1/auth/token/revoke-self" || true
+  artifacts:
+    paths:
+      - "meshsat-android-*-release.apk"
+      - "meshsat-android-*-release.aab"
     reports:
       dotenv: build.env
     expire_in: 7 days
 
 # =============================================================================
-# Upload APK to GitLab Package Registry (tag push only)
+# Upload APK + AAB to GitLab Package Registry (tag push only)
 # =============================================================================
 upload-package:
   stage: release
@@ -49,18 +134,20 @@ upload-package:
   rules:
     - if: '$CI_COMMIT_TAG =~ /^v/'
   needs:
-    - job: build
+    - job: build-release
       artifacts: true
   script:
     - apk add --no-cache curl
     - |
       set -e
-      echo "Uploading ${APK_NAME} to GitLab Package Registry..."
-      curl --fail \
-        --header "JOB-TOKEN: ${CI_JOB_TOKEN}" \
-        --upload-file "${APK_NAME}" \
-        "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/meshsat-android/${VERSION}/${APK_NAME}"
-      echo "  Uploaded to Package Registry."
+      for FILE in "$APK_NAME" "$AAB_NAME"; do
+        echo "Uploading ${FILE} to GitLab Package Registry..."
+        curl --fail \
+          --header "JOB-TOKEN: ${CI_JOB_TOKEN}" \
+          --upload-file "${FILE}" \
+          "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/meshsat-android/${VERSION}/${FILE}"
+        echo "  Uploaded ${FILE}."
+      done
 
 # =============================================================================
 # Create GitLab Release (tag push only)
@@ -71,7 +158,7 @@ create-gitlab-release:
   rules:
     - if: '$CI_COMMIT_TAG =~ /^v/'
   needs:
-    - job: build
+    - job: build-release
       artifacts: true
     - job: upload-package
   script:
@@ -84,19 +171,19 @@ create-gitlab-release:
 
       ## Download
 
-      - [${APK_NAME}](${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/meshsat-android/${VERSION}/${APK_NAME})
+      - [${APK_NAME}](${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/meshsat-android/${VERSION}/${APK_NAME}) — Signed APK (sideload)
+      - [${AAB_NAME}](${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/meshsat-android/${VERSION}/${AAB_NAME}) — Signed AAB (Play Store)
     assets:
       links:
         - name: "${APK_NAME}"
           url: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/meshsat-android/${VERSION}/${APK_NAME}"
           link_type: "package"
+        - name: "${AAB_NAME}"
+          url: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/meshsat-android/${VERSION}/${AAB_NAME}"
+          link_type: "package"
 
 # =============================================================================
-# Create GitHub Release with APK asset (tag push only)
-# =============================================================================
-# Mirrors the pattern from releases/.gitlab-ci.yml create-github-release job.
-# The GitLab push mirror syncs tags to GitHub automatically, but release
-# assets (APK) require explicit GitHub API calls.
+# Create GitHub Release with APK + AAB assets (tag push only)
 # =============================================================================
 create-github-release:
   stage: release
@@ -104,7 +191,7 @@ create-github-release:
   rules:
     - if: '$CI_COMMIT_TAG =~ /^v/'
   needs:
-    - job: build
+    - job: build-release
       artifacts: true
   script:
     - apk add --no-cache curl jq
@@ -127,6 +214,7 @@ create-github-release:
       ### Download
 
       Download the APK below and install on your Android device.
+      The AAB is for Play Store distribution.
 
       ### Features
       - Meshtastic BLE radio connection
@@ -161,18 +249,20 @@ create-github-release:
         RELEASE_ID="$EXISTING_ID"
         UPLOAD_URL="https://uploads.github.com/repos/${GITHUB_REPO}/releases/${RELEASE_ID}/assets"
 
-        # Delete existing APK asset if present (re-upload fresh)
+        # Delete existing assets if present (re-upload fresh)
         ASSETS=$(curl -s \
           -H "Authorization: token ${GHCR_TOKEN}" \
           -H "Accept: application/vnd.github+json" \
           "https://api.github.com/repos/${GITHUB_REPO}/releases/${RELEASE_ID}/assets")
-        OLD_ID=$(echo "$ASSETS" | jq -r ".[] | select(.name == \"${APK_NAME}\") | .id // empty")
-        if [ -n "$OLD_ID" ]; then
-          echo "  Deleting old APK asset..."
-          curl -s -X DELETE \
-            -H "Authorization: token ${GHCR_TOKEN}" \
-            "https://api.github.com/repos/${GITHUB_REPO}/releases/assets/${OLD_ID}" > /dev/null
-        fi
+        for ASSET_NAME in "$APK_NAME" "$AAB_NAME"; do
+          OLD_ID=$(echo "$ASSETS" | jq -r ".[] | select(.name == \"${ASSET_NAME}\") | .id // empty")
+          if [ -n "$OLD_ID" ]; then
+            echo "  Deleting old asset: ${ASSET_NAME}..."
+            curl -s -X DELETE \
+              -H "Authorization: token ${GHCR_TOKEN}" \
+              "https://api.github.com/repos/${GITHUB_REPO}/releases/assets/${OLD_ID}" > /dev/null
+          fi
+        done
         echo "  Release updated."
       else
         echo "Creating new release..."
@@ -205,7 +295,25 @@ create-github-release:
       if [ "$HTTP_CODE" = "201" ]; then
         echo "  APK uploaded successfully."
       else
-        echo "  WARN: Upload returned HTTP ${HTTP_CODE}"
+        echo "  WARN: APK upload returned HTTP ${HTTP_CODE}"
+        echo "$UPLOAD_RESP" | sed '$d' | jq . 2>/dev/null || true
+      fi
+
+      # Upload AAB as release asset
+      echo "Uploading ${AAB_NAME} ($(du -h ${AAB_NAME} | cut -f1))..."
+      UPLOAD_RESP=$(curl -s -w "\n%{http_code}" \
+        --max-time 300 \
+        -X POST \
+        -H "Authorization: token ${GHCR_TOKEN}" \
+        -H "Content-Type: application/octet-stream" \
+        "${UPLOAD_URL}?name=${AAB_NAME}" \
+        --data-binary "@${AAB_NAME}")
+
+      HTTP_CODE=$(echo "$UPLOAD_RESP" | tail -1)
+      if [ "$HTTP_CODE" = "201" ]; then
+        echo "  AAB uploaded successfully."
+      else
+        echo "  WARN: AAB upload returned HTTP ${HTTP_CODE}"
         echo "$UPLOAD_RESP" | sed '$d' | jq . 2>/dev/null || true
       fi
 
