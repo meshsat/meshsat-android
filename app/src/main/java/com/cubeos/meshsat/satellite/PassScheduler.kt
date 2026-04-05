@@ -23,9 +23,10 @@ class PassScheduler(
 ) {
     companion object {
         private const val TAG = "PassScheduler"
-        const val MODE_CHECK_INTERVAL_MS = 30_000L // re-evaluate mode every 30s
-        const val PRE_WAKE_WINDOW_MS = 3 * 60 * 1000L // 3 minutes before AOS
-        const val POST_PASS_WINDOW_MS = 2 * 60 * 1000L // 2 minutes after LOS
+        const val MODE_CHECK_INTERVAL_MS = 30_000L // re-evaluate mode every 30s (coroutine delay — ms)
+        // Window constants are in SECONDS to match PassPrediction.aosUnix/losUnix unit (MESHSAT-498)
+        const val PRE_WAKE_WINDOW_SEC = 3 * 60L // 3 minutes before AOS
+        const val POST_PASS_WINDOW_SEC = 2 * 60L // 2 minutes after LOS
     }
 
     enum class PassMode {
@@ -77,7 +78,8 @@ class PassScheduler(
     }
 
     private suspend fun updateMode() {
-        val now = System.currentTimeMillis()
+        // PassPrediction.aosUnix/losUnix are unix SECONDS (MESHSAT-498).
+        val now = System.currentTimeMillis() / 1000
         val passes = try { passProvider() } catch (e: Exception) {
             Log.w(TAG, "Failed to get passes: ${e.message}")
             emptyList()
@@ -95,11 +97,11 @@ class PassScheduler(
                 PassMode.Active
             }
             // Check if we're in post-pass window (just ended)
-            passes.any { now > it.losUnix && now - it.losUnix < POST_PASS_WINDOW_MS } -> {
+            passes.any { now > it.losUnix && now - it.losUnix < POST_PASS_WINDOW_SEC } -> {
                 PassMode.PostPass
             }
             // Check if next pass is within pre-wake window
-            nextPass != null && (nextPass.aosUnix - now) < PRE_WAKE_WINDOW_MS -> {
+            nextPass != null && (nextPass.aosUnix - now) < PRE_WAKE_WINDOW_SEC -> {
                 _nextPassAos.value = nextPass.aosUnix
                 _nextPassLos.value = nextPass.losUnix
                 PassMode.PreWake

@@ -945,11 +945,11 @@ class GatewayService : Service() {
         val iridium = iridiumSpp ?: return
         // Cache pass predictions to avoid recomputing SGP4 every 30s (MESHSAT-498)
         var cachedPasses: List<com.cubeos.meshsat.satellite.PassPrediction> = emptyList()
-        var cacheTimestamp = 0L
+        var cacheTimestampMs = 0L
         val cacheTtlMs = 5 * 60 * 1000L // 5 minutes
         val predictor = {
-            val now = System.currentTimeMillis()
-            if (now - cacheTimestamp < cacheTtlMs && cachedPasses.isNotEmpty()) {
+            val nowMs = System.currentTimeMillis()
+            if (nowMs - cacheTimestampMs < cacheTtlMs && cachedPasses.isNotEmpty()) {
                 cachedPasses
             } else {
                 val allTles = kotlinx.coroutines.runBlocking { db.tleCacheDao().getAll() }
@@ -959,6 +959,9 @@ class GatewayService : Service() {
                     val parsed = allTles.mapNotNull { tle ->
                         com.cubeos.meshsat.satellite.TleParser.parse(tle.satelliteName, tle.line1, tle.line2)
                     }
+                    // PassPredictor expects unix SECONDS. Passing milliseconds would make
+                    // the propagation loop iterate 1000x too many steps and OOM the heap (MESHSAT-498).
+                    val nowSec = nowMs / 1000
                     val passes = parsed.flatMap { tleElements ->
                         try {
                             com.cubeos.meshsat.satellite.PassPredictor.predictPasses(
@@ -966,8 +969,8 @@ class GatewayService : Service() {
                                 lat = loc.latitude,
                                 lon = loc.longitude,
                                 altKm = (loc.altitude / 1000.0),
-                                startUnix = now,
-                                endUnix = now + 6 * 3600_000L,
+                                startUnix = nowSec,
+                                endUnix = nowSec + 6 * 3600L, // 6 hours in seconds
                             )
                         } catch (e: Exception) {
                             Log.w("MeshSat", "SGP4 failed for ${tleElements.name}: ${e.message}")
@@ -979,7 +982,7 @@ class GatewayService : Service() {
                     val elapsedMs = System.currentTimeMillis() - startMs
                     Log.i("MeshSat", "Pass prediction: ${allTles.size} TLEs, ${parsed.size} parsed, ${sorted.size} passes, ${elapsedMs}ms")
                     cachedPasses = sorted
-                    cacheTimestamp = now
+                    cacheTimestampMs = nowMs
                     sorted
                 } else emptyList()
             }
