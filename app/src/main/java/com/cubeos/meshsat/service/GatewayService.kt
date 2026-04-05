@@ -940,27 +940,49 @@ class GatewayService : Service() {
         }
     }
 
-    /** Initialize pass-aware satellite scheduling (MESHSAT-386). */
+    /** Initialize pass-aware satellite scheduling (MESHSAT-386, MESHSAT-498). */
     private fun initPassScheduler() {
         val iridium = iridiumSpp ?: return
+        // Cache pass predictions to avoid recomputing SGP4 every 30s (MESHSAT-498)
+        var cachedPasses: List<com.cubeos.meshsat.satellite.PassPrediction> = emptyList()
+        var cacheTimestamp = 0L
+        val cacheTtlMs = 5 * 60 * 1000L // 5 minutes
         val predictor = {
-            val allTles = kotlinx.coroutines.runBlocking { db.tleCacheDao().getAll() }
-            val loc = _phoneLocation.value
-            if (allTles.isNotEmpty() && loc != null) {
-                val now = System.currentTimeMillis()
-                allTles.mapNotNull { tle ->
-                    com.cubeos.meshsat.satellite.TleParser.parse(tle.satelliteName, tle.line1, tle.line2)
-                }.flatMap { tleElements ->
-                    com.cubeos.meshsat.satellite.PassPredictor.predictPasses(
-                        tle = tleElements,
-                        lat = loc.latitude,
-                        lon = loc.longitude,
-                        altKm = (loc.altitude / 1000.0),
-                        startUnix = now,
-                        endUnix = now + 6 * 3600_000L,
-                    )
-                }.sortedBy { it.aosUnix }
-            } else emptyList()
+            val now = System.currentTimeMillis()
+            if (now - cacheTimestamp < cacheTtlMs && cachedPasses.isNotEmpty()) {
+                cachedPasses
+            } else {
+                val allTles = kotlinx.coroutines.runBlocking { db.tleCacheDao().getAll() }
+                val loc = _phoneLocation.value
+                if (allTles.isNotEmpty() && loc != null) {
+                    val startMs = System.currentTimeMillis()
+                    val parsed = allTles.mapNotNull { tle ->
+                        com.cubeos.meshsat.satellite.TleParser.parse(tle.satelliteName, tle.line1, tle.line2)
+                    }
+                    val passes = parsed.flatMap { tleElements ->
+                        try {
+                            com.cubeos.meshsat.satellite.PassPredictor.predictPasses(
+                                tle = tleElements,
+                                lat = loc.latitude,
+                                lon = loc.longitude,
+                                altKm = (loc.altitude / 1000.0),
+                                startUnix = now,
+                                endUnix = now + 6 * 3600_000L,
+                            )
+                        } catch (e: Exception) {
+                            Log.w("MeshSat", "SGP4 failed for ${tleElements.name}: ${e.message}")
+                            emptyList()
+                        }
+                    }
+                    // Sort using Comparator to avoid Long autoboxing (MESHSAT-498)
+                    val sorted = passes.sortedWith(Comparator { a, b -> a.aosUnix.compareTo(b.aosUnix) })
+                    val elapsedMs = System.currentTimeMillis() - startMs
+                    Log.i("MeshSat", "Pass prediction: ${allTles.size} TLEs, ${parsed.size} parsed, ${sorted.size} passes, ${elapsedMs}ms")
+                    cachedPasses = sorted
+                    cacheTimestamp = now
+                    sorted
+                } else emptyList()
+            }
         }
         val scheduler = com.cubeos.meshsat.satellite.PassScheduler(
             passProvider = predictor,
