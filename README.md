@@ -7,19 +7,18 @@ Native Android app that turns a phone into a standalone field gateway and full R
 
 The phone IS the gateway. No companion app, no server dependency, no internet required.
 
-## Screenshots
-
-| Dashboard | Map | Pass Predictor |
-|:---------:|:---:|:--------------:|
-| ![Dashboard](docs/screenshots/01-dashboard.png) | ![Map](docs/screenshots/03-map.png) | ![Pass Predictor](docs/screenshots/04-pass-predictor.png) |
-
-| Messages | Interfaces | Radio Config |
-|:--------:|:----------:|:------------:|
-| ![Messages](docs/screenshots/10-messages.png) | ![Interfaces](docs/screenshots/06-interfaces.png) | ![Radio Config](docs/screenshots/07-radio-config.png) |
-
-| Peers | Credentials | Audit Log |
-|:-----:|:-----------:|:---------:|
-| ![Peers](docs/screenshots/11-peers.png) | ![Credentials](docs/screenshots/09-credentials.png) | ![Audit Log](docs/screenshots/08-audit-log.png) |
+<table>
+  <tr>
+    <td width="33%"><img src="docs/screenshots/01-dashboard.png" alt="Dashboard" /></td>
+    <td width="33%"><img src="docs/screenshots/03-map.png" alt="Map" /></td>
+    <td width="33%"><img src="docs/screenshots/04-pass-predictor.png" alt="Pass Predictor" /></td>
+  </tr>
+  <tr>
+    <td align="center"><sub><b>Dashboard</b> — live cellular signal, SOS, location, queue depth</sub></td>
+    <td align="center"><sub><b>Map</b> — native OSM tiles with GPS marker, track lines, node filters</sub></td>
+    <td align="center"><sub><b>Pass Predictor</b> — SGP4 orbital mechanics, active Iridium pass at 71° peak elevation</sub></td>
+  </tr>
+</table>
 
 ## Quick Start
 
@@ -76,6 +75,8 @@ Go to **Rules** to set up message routing between transports. Rules use Cisco AS
 ### Step 5: Send a Test Message
 
 Open the **Comms** tab and send a test message to a Meshtastic node. If access rules route to a satellite interface, verify delivery in the **Delivery Ledger** (Rules > DLQ tab). Check the Dashboard sparklines for real-time activity.
+
+<img align="right" width="260" src="docs/screenshots/05-features-menu.png" alt="Features menu — breadth by category" />
 
 ## Transports
 
@@ -164,13 +165,20 @@ MeshSat Android is a full Reticulum Transport Node -- not just a client. It rela
 
 ## Meshtastic Integration
 
+<img align="right" width="260" src="docs/screenshots/07-radio-config.png" alt="Radio Config — 7-tab Meshtastic" />
+
 Full radio configuration via BLE (not just messaging):
 
 - **15 portnums**: text, position, telemetry, routing ACK/NAK, waypoint, neighborinfo, traceroute, store-forward, range test, detection sensor, paxcounter, reply, nodeinfo, admin, private
 - **7 config tabs**: Identity, LoRa (region/preset/TX power/hop limit), Channels (8 with PSK), Position (GPS/broadcast interval), Bluetooth, Network (WiFi), Admin (reboot/shutdown/factory reset)
 - **Official protobuf bindings** from `meshtastic/protobufs` via `protobuf-javalite`
+- **Single-parse dispatch** via `MeshtasticProtocol.parseFromRadioFull()` — one protobuf parse per frame, then adapter maps to internal types
+
+<br clear="right" />
 
 ## Security & Encryption
+
+<img align="right" width="260" src="docs/screenshots/08-audit-log.png" alt="Audit Log — Ed25519 hash chain" />
 
 ### Crypto
 
@@ -183,9 +191,18 @@ Full radio configuration via BLE (not just messaging):
 
 Device-level at-rest encryption using Android's `EncryptedSharedPreferences` (AndroidX Security). All sensitive keys and credentials are wrapped with HKDF + AES-256-GCM key wrapping backed by the Android Keystore hardware.
 
-### QR Key Bundles
+### QR Key Bundles with TOFU Pinning
 
-Cross-platform key exchange via `meshsat://key/` URI scheme. Scan a QR code from Bridge or another Android device to import conversation keys, transport credentials, and Hub certificates. The `KeyBundleImporter` validates, decodes, and stores key material with TOFU (Trust On First Use) pinning.
+Cross-platform channel key exchange via `meshsat://key/` URI scheme. Scan a QR code from the Bridge or another Android device to import AES-256-GCM conversation keys for each channel (mesh, iridium, astrocast, sms, etc.) in a single operation.
+
+Starting in **v2.8.5**, `KeyBundleImporter` supports **TOFU (Trust On First Use)** pinning against the bridge's Ed25519 signing key:
+
+- **Bundle v2 format** embeds the 32-byte Ed25519 signing pubkey inside the signed payload. Signature covers everything except the signature bytes themselves, so the pubkey cannot be swapped without invalidating the signature.
+- **First import** from a new bridge hash → pubkey is pinned in the `bridge_trust` Room table, status `NEW_TRUSTED`.
+- **Subsequent imports** → signature verified against the *stored* pubkey, status `EXISTING_TRUSTED`. A mismatch (key rotation or impersonation) is **rejected** and the user sees a KeyMismatch warning with an explicit re-pin option.
+- **Bundle v1 (legacy)** still imports for backward compat with older bridges, flagged as `UNVERIFIED_V1` with a user-visible warning.
+
+See MESHSAT-495 for the full design.
 
 ### Credential Management
 
@@ -198,12 +215,27 @@ The **Credentials** screen provides:
 ### Release Signing
 
 All release builds (v2.8.0+) are signed via OpenBao secret management:
-- **Keystore**: PKCS12, RSA 2048, stored in OpenBao vault
+- **Keystore**: PKCS12, RSA 2048, 30-year validity (Play Store requires > 25), stored in OpenBao vault
 - **Upload key alias**: `meshsat-upload`
-- **Verification**: `apksigner verify --print-certs meshsat-v*.apk`
-- CI pipeline fetches signing credentials via GitLab JWT -> OpenBao auth -> signed APK + AAB
+- **CI pipeline**: GitLab JWT → OpenBao auth → fetches keystore → signed APK + AAB → uploaded to GitLab Package Registry and GitHub Releases
 
-Debug builds use the Android debug keystore and are not suitable for production.
+Verify any downloaded APK before installing:
+
+```bash
+apksigner verify --print-certs meshsat-android-X.Y.Z-release.apk
+```
+
+Expected output for all v2.8.0+ releases:
+
+```
+Signer #1 certificate DN: CN=MeshSat, OU=CubeOS, O=Nuclear Lighters, L=Leiden, ST=South Holland, C=NL
+Signer #1 certificate SHA-256 digest: 8ca78b6c33bd9796bb05f40fec2a0ab801e0297e7565960d42f5e6af821c9f66
+Signer #1 certificate SHA-1 digest:   9040570a7bf4d33890bf82ad85a7debf24fa57ab
+```
+
+All releases share the same upload key, so in-place upgrades work without uninstalling. Debug builds use the Android debug keystore and are not suitable for production.
+
+<br clear="right" />
 
 ## TAK / CoT Integration
 
@@ -284,10 +316,10 @@ Jetpack Compose Material 3 dark theme with 14 screens:
 
 | Device | Android | Status | Notes |
 |--------|---------|--------|-------|
-| Google Pixel 9a | 16 (API 36) | Tested | Primary test device, BouncyCastle/Conscrypt verified |
-| Google Pixel 9 | 16 (API 36) | Tested | Android 16 compatibility verified |
-| Samsung Galaxy S23 | 14 (API 34) | Tested | Foreground service types verified |
-| Android Emulator (API 30) | 11 (API 30) | Tested | CI/map testing (nllei01androidsdk01) |
+| Google Pixel 9a | 16 (API 36) | **Primary** | BouncyCastle/Conscrypt, foreground service types, Room v13 migration, full E2E via wireless ADB |
+| Android Emulator (API 30) | 11 | CI | Build verification on `nllei01androidsdk01` |
+
+Other modern Android devices (Android 8.0+ / API 26+) should work — the app's only device-specific dependencies are Android's standard BLE, SMS, and Location APIs. If you test on another device, an issue report with your results is welcome.
 
 ### Radios & Modems
 
@@ -345,12 +377,12 @@ Jetpack Compose Material 3 dark theme with 14 screens:
 
 ### v2.8.x (Current)
 
-- **v2.8.5** -- TOFU key pinning in KeyBundleImporter, bundle v2 format (MESHSAT-495). Transport I/O state gating (MESHSAT-499)
-- **v2.8.4** -- Version bump
-- **v2.8.3** -- Fix PassScheduler OOM: ms/sec unit mismatch causing 1000x propagation loop (MESHSAT-498). Verified on Pixel 9a Android 16
-- **v2.8.2** -- Fix BouncyCastle JCA provider ordering breaking Conscrypt SSL on Android 16 (MESHSAT-497). Restored HTTPS for map tiles, Hub TLS, mTLS
-- **v2.8.1** -- osmdroid R8 keep rules (MESHSAT-493)
-- **v2.8.0** -- Release signing with OpenBao + Play Store AAB (MESHSAT-492)
+- **v2.8.5** -- TOFU key pinning in `KeyBundleImporter`, bundle v2 format with embedded Ed25519 pubkey, `bridge_trust` Room table (MESHSAT-495). 11 new unit tests covering every TOFU path.
+- **v2.8.4** -- Holistic transport state gates -- no I/O on disconnected devices, eliminated ~720 spurious warnings/hour on Iridium-less installs (MESHSAT-499). All 6 transport classes plus PassScheduler wire-up gated.
+- **v2.8.3** -- PassScheduler ms/sec unit mismatch fix -- eliminated 1000× over-iteration OOM in the SGP4 propagation loop (MESHSAT-498). Verified on Pixel 9a Android 16: 51--84 ms per provider call.
+- **v2.8.2** -- BouncyCastle JCA provider ordering fix -- restored Conscrypt SSL on Android 16 (MESHSAT-497). Unblocked map tiles, Hub TLS, mTLS, every HTTPS call in the app.
+- **v2.8.1** -- osmdroid R8 keep rules (MESHSAT-493 -- kept as defensive but not the actual cause of blank tiles).
+- **v2.8.0** -- Release signing with OpenBao + Play Store AAB pipeline (MESHSAT-492).
 
 ### v2.7.x
 
@@ -379,7 +411,12 @@ JSON + YAML export/import (Bridge-compatible `show run`-style), validate, diff p
 
 ## Data Layer
 
-Room database (schema v10) with 12 entities: Messages, SignalRecord, NodePosition, ForwardingRuleEntity, ConversationKey, AccessRuleEntity, ObjectGroupEntity, FailoverGroupEntity, MessageDeliveryEntity, AuditLogEntity, RnsTcpPeer, IridiumCreditEntry.
+Room database (schema **v13**) with 17 entities:
+- **Messages**: `messages`, `message_deliveries`, `conversation_keys`
+- **Routing**: `forwarding_rules`, `access_rules`, `object_groups`, `failover_groups`, `failover_members`, `rns_tcp_peers`
+- **Signal/Position**: `signal_history`, `node_positions`
+- **Credentials/Trust**: `provider_credentials`, `bridge_trust` (TOFU pinning, added v2.8.5)
+- **Operations**: `audit_log`, `tle_cache`, `iridium_credit_log`, `hemb_bond_groups`
 
 DataStore for all settings including encryption keys, transport config, routing parameters, mTLS certificates, and dashboard layout.
 
@@ -387,9 +424,9 @@ DataStore for all settings including encryption keys, transport config, routing 
 
 | Component | Library | Version |
 |-----------|---------|---------|
-| Language | Kotlin | 1.9.x |
+| Language | Kotlin | 2.0.x |
 | UI | Jetpack Compose (Material 3) | BOM 2024.x |
-| Database | Room (SQLite, schema v10) | 2.6.x |
+| Database | Room (SQLite, schema v13) | 2.6.x |
 | Settings | DataStore Preferences | 1.1.x |
 | Secure storage | EncryptedSharedPreferences (AndroidX Security) | 1.1.0-alpha06 |
 | ML Runtime | ONNX Runtime Android (INT8 quantized) | 1.16.x |
@@ -429,8 +466,10 @@ PRs welcome. See open issues for where help is needed.
 
 1. Fork the repository
 2. Create a feature branch
-3. Run tests: `./gradlew testDebugUnitTest` (~400 unit tests)
+3. Run tests: `./gradlew testDebugUnitTest` (~550 JVM unit tests, no device needed)
 4. Submit a pull request
+
+For security issues, please email disclosure to `security@nuclearlighters.net` rather than opening a public issue.
 
 ## License
 
