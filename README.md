@@ -76,8 +76,6 @@ Go to **Rules** to set up message routing between transports. Rules use Cisco AS
 
 Open the **Comms** tab and send a test message to a Meshtastic node. If access rules route to a satellite interface, verify delivery in the **Delivery Ledger** (Rules > DLQ tab). Check the Dashboard sparklines for real-time activity.
 
-<img align="right" width="260" src="docs/screenshots/05-features-menu.png" alt="Features menu — breadth by category" />
-
 ## Transports
 
 | Transport | Connection | Protocol | MTU |
