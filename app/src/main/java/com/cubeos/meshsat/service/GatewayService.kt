@@ -989,12 +989,21 @@ class GatewayService : Service() {
         }
         val scheduler = com.cubeos.meshsat.satellite.PassScheduler(
             passProvider = predictor,
-            signalPoller = { iridium.pollSignal() },
+            // Gate at wire-up so the 5-second poll tick doesn't invoke anything
+            // when no Iridium modem is paired (MESHSAT-499).
+            signalPoller = {
+                if (iridium.state.value == IridiumSpp.State.Connected) {
+                    iridium.pollSignal()
+                }
+            },
             burstFlusher = {
-                burstQueue?.flush()?.let { (payload, count) ->
-                    if (payload != null && count > 0) {
-                        iridium.writeMoBuffer(payload)
-                        iridium.sbdix()
+                // Same gate — nothing to flush to if modem is absent.
+                if (iridium.state.value == IridiumSpp.State.Connected) {
+                    burstQueue?.flush()?.let { (payload, count) ->
+                        if (payload != null && count > 0) {
+                            iridium.writeMoBuffer(payload)
+                            iridium.sbdix()
+                        }
                     }
                 }
             },

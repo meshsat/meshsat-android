@@ -264,10 +264,9 @@ class MeshtasticBle(private val context: Context) {
     // --- Send to Radio ---
 
     fun sendToRadio(data: ByteArray) {
-        val char = toRadioChar ?: run {
-            scope.launch { _error.emit("Not connected — toRadio characteristic unavailable") }
-            return
-        }
+        // Silent drop if not connected — state, not error (MESHSAT-499)
+        if (_state.value != State.Connected) return
+        val char = toRadioChar ?: return
 
         // Meshtastic BLE protocol: 4-byte header [0x94 0xc3 MSB LSB] + payload
         val framed = byteArrayOf(
@@ -300,6 +299,7 @@ class MeshtasticBle(private val context: Context) {
 
     /** Read remote RSSI. Result arrives via onReadRemoteRssi callback → _rssi StateFlow. */
     fun readRssi() {
+        if (_state.value != State.Connected) return  // MESHSAT-499
         gatt?.readRemoteRssi()
     }
 

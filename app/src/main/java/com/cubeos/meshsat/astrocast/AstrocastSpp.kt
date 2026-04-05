@@ -279,6 +279,10 @@ class AstrocastSpp(private val context: Context) {
     }
 
     private suspend fun sendAndReceive(frame: ByteArray): AstrocastProtocol.Response? {
+        // Silent no-op when not connected — state, not error (MESHSAT-499).
+        // Covers all higher-level callers (sendPayload, pollEvents, dequeuePayload,
+        // clearPayloads, setGeolocation, readNextPass, readRtc, initDevice).
+        if (_state.value != State.Connected) return null
         val os = outputStream ?: return null
         val iStream = inputStream ?: return null
 

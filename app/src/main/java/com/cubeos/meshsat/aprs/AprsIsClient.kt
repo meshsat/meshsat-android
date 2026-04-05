@@ -135,9 +135,12 @@ class AprsIsClient(
     /**
      * Send a raw APRS-IS packet line.
      * Format: SOURCE>DEST,PATH:payload
+     *
+     * Silent drop if disconnected — state, not error (MESHSAT-499).
      */
     suspend fun sendRaw(line: String) = withContext(Dispatchers.IO) {
-        val pw = writer ?: throw IllegalStateException("Not connected")
+        if (_state.value != State.Connected) return@withContext
+        val pw = writer ?: return@withContext
         pw.println(line)
         Log.d(Const.TAG, "TX: $line")
     }

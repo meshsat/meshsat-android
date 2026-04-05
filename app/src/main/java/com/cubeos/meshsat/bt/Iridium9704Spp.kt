@@ -707,8 +707,17 @@ class Iridium9704Spp(private val context: Context) {
     // Signal / Status
     // ═══════════════════════════════════════════════════════════════
 
+    /**
+     * True when the JSPR link is usable for commands. Gates silent no-ops when
+     * no HC-05 is paired so disconnected state doesn't spam the error flow (MESHSAT-499).
+     * Accepts Connected/Initializing/Ready because sendJspr is used during init.
+     */
+    private fun isWireReady(): Boolean =
+        _state.value in setOf(State.Connected, State.Initializing, State.Ready)
+
     /** Poll signal strength. Returns 0-5. */
     suspend fun pollSignal(): Int {
+        if (!isWireReady()) return 0
         return try {
             val resp = sendJspr("GET", "constellationState", JSONObject(), SIGNAL_TIMEOUT_MS)
             val bars = resp?.optInt("signal_bars", 0) ?: 0
@@ -722,6 +731,7 @@ class Iridium9704Spp(private val context: Context) {
 
     /** Get SIM status. */
     suspend fun getSimStatus(): JSONObject? {
+        if (!isWireReady()) return null
         return try {
             sendJspr("GET", "simStatus", JSONObject())
         } catch (e: Exception) {

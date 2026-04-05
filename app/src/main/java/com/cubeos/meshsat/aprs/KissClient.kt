@@ -66,9 +66,13 @@ class KissClient(
         _state.value = State.Disconnected
     }
 
-    /** Send an AX.25 frame via KISS. */
+    /**
+     * Send an AX.25 frame via KISS.
+     * Silent drop if disconnected — state, not error (MESHSAT-499).
+     */
     suspend fun sendFrame(frame: ByteArray) = withContext(Dispatchers.IO) {
-        val sock = socket ?: throw IllegalStateException("Not connected")
+        if (_state.value != State.Connected) return@withContext
+        val sock = socket ?: return@withContext
         val kissFrame = KissCodec.encode(frame)
         sock.getOutputStream().write(kissFrame)
         sock.getOutputStream().flush()

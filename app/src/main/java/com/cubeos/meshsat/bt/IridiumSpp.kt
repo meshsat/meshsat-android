@@ -206,8 +206,16 @@ class IridiumSpp(private val context: Context) {
         }
     }
 
+    /**
+     * True when the SPP socket is up and the modem is reachable for AT commands.
+     * Used to silence no-op polls when no HC-05 is paired (MESHSAT-499).
+     * "Not connected" is a state, not an error — don't emit on the error flow for it.
+     */
+    private fun isWireReady(): Boolean = _state.value == State.Connected
+
     /** Poll signal strength (AT+CSQ). Returns 0-5. */
     suspend fun pollSignal(): Int {
+        if (!isWireReady()) return 0
         return try {
             val resp = sendAT("AT+CSQ")
             // Response: +CSQ:3 or +CSQF:3
@@ -223,6 +231,7 @@ class IridiumSpp(private val context: Context) {
 
     /** Check SBD status (AT+SBDSX) — free, no RF needed. */
     suspend fun sbdStatus(): SbdsxResult? {
+        if (!isWireReady()) return null
         return try {
             val resp = sendAT("AT+SBDSX")
             // +SBDSX: 0, 5, 0, 5, 0, 0
@@ -245,6 +254,7 @@ class IridiumSpp(private val context: Context) {
 
     /** Write binary data to MO buffer (AT+SBDWB). Max 340 bytes. */
     suspend fun writeMoBuffer(data: ByteArray): Boolean {
+        if (!isWireReady()) return false
         if (data.size > MO_MAX_SIZE) {
             _error.emit("MO payload too large: ${data.size} > $MO_MAX_SIZE")
             return false
@@ -276,6 +286,7 @@ class IridiumSpp(private val context: Context) {
 
     /** Initiate SBD session (AT+SBDIX). Blocks 10-60s. Returns result or null. */
     suspend fun sbdix(): SbdixResult? {
+        if (!isWireReady()) return null
         return try {
             val resp = sendAT("AT+SBDIX", SBDIX_TIMEOUT_MS)
             // +SBDIX: 0, 12, 0, 0, 0, 0
@@ -298,6 +309,7 @@ class IridiumSpp(private val context: Context) {
 
     /** Read text from MT buffer (AT+SBDRT). */
     suspend fun readMtBuffer(): String? {
+        if (!isWireReady()) return null
         return try {
             val resp = sendAT("AT+SBDRT")
             // +SBDRT:\r\nMessage text\r\nOK
