@@ -226,23 +226,44 @@ fun SettingsScreen(navController: NavController? = null) {
                 }
             }
         } else if (scanned != null && scanned.startsWith("meshsat://key/")) {
-            // MeshSat key bundle URL — contains signed multi-channel key bundle
+            // MeshSat key bundle URL — contains signed multi-channel key bundle (MESHSAT-495)
             scope.launch {
-                try {
-                    val imported = com.cubeos.meshsat.crypto.KeyBundleImporter.importFromURL(
-                        scanned, context
-                    )
-                    Toast.makeText(
-                        context,
-                        "Imported $imported key(s) from bridge bundle",
-                        Toast.LENGTH_SHORT
-                    ).show()
-                } catch (e: Exception) {
-                    Toast.makeText(
-                        context,
-                        "Bundle import failed: ${e.message}",
-                        Toast.LENGTH_LONG
-                    ).show()
+                val result = com.cubeos.meshsat.crypto.KeyBundleImporter.importFromURL(
+                    scanned, context
+                )
+                when (result) {
+                    is com.cubeos.meshsat.crypto.KeyBundleImporter.ImportResult.Success -> {
+                        val trustMsg = when (result.status) {
+                            com.cubeos.meshsat.crypto.KeyBundleImporter.TrustStatus.NEW_TRUSTED ->
+                                "Imported ${result.count} key(s) — new bridge ${result.bridgeHashHex.take(8)} pinned"
+                            com.cubeos.meshsat.crypto.KeyBundleImporter.TrustStatus.EXISTING_TRUSTED ->
+                                "Imported ${result.count} key(s) — signature verified against pinned bridge"
+                            com.cubeos.meshsat.crypto.KeyBundleImporter.TrustStatus.UNVERIFIED_V1 ->
+                                "Imported ${result.count} key(s) — UNVERIFIED (legacy v1 bundle, no signature check)"
+                        }
+                        Toast.makeText(context, trustMsg, Toast.LENGTH_LONG).show()
+                    }
+                    is com.cubeos.meshsat.crypto.KeyBundleImporter.ImportResult.KeyMismatch -> {
+                        Toast.makeText(
+                            context,
+                            "⚠ Bridge key CHANGED since last scan! Rejected. Bridge: ${result.bridgeHashHex.take(8)} — remove from Settings if this is intentional rotation.",
+                            Toast.LENGTH_LONG,
+                        ).show()
+                    }
+                    is com.cubeos.meshsat.crypto.KeyBundleImporter.ImportResult.InvalidSignature -> {
+                        Toast.makeText(
+                            context,
+                            "⚠ Bundle signature INVALID — possibly tampered. ${result.reason}",
+                            Toast.LENGTH_LONG,
+                        ).show()
+                    }
+                    is com.cubeos.meshsat.crypto.KeyBundleImporter.ImportResult.Malformed -> {
+                        Toast.makeText(
+                            context,
+                            "Bundle malformed: ${result.reason}",
+                            Toast.LENGTH_LONG,
+                        ).show()
+                    }
                 }
             }
         } else if (scanned != null && scanned.length == 64 &&

@@ -25,8 +25,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         RnsTcpPeer::class,
         IridiumCreditEntry::class,
         HembBondGroupEntity::class,
+        BridgeTrustEntity::class,
     ],
-    version = 12,
+    version = 13,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -46,6 +47,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun rnsTcpPeerDao(): RnsTcpPeerDao
     abstract fun iridiumCreditDao(): IridiumCreditDao
     abstract fun hembBondGroupDao(): HembBondGroupDao
+    abstract fun bridgeTrustDao(): BridgeTrustDao
 
     companion object {
         @Volatile
@@ -169,6 +171,22 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /** Migration 12→13: Bridge TOFU trust table [MESHSAT-495]. */
+        val MIGRATION_12_13 = object : Migration(12, 13) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS bridge_trust (
+                        bridgeHash TEXT NOT NULL PRIMARY KEY,
+                        pubkey BLOB NOT NULL,
+                        firstSeen INTEGER NOT NULL,
+                        lastSeen INTEGER NOT NULL,
+                        label TEXT NOT NULL,
+                        importCount INTEGER NOT NULL
+                    )
+                """.trimIndent())
+            }
+        }
+
         fun getInstance(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
@@ -176,7 +194,10 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "meshsat.db"
                 )
-                    .addMigrations(MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12)
+                    .addMigrations(
+                        MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9,
+                        MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13,
+                    )
                     .fallbackToDestructiveMigration()
                     .build()
                     .also { INSTANCE = it }
