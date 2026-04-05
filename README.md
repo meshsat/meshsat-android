@@ -163,8 +163,6 @@ MeshSat Android is a full Reticulum Transport Node -- not just a client. It rela
 
 ## Meshtastic Integration
 
-<img align="right" width="260" src="docs/screenshots/07-radio-config.png" alt="Radio Config — 7-tab Meshtastic" />
-
 Full radio configuration via BLE (not just messaging):
 
 - **15 portnums**: text, position, telemetry, routing ACK/NAK, waypoint, neighborinfo, traceroute, store-forward, range test, detection sensor, paxcounter, reply, nodeinfo, admin, private
@@ -172,11 +170,7 @@ Full radio configuration via BLE (not just messaging):
 - **Official protobuf bindings** from `meshtastic/protobufs` via `protobuf-javalite`
 - **Single-parse dispatch** via `MeshtasticProtocol.parseFromRadioFull()` — one protobuf parse per frame, then adapter maps to internal types
 
-<br clear="right" />
-
 ## Security & Encryption
-
-<img align="right" width="260" src="docs/screenshots/08-audit-log.png" alt="Audit Log — Ed25519 hash chain" />
 
 ### Crypto
 
@@ -232,8 +226,6 @@ Signer #1 certificate SHA-1 digest:   9040570a7bf4d33890bf82ad85a7debf24fa57ab
 ```
 
 All releases share the same upload key, so in-place upgrades work without uninstalling. Debug builds use the Android debug keystore and are not suitable for production.
-
-<br clear="right" />
 
 ## TAK / CoT Integration
 
