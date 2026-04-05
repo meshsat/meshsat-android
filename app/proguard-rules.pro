@@ -34,6 +34,12 @@
 # NanoHTTPD (local REST API server)
 -keep class fi.iki.elonen.** { *; }
 
+# osmdroid (map tile rendering — uses reflection for tile providers and HTTP threads)
+# Without these rules R8 strips tile provider classes and the map renders white tiles (MESHSAT-493)
+-keep class org.osmdroid.** { *; }
+-keep interface org.osmdroid.** { *; }
+-dontwarn org.osmdroid.**
+
 # Phase F: signing + config + API
 -keepnames class com.cubeos.meshsat.engine.SigningService { *; }
 -keepnames class com.cubeos.meshsat.config.ConfigManager { *; }
