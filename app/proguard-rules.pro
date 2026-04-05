@@ -22,6 +22,11 @@
 -keep class androidx.security.crypto.** { *; }
 -keep class com.cubeos.meshsat.crypto.SecureKeyStore { *; }
 
+# Google Tink annotations (compile-time only, not needed at runtime)
+-dontwarn com.google.errorprone.annotations.**
+-dontwarn javax.annotation.**
+-dontwarn javax.annotation.concurrent.**
+
 # MSVQ-SC crypto classes (accessed via reflection in ONNX pipeline)
 -keep class com.cubeos.meshsat.crypto.MsvqscEncoder { *; }
 -keep class com.cubeos.meshsat.crypto.MsvqscCodebook { *; }
