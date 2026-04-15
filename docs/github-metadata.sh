@@ -13,7 +13,7 @@ curl -s -X PATCH "https://api.github.com/repos/${REPO}" \
   -H "Authorization: Bearer ${TOKEN}" \
   -H "Accept: application/vnd.github+json" \
   -d '{
-    "description": "Standalone Android gateway + Reticulum Transport Node. Meshtastic BLE, Iridium SBD/IMT, Astrocast, APRS, SMS. No companion app, no cloud.",
+    "description": "Standalone Android gateway + Reticulum Transport Node. Meshtastic BLE, Iridium SBD/IMT, APRS, SMS. No companion app, no cloud.",
     "homepage": "https://meshsat.net"
   }' | jq '{description, homepage}'
 
@@ -25,7 +25,7 @@ curl -s -X PUT "https://api.github.com/repos/${REPO}/topics" \
     "names": [
       "android", "kotlin", "jetpack-compose", "meshtastic", "iridium",
       "satellite", "reticulum", "mesh-networking", "lora", "aprs",
-      "astrocast", "ble", "tactical", "off-grid"
+      "ble", "tactical", "off-grid"
     ]
   }' | jq '.names'
 

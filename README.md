@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 [![GitHub Release](https://img.shields.io/github/v/release/cubeos-app/meshsat-android)](https://github.com/cubeos-app/meshsat-android/releases)
 
-Native Android app that turns a phone into a standalone field gateway and full Reticulum Transport Node. Bridges Meshtastic mesh (BLE), Iridium satellite (9603N SBD + 9704 IMT), Astrocast LEO, APRS, cellular SMS, and MQTT -- with end-to-end encryption, semantic compression, and intelligent routing.
+Native Android app that turns a phone into a standalone field gateway and full Reticulum Transport Node. Bridges Meshtastic mesh (BLE), Iridium satellite (9603N SBD + 9704 IMT), APRS, cellular SMS, and MQTT -- with end-to-end encryption, semantic compression, and intelligent routing.
 
 The phone IS the gateway. No companion app, no server dependency, no internet required.
 
@@ -57,7 +57,7 @@ On first launch, MeshSat requests permissions for Bluetooth, Location, SMS, and 
 
 Open **Settings** and pair your Meshtastic radio via Bluetooth. The app scans for BLE devices advertising the Meshtastic service UUID. Tap your device to connect. Full radio configuration is available in the **Radio Config** tab (7 sub-tabs: Identity, LoRa, Channels, Position, Bluetooth, Network, Admin).
 
-For satellite modems (RockBLOCK 9603N/9704) or Astrocast, pair the HC-05 Bluetooth SPP adapter first via Android Bluetooth settings, then select it in MeshSat Settings.
+For satellite modems (RockBLOCK 9603N/9704), pair the HC-05 Bluetooth SPP adapter first via Android Bluetooth settings, then select it in MeshSat Settings.
 
 ### Step 3: Connect to Hub (Optional)
 
@@ -83,7 +83,6 @@ Open the **Comms** tab and send a test message to a Meshtastic node. If access r
 | **Meshtastic** | Bluetooth LE | Official protobuf (15 portnums) | 237B |
 | **Iridium 9603N** | HC-05 Bluetooth SPP | AT/SBD (19200 baud) | 340B |
 | **Iridium 9704** | HC-05 Bluetooth SPP | JSPR (230400 baud, 100KB msgs) | 100KB |
-| **Astrocast** | HC-05 Bluetooth SPP | Astronode S (auto-fragmentation) | 636B |
 | **APRS** | KISS TNC + APRS-IS | AX.25 / APRS-IS TCP | 256B |
 | **SMS** | Native Android | AES-GCM encrypted, MSVQ-SC compressed | 160B |
 | **MQTT** | WiFi/cellular | Eclipse Paho (mTLS) | -- |
@@ -97,7 +96,6 @@ Phone (MeshSat Android)
  |
  +-- Bluetooth SPP ------> HC-05 --> RockBLOCK 9603N (Iridium SBD)
  |                      +-> HC-05 --> RockBLOCK 9704  (Iridium IMT/JSPR)
- |                      +-> HC-05 --> Astronode S      (Astrocast LEO)
  |
  +-- KISS TNC -----------> APRS radio (smart beaconing, directed messaging)
  +-- APRS-IS TCP --------> APRS internet gateway
@@ -126,7 +124,6 @@ Phone (MeshSat Android)
 | Meshtastic | Serial/USB | BLE |
 | Iridium 9603N SBD | UART/USB | HC-05 Bluetooth SPP |
 | Iridium 9704 IMT | FTDI USB | HC-05 Bluetooth SPP |
-| Astrocast LEO | USB serial | HC-05 Bluetooth SPP |
 | Cellular SMS | USB AT modem | Native Android SMS |
 | ZigBee | USB dongle (Z-Stack ZNP) | -- |
 | APRS | Direwolf KISS TNC | KISS TNC + APRS-IS |
@@ -155,7 +152,7 @@ Phone (MeshSat Android)
 MeshSat Android is a full Reticulum Transport Node -- not just a client. It relays packets between all interfaces, maintains a forwarding table with cost-aware routing, and announces itself to the mesh.
 
 - **Ed25519 signing + X25519 encryption** identity
-- **10+ Reticulum interfaces**: Meshtastic BLE, Iridium 9603, Iridium 9704, Astrocast, SMS, MQTT, TCP (HDLC), BLE peripheral (GATT server), Tor (SOCKS5), WireGuard
+- **10+ Reticulum interfaces**: Meshtastic BLE, Iridium 9603, Iridium 9704, SMS, MQTT, TCP (HDLC), BLE peripheral (GATT server), Tor (SOCKS5), WireGuard
 - **Cross-interface relay** with announce propagation and hop counting
 - **3-packet ECDH link handshake** with AES-256-GCM encrypted links
 - **Path table** with cost-aware forwarding and path request/response
@@ -185,7 +182,7 @@ Device-level at-rest encryption using Android's `EncryptedSharedPreferences` (An
 
 ### QR Key Bundles with TOFU Pinning
 
-Cross-platform channel key exchange via `meshsat://key/` URI scheme. Scan a QR code from the Bridge or another Android device to import AES-256-GCM conversation keys for each channel (mesh, iridium, astrocast, sms, etc.) in a single operation.
+Cross-platform channel key exchange via `meshsat://key/` URI scheme. Scan a QR code from the Bridge or another Android device to import AES-256-GCM conversation keys for each channel (mesh, iridium, sms, etc.) in a single operation.
 
 Starting in **v2.8.5**, `KeyBundleImporter` supports **TOFU (Trust On First Use)** pinning against the bridge's Ed25519 signing key:
 
@@ -322,7 +319,6 @@ Other modern Android devices (Android 8.0+ / API 26+) should work — the app's 
 | | Any Meshtastic BLE device | BLE | Should work | Standard Meshtastic service UUID |
 | **Satellite** | RockBLOCK 9603 (Iridium 9603N) | HC-05 SPP (19200) | Tested | SBD, 340B MO, $0.05/msg |
 | | RockBLOCK 9704 (Iridium IMT) | HC-05 SPP (230400) | To Verify | JSPR, 100KB msgs |
-| | Astrocast Astronode S | HC-05 SPP | To Verify | Auto-fragmentation, 636B |
 | **APRS** | Quansheng UV-K5 | KISS TNC | Tested | Via AIOC audio interface |
 | | Any Direwolf-compatible TNC | KISS TNC | Should work | |
 | **Bluetooth adapter** | HC-05 | SPP | Tested | Set baud rate before use |

@@ -120,7 +120,7 @@ Captured from live Pi5 dashboard at `http://nllei01mule01-wireless:6050/` via Pl
 **Layout:** Interface status cards + tab bar + rules list
 
 **Interface status cards (top row):**
-- 6 cards: MESH RADIO, MQTT, IRIDIUM, CELLULAR, ASTROCAST, WEBHOOK
+- 5 cards: MESH RADIO, MQTT, IRIDIUM, CELLULAR, WEBHOOK
 - Each: status dot (green/amber/gray) + label (Connected/Disconnected/Not configured)
 
 **Tabs:** Outbound | Inbound | Cross-Bridge `1` | Deliveries | Queue `50`
@@ -160,7 +160,7 @@ Captured from live Pi5 dashboard at `http://nllei01mule01-wireless:6050/` via Pl
 **Layout:** Controls bar + next pass card + signal chart + pass list
 
 **Controls:**
-- Constellation toggle: `Iridium` / `Astrocast` (pill buttons)
+- Constellation toggle: `Iridium` (pill buttons)
 - Source dropdown: AUTO / GPS / Custom
 - Location display: `● 52.1621, 4.5094 (4km)`
 - Time window: `12h` / `24h` / `48h` / `72h`
@@ -188,7 +188,7 @@ Captured from live Pi5 dashboard at `http://nllei01mule01-wireless:6050/` via Pl
 - `▸ 495 passes Next: IRIDIUM 124 at 20:41`
 - Expandable to show all predicted passes
 
-**Android status:** PassPredictorScreen exists with countdown + timeline. **Critically missing: the Signal vs Passes SVG chart** — this is the killer visualization. Also missing: Astrocast toggle, GPS/Custom source selector, elevation slider, GSS correlation.
+**Android status:** PassPredictorScreen exists with countdown + timeline. **Critically missing: the Signal vs Passes SVG chart** — this is the killer visualization. Also missing: GPS/Custom source selector, elevation slider, GSS correlation.
 
 ---
 
@@ -248,14 +248,14 @@ Captured from live Pi5 dashboard at `http://nllei01mule01-wireless:6050/` via Pl
 
 **Layout:** Config section tabs + JSON viewer/editor
 
-**Tabs:** Radio | Channels | Position | Canned Msg | MQTT | Device MQTT | Iridium | Astrocast | Cellular | ZigBee | S&F | Range Test | Dead Man | Export/Import | About
+**Tabs:** Radio | Channels | Position | Canned Msg | MQTT | Device MQTT | Iridium | Cellular | ZigBee | S&F | Range Test | Dead Man | Export/Import | About
 
 **Per tab:** Shows raw JSON config fetched from radio, with:
 - Source dropdown (e.g., `LoRa Radio`, `Device`, `Position`, `Power`, `Bluetooth`)
 - `Refresh` button
 - `Edit JSON` button → inline JSON editor
 
-**Android status:** RadioConfigScreen has LoRa region/preset/TX power. Missing: most config sections (Channels, Position, MQTT, Device MQTT, Iridium, Astrocast, Cellular, ZigBee, S&F, Range Test, Export/Import). Missing JSON viewer/editor.
+**Android status:** RadioConfigScreen has LoRa region/preset/TX power. Missing: most config sections (Channels, Position, MQTT, Device MQTT, Iridium, Cellular, ZigBee, S&F, Range Test, Export/Import). Missing JSON viewer/editor.
 
 ---
 

@@ -29,7 +29,6 @@ object HubProtocol {
     const val DEVICE_IRIDIUM_SBD = "iridium_sbd"
     const val DEVICE_IRIDIUM_IMT = "iridium_imt"
     const val DEVICE_CELLULAR = "cellular"
-    const val DEVICE_ASTROCAST = "astrocast"
     const val DEVICE_APRS = "aprs"
 
     /** ISO 8601 timestamp formatter. */
@@ -43,7 +42,7 @@ object HubProtocol {
     /** Returns CoT type string for a given device type. */
     fun cotTypeForDevice(deviceType: String): String = when (deviceType) {
         DEVICE_MESHTASTIC -> COT_MESH_NODE
-        DEVICE_IRIDIUM_SBD, DEVICE_IRIDIUM_IMT, DEVICE_ASTROCAST -> COT_SAT_MODEM
+        DEVICE_IRIDIUM_SBD, DEVICE_IRIDIUM_IMT -> COT_SAT_MODEM
         DEVICE_CELLULAR -> COT_CELL_MODEM
         else -> COT_MESH_NODE
     }

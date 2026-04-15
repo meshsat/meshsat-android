@@ -39,11 +39,11 @@ class RnsTransportNode(
         const val MAX_HOPS = 128
 
         /** Paid interface prefixes — protocol overhead MUST NOT be broadcast to these. */
-        private val PAID_PREFIXES = listOf("iridium", "astrocast", "sms", "cellular")
+        private val PAID_PREFIXES = listOf("iridium", "sms", "cellular")
 
         /**
          * Check if an interface ID represents a paid transport.
-         * Paid transports: Iridium SBD/IMT ($0.05+/msg), Astrocast, SMS.
+         * Paid transports: Iridium SBD/IMT ($0.05+/msg), SMS.
          * Protocol overhead (announces, time sync, keepalives) must NEVER
          * be sent to paid interfaces — only user-initiated messages.
          */

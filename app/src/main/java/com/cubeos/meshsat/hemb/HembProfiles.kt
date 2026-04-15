@@ -14,7 +14,6 @@ object HembProfiles {
         "mesh" to 1.30,
         "iridium_sbd" to 1.00,
         "iridium_imt" to 1.00,
-        "astrocast" to 1.40,
         "cellular" to 1.10,
         "sms" to 1.10,
         "zigbee" to 1.30,

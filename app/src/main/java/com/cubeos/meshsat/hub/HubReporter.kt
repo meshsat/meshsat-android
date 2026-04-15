@@ -480,20 +480,6 @@ class HubReporter(
             ))
         }
 
-        // Astrocast SPP
-        GatewayService.astrocastSpp?.let { spp ->
-            val status = when (spp.state.value) {
-                com.cubeos.meshsat.astrocast.AstrocastSpp.State.Connected -> "online"
-                com.cubeos.meshsat.astrocast.AstrocastSpp.State.Connecting -> "binding"
-                else -> "offline"
-            }
-            ifaces.add(InterfaceInfo(
-                name = "astrocast_0",
-                type = "astrocast",
-                status = status,
-            ))
-        }
-
         // MQTT (existing device transport)
         GatewayService.mqttTransport?.let { mqtt ->
             val status = when (mqtt.state.value) {
@@ -516,7 +502,6 @@ class HubReporter(
         GatewayService.meshtasticBle?.let { caps.add("ble_mesh") }
         GatewayService.iridiumSpp?.let { caps.add("iridium_sbd") }
         GatewayService.iridium9704Spp?.let { caps.add("iridium_imt") }
-        GatewayService.astrocastSpp?.let { caps.add("astrocast") }
         GatewayService.mqttTransport?.let { caps.add("mqtt") }
         GatewayService.kissClient?.let { caps.add("aprs_kiss") }
         GatewayService.aprsIsClient?.let { caps.add("aprs_is") }
@@ -551,11 +536,6 @@ class HubReporter(
                 status = status,
                 signalBars = bars,
             ))
-        }
-
-        GatewayService.astrocastSpp?.let { spp ->
-            val status = if (spp.state.value == com.cubeos.meshsat.astrocast.AstrocastSpp.State.Connected) "online" else "offline"
-            health.add(InterfaceHealth(name = "astrocast_0", status = status))
         }
 
         return health

@@ -113,7 +113,6 @@ class HealthScorer(
         fun channelCostScore(channelType: String): Int = when (channelType) {
             "mesh", "mqtt", "webhook" -> 100
             "cellular", "sms" -> 60
-            "astrocast" -> 50
             "iridium" -> 30
             else -> 50
         }

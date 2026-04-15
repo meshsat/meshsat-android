@@ -17,7 +17,7 @@ import kotlinx.coroutines.flow.Flow
 @Entity(tableName = "provider_credentials")
 data class ProviderCredential(
     @PrimaryKey val id: String,
-    val provider: String,       // cloudloop_mqtt, rockblock, astrocast, etc.
+    val provider: String,       // cloudloop_mqtt, rockblock, etc.
     val name: String,
     @ColumnInfo(name = "cred_type") val credType: String, // mtls_bundle, api_key, webhook_secret
     @ColumnInfo(name = "encrypted_data") val encryptedData: ByteArray,

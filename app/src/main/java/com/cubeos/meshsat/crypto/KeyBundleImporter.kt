@@ -71,7 +71,6 @@ object KeyBundleImporter {
         0x00.toByte() to "sms",
         0x01.toByte() to "mesh",
         0x02.toByte() to "iridium",
-        0x03.toByte() to "astrocast",
         0x04.toByte() to "zigbee",
         0x05.toByte() to "mqtt",
         0x06.toByte() to "webhook",

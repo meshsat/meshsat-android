@@ -35,7 +35,6 @@ class HubProtocolTest {
         assertEquals("iridium_sbd", HubProtocol.DEVICE_IRIDIUM_SBD)
         assertEquals("iridium_imt", HubProtocol.DEVICE_IRIDIUM_IMT)
         assertEquals("cellular", HubProtocol.DEVICE_CELLULAR)
-        assertEquals("astrocast", HubProtocol.DEVICE_ASTROCAST)
         assertEquals("aprs", HubProtocol.DEVICE_APRS)
     }
 
@@ -58,7 +57,6 @@ class HubProtocolTest {
         assertEquals(HubProtocol.COT_MESH_NODE, HubProtocol.cotTypeForDevice(HubProtocol.DEVICE_MESHTASTIC))
         assertEquals(HubProtocol.COT_SAT_MODEM, HubProtocol.cotTypeForDevice(HubProtocol.DEVICE_IRIDIUM_SBD))
         assertEquals(HubProtocol.COT_SAT_MODEM, HubProtocol.cotTypeForDevice(HubProtocol.DEVICE_IRIDIUM_IMT))
-        assertEquals(HubProtocol.COT_SAT_MODEM, HubProtocol.cotTypeForDevice(HubProtocol.DEVICE_ASTROCAST))
         assertEquals(HubProtocol.COT_CELL_MODEM, HubProtocol.cotTypeForDevice(HubProtocol.DEVICE_CELLULAR))
         assertEquals(HubProtocol.COT_MESH_NODE, HubProtocol.cotTypeForDevice("unknown"))
     }

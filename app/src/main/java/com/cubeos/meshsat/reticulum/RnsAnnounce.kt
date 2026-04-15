@@ -255,7 +255,7 @@ object MeshSatAppData {
 
     // Capability flags
     const val CAP_MESH: Byte = 0x01        // Has LoRa/Meshtastic
-    const val CAP_SATELLITE: Byte = 0x02   // Has Iridium/Astrocast
+    const val CAP_SATELLITE: Byte = 0x02   // Has Iridium
     const val CAP_SMS: Byte = 0x04         // Has native SMS
     const val CAP_APRS: Byte = 0x08        // Has AX.25/APRS
     const val CAP_MQTT: Byte = 0x10        // Has MQTT/internet
