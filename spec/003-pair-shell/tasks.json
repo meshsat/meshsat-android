@@ -1,0 +1,76 @@
+{
+  "feature_id": "003-pair-shell",
+  "parent_epic": "MESHSAT-S8-Android",
+  "spec_revision": "1 (2026-05-18 — CGC-verified paths)",
+  "tasks": [
+    {
+      "id": "T-001",
+      "status": "pending",
+      "title": "Room MIGRATION_15_16 + paired_bridges + DAO + WelcomeSplash + config/AppMode + Mode reentry",
+      "prompt": "FIRST: read spec/003-pair-shell/{requirements.md, design.md, acceptance/pair-shell.feature}. SECOND: add MIGRATION_15_16 to data/AppDatabase.kt (append per Article C-IV; current last is MIGRATION_14_15 from spec/002). Implement WelcomeSplashScreen alongside the 17 existing *Screen.kt files. Persist app.mode via config/AppMode.kt sibling to existing config/ConfigManager.kt. PairedBridgesDao as interface per Article C-VII (JVM-testable). Tests at FLAT layout per Article C-VIII.",
+      "files_owned": [
+        "app/src/main/java/com/cubeos/meshsat/ui/screens/WelcomeSplashScreen.kt",
+        "app/src/main/java/com/cubeos/meshsat/data/PairedBridgesEntity.kt",
+        "app/src/main/java/com/cubeos/meshsat/data/PairedBridgesDao.kt",
+        "app/src/main/java/com/cubeos/meshsat/data/AppDatabase.kt",
+        "app/src/main/java/com/cubeos/meshsat/config/AppMode.kt",
+        "app/src/test/java/com/cubeos/meshsat/PairedBridgesDaoTest.kt"
+      ],
+      "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/cubeos/meshsat-android && ./gradlew :app:testDebugUnitTest --tests com.cubeos.meshsat.PairedBridgesDaoTest'",
+      "dependencies": [],
+      "parallelizable": true,
+      "bounded_context": "data",
+      "requirement_ids": ["REQ-200", "REQ-201", "REQ-202", "REQ-203", "REQ-204", "REQ-213", "REQ-214", "REQ-215", "REQ-226"],
+      "complexity": 5,
+      "risk_score": 0.4,
+      "max_wall_clock_minutes": 70,
+      "max_loc_delta": 800
+    },
+    {
+      "id": "T-002",
+      "status": "pending",
+      "title": "PairScannerScreen + ECDH/CSR/HMAC pair-claim + Android Keystore storage",
+      "prompt": "FIRST: read spec/003-pair-shell/{requirements.md, design.md, acceptance/pair-shell.feature} AND meshsat/spec/001-pair-protocol/ for the bridge-side protocol contract. SECOND: implement ui/screens/PairScannerScreen.kt + crypto/PairClaimClient.kt + crypto/PairedClientKeystore.kt. Camera via CameraX + ZXing. Ed25519 sig verify with explicit \"BC\" provider per Article C-II. X25519 + Ed25519 keypairs generated in Android Keystore per Article C-V. TLS 1.3 via OkHttp with CertificatePinner pinning QR.fp. POST /api/v2/pair/claim per design.md contract. Persist cert + JWT + bridge metadata per Articles C-V + C-VI. Tests at FLAT layout per Article C-VIII.",
+      "files_owned": [
+        "app/src/main/java/com/cubeos/meshsat/ui/screens/PairScannerScreen.kt",
+        "app/src/main/java/com/cubeos/meshsat/crypto/PairClaimClient.kt",
+        "app/src/main/java/com/cubeos/meshsat/crypto/PairedClientKeystore.kt",
+        "app/src/test/java/com/cubeos/meshsat/PairClaimClientTest.kt",
+        "app/src/test/java/com/cubeos/meshsat/PairedClientKeystoreTest.kt"
+      ],
+      "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/cubeos/meshsat-android && ./gradlew :app:testDebugUnitTest --tests com.cubeos.meshsat.PairClaimClientTest --tests com.cubeos.meshsat.PairedClientKeystoreTest'",
+      "dependencies": ["T-001"],
+      "parallelizable": false,
+      "bounded_context": "crypto",
+      "requirement_ids": ["REQ-205", "REQ-206", "REQ-207", "REQ-208", "REQ-209", "REQ-210", "REQ-211", "REQ-212", "REQ-224"],
+      "complexity": 7,
+      "risk_score": 0.7,
+      "max_wall_clock_minutes": 110,
+      "max_loc_delta": 1300
+    },
+    {
+      "id": "T-003",
+      "status": "pending",
+      "title": "HybridShell + SourceSwitcher + PinnedWebViewClient + per-source notifications + remove-pairing",
+      "prompt": "FIRST: read spec/003-pair-shell/{requirements.md, design.md, acceptance/pair-shell.feature}. SECOND: implement ui/HybridShell.kt + ui/SourceSwitcher.kt + ui/SourceStore.kt + ui/web/PinnedWebViewClient.kt as new top-level files under ui/ (alongside existing ui/MeshSatUI.kt). Implement service/PerSourceNotifications.kt alongside existing service/GatewayService.kt. Implement data/RemovePairedBridge.kt that deletes Keystore alias + paired_bridges row + cascades paired_bridge_* rows. Compose Material 3 per Article C-IX. SourceStore is Kotlin shared store (Compose-state-friendly). WebView Authorization Bearer injection + SPKI pin verification per REQ-217/218.",
+      "files_owned": [
+        "app/src/main/java/com/cubeos/meshsat/ui/HybridShell.kt",
+        "app/src/main/java/com/cubeos/meshsat/ui/SourceSwitcher.kt",
+        "app/src/main/java/com/cubeos/meshsat/ui/SourceStore.kt",
+        "app/src/main/java/com/cubeos/meshsat/ui/web/PinnedWebViewClient.kt",
+        "app/src/main/java/com/cubeos/meshsat/service/PerSourceNotifications.kt",
+        "app/src/main/java/com/cubeos/meshsat/data/RemovePairedBridge.kt",
+        "app/src/test/java/com/cubeos/meshsat/HybridShellTest.kt"
+      ],
+      "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/cubeos/meshsat-android && ./gradlew :app:testDebugUnitTest --tests com.cubeos.meshsat.HybridShellTest'",
+      "dependencies": ["T-002"],
+      "parallelizable": false,
+      "bounded_context": "ui",
+      "requirement_ids": ["REQ-216", "REQ-217", "REQ-218", "REQ-219", "REQ-220", "REQ-221", "REQ-222", "REQ-223", "REQ-225"],
+      "complexity": 7,
+      "risk_score": 0.6,
+      "max_wall_clock_minutes": 110,
+      "max_loc_delta": 1400
+    }
+  ]
+}

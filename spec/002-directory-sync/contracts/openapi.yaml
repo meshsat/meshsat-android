@@ -1,0 +1,116 @@
+openapi: 3.0.3
+info:
+  title: meshsat-android — bridge-directory consumer
+  version: 0.2.0
+  description: |
+    OpenAPI subset documenting the Bridge endpoints consumed by Android's
+    DirectorySyncService (spec/002). The full contract is in the Bridge's
+    own openapi (meshsat/spec/002-unified-directory/contracts/openapi.yaml);
+    this file is the Android-side view + the LocalApiServer endpoint Android
+    exposes to its own automation users.
+servers:
+  - url: https://lan.host/api  (paired bridge)
+  - url: http://127.0.0.1:7042  (LocalApiServer on Android — port from api/LocalApiServer.kt)
+paths:
+  /directory/snapshot:
+    get:
+      summary: Pull directory snapshot from a paired bridge
+      operationId: getDirectorySnapshot
+      parameters:
+        - name: since
+          in: query
+          required: false
+          schema:
+            type: integer
+            description: Unix milliseconds; bridge returns only changes after this.
+      responses:
+        '200':
+          description: Signed snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SignedDirectorySnapshot'
+        '401':
+          description: Bearer JWT missing or invalid
+        '403':
+          description: Client cert SPKI does not match server expectation
+  /android/directory/refresh:
+    post:
+      summary: Operator-triggered directory refresh (Android LocalApiServer)
+      description: |
+        Local-only endpoint on the Android app's LocalApiServer for scripts
+        that want to force a refresh outside the normal poll cycle.
+      operationId: refreshDirectory
+      responses:
+        '202':
+          description: Refresh started; check status via /android/directory/status
+        '503':
+          description: No paired bridges configured
+components:
+  schemas:
+    SignedDirectorySnapshot:
+      type: object
+      required: [bridge_hash, snapshot, signature]
+      properties:
+        bridge_hash:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+        snapshot:
+          $ref: '#/components/schemas/DirectorySnapshot'
+        signature:
+          type: string
+          description: Base64-encoded Ed25519 signature over the canonical serialisation of `snapshot`.
+    DirectorySnapshot:
+      type: object
+      required: [contacts, addresses, groups, dispatch_policies, generated_at]
+      properties:
+        contacts:
+          type: array
+          items: {$ref: '#/components/schemas/Contact'}
+        addresses:
+          type: array
+          items: {$ref: '#/components/schemas/Address'}
+        groups:
+          type: array
+          items: {$ref: '#/components/schemas/Group'}
+        dispatch_policies:
+          type: array
+          items: {$ref: '#/components/schemas/DispatchPolicy'}
+        generated_at:
+          type: integer
+          description: Unix milliseconds when the snapshot was sealed.
+    Contact:
+      type: object
+      required: [contact_id, display_name]
+      properties:
+        contact_id: {type: string}
+        display_name: {type: string}
+        notes:
+          type: string
+          nullable: true
+    Address:
+      type: object
+      required: [contact_id, address_type, address_value]
+      properties:
+        contact_id: {type: string}
+        address_type:
+          type: string
+          enum: [meshtastic, iridium, sms, aprs, mqtt, tak, ble, astrocast]
+        address_value: {type: string}
+    Group:
+      type: object
+      required: [group_id, display_name]
+      properties:
+        group_id: {type: string}
+        display_name: {type: string}
+    DispatchPolicy:
+      type: object
+      required: [policy_id, precedence, json_blob]
+      properties:
+        policy_id: {type: string}
+        precedence:
+          type: integer
+          minimum: 0
+          maximum: 5
+          description: STANAG 4406 precedence (0=routine, 5=flash override).
+        json_blob: {type: string}

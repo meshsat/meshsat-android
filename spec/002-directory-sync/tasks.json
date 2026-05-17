@@ -1,0 +1,73 @@
+{
+  "feature_id": "002-directory-sync",
+  "parent_epic": "MESHSAT-S5-Android",
+  "spec_revision": "1 (2026-05-18 — CGC-verified paths)",
+  "tasks": [
+    {
+      "id": "T-001",
+      "status": "pending",
+      "title": "Room MIGRATION_14_15 + 4 paired_bridge_* entities + PairedBridgeDirectoryDao",
+      "prompt": "FIRST: read spec/002-directory-sync/{requirements.md, design.md, acceptance/directory-sync.feature}. SECOND: add MIGRATION_14_15 to data/AppDatabase.kt (append to existing list per Article C-IV; current last is MIGRATION_13_14). Add 4 new Entity classes + the DAO interface. Schema per design.md. JVM test at FLAT path app/src/test/java/com/cubeos/meshsat/PairedBridgeDirectoryDaoTest.kt per Article C-VIII.",
+      "files_owned": [
+        "app/src/main/java/com/cubeos/meshsat/data/AppDatabase.kt",
+        "app/src/main/java/com/cubeos/meshsat/data/PairedBridgeContactEntity.kt",
+        "app/src/main/java/com/cubeos/meshsat/data/PairedBridgeAddressEntity.kt",
+        "app/src/main/java/com/cubeos/meshsat/data/PairedBridgeGroupEntity.kt",
+        "app/src/main/java/com/cubeos/meshsat/data/PairedBridgeDispatchPolicyEntity.kt",
+        "app/src/main/java/com/cubeos/meshsat/data/PairedBridgeDirectoryDao.kt",
+        "app/src/test/java/com/cubeos/meshsat/PairedBridgeDirectoryDaoTest.kt"
+      ],
+      "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/cubeos/meshsat-android && ./gradlew :app:testDebugUnitTest --tests com.cubeos.meshsat.PairedBridgeDirectoryDaoTest'",
+      "dependencies": [],
+      "parallelizable": true,
+      "bounded_context": "data",
+      "requirement_ids": ["REQ-100", "REQ-101", "REQ-102", "REQ-118"],
+      "complexity": 5,
+      "risk_score": 0.4,
+      "max_wall_clock_minutes": 75,
+      "max_loc_delta": 900
+    },
+    {
+      "id": "T-002",
+      "status": "pending",
+      "title": "DirectorySyncService + ContactCardImporter",
+      "prompt": "FIRST: read spec/002-directory-sync/{requirements.md, design.md, acceptance/directory-sync.feature}. SECOND: add service/DirectorySyncService.kt (alongside existing GatewayService.kt + TransportRegistry.kt) and crypto/ContactCardImporter.kt (alongside KeyBundleImporter.kt — same shape: sealed class inline, explicit \"BC\" provider per Article C-II). Per-bridge poll + Ed25519 verify against bridge_trust.pubkey + Room transaction apply + MQTT-trigger subscriber. Tests at FLAT layout per Article C-VIII.",
+      "files_owned": [
+        "app/src/main/java/com/cubeos/meshsat/service/DirectorySyncService.kt",
+        "app/src/main/java/com/cubeos/meshsat/crypto/ContactCardImporter.kt",
+        "app/src/test/java/com/cubeos/meshsat/DirectorySyncServiceTest.kt",
+        "app/src/test/java/com/cubeos/meshsat/ContactCardImporterTest.kt"
+      ],
+      "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/cubeos/meshsat-android && ./gradlew :app:testDebugUnitTest --tests com.cubeos.meshsat.DirectorySyncServiceTest --tests com.cubeos.meshsat.ContactCardImporterTest'",
+      "dependencies": ["T-001"],
+      "parallelizable": false,
+      "bounded_context": "service",
+      "requirement_ids": ["REQ-103", "REQ-104", "REQ-105", "REQ-106", "REQ-107", "REQ-108", "REQ-114", "REQ-115", "REQ-116", "REQ-117", "REQ-119", "REQ-120"],
+      "complexity": 6,
+      "risk_score": 0.5,
+      "max_wall_clock_minutes": 100,
+      "max_loc_delta": 1100
+    },
+    {
+      "id": "T-003",
+      "status": "pending",
+      "title": "PeopleScreen + ContactDetailScreen + Contact QR display/scanner components",
+      "prompt": "FIRST: read spec/002-directory-sync/{requirements.md, design.md, acceptance/directory-sync.feature}. SECOND: add ui/screens/PeopleScreen.kt + ContactDetailScreen.kt (alongside the 17 existing *Screen.kt files) and ui/components/ContactQRDisplay.kt + ContactQRScanner.kt (alongside the existing StatusCard.kt). Compose Material 3 per Article C-IX. Wire to PairedBridgeDirectoryDao (T-001) + ContactCardImporter (T-002). Stale-data banner threshold 24h per REQ-111.",
+      "files_owned": [
+        "app/src/main/java/com/cubeos/meshsat/ui/screens/PeopleScreen.kt",
+        "app/src/main/java/com/cubeos/meshsat/ui/screens/ContactDetailScreen.kt",
+        "app/src/main/java/com/cubeos/meshsat/ui/components/ContactQRDisplay.kt",
+        "app/src/main/java/com/cubeos/meshsat/ui/components/ContactQRScanner.kt"
+      ],
+      "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/cubeos/meshsat-android && ./gradlew :app:assembleDebug'",
+      "dependencies": ["T-001", "T-002"],
+      "parallelizable": false,
+      "bounded_context": "ui",
+      "requirement_ids": ["REQ-109", "REQ-110", "REQ-111", "REQ-112", "REQ-113"],
+      "complexity": 5,
+      "risk_score": 0.4,
+      "max_wall_clock_minutes": 80,
+      "max_loc_delta": 900
+    }
+  ]
+}

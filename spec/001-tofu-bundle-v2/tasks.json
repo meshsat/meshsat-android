@@ -1,0 +1,48 @@
+{
+  "feature_id": "001-tofu-bundle-v2",
+  "parent_epic": "MESHSAT-495",
+  "spec_revision": "1 (2026-05-18 — retrospective; CGC-verified against actual repo)",
+  "tasks": [
+    {
+      "id": "T-001",
+      "status": "completed",
+      "title": "Room MIGRATION_12_13 + bridge_trust entity + DAO",
+      "prompt": "(RETROSPECTIVE — shipped versionCode 50, 2026-03.) The bridge_trust table + BridgeTrustEntity + BridgeTrustDao + MIGRATION_12_13 are CGC-verified to exist at the listed paths. Current Room DB version is 14; the migration is shipped. This task is documented for the historical record + to anchor the future spec/002 + spec/003 schema bumps.",
+      "files_owned": [
+        "app/src/main/java/com/cubeos/meshsat/data/BridgeTrustEntity.kt",
+        "app/src/main/java/com/cubeos/meshsat/data/BridgeTrustDao.kt",
+        "app/src/main/java/com/cubeos/meshsat/data/AppDatabase.kt"
+      ],
+      "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/cubeos/meshsat-android && ./gradlew :app:assembleDebug' && [ -f app/src/main/java/com/cubeos/meshsat/data/BridgeTrustEntity.kt ]",
+      "dependencies": [],
+      "parallelizable": true,
+      "bounded_context": "data",
+      "requirement_ids": ["REQ-012", "REQ-013"],
+      "complexity": 3,
+      "risk_score": 0.0,
+      "max_wall_clock_minutes": 30,
+      "max_loc_delta": 300,
+      "completed_at": "2026-03-15"
+    },
+    {
+      "id": "T-002",
+      "status": "completed",
+      "title": "KeyBundleImporter v1+v2 codec + Ed25519 verify + TOFU + inline ImportResult sealed class",
+      "prompt": "(RETROSPECTIVE — shipped versionCode 50, 2026-03.) KeyBundleImporter.kt is CGC-verified to exist with the ImportResult sealed class INLINE at line 95. KeyBundleImporterTest.kt exists at the FLAT layout app/src/test/java/com/cubeos/meshsat/KeyBundleImporterTest.kt.",
+      "files_owned": [
+        "app/src/main/java/com/cubeos/meshsat/crypto/KeyBundleImporter.kt",
+        "app/src/test/java/com/cubeos/meshsat/KeyBundleImporterTest.kt"
+      ],
+      "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/cubeos/meshsat-android && ./gradlew :app:testDebugUnitTest --tests com.cubeos.meshsat.KeyBundleImporterTest'",
+      "dependencies": ["T-001"],
+      "parallelizable": false,
+      "bounded_context": "crypto",
+      "requirement_ids": ["REQ-001", "REQ-002", "REQ-003", "REQ-004", "REQ-005", "REQ-006", "REQ-007", "REQ-008", "REQ-009", "REQ-010", "REQ-011", "REQ-014", "REQ-015", "REQ-016", "REQ-017"],
+      "complexity": 6,
+      "risk_score": 0.0,
+      "max_wall_clock_minutes": 60,
+      "max_loc_delta": 700,
+      "completed_at": "2026-03-15"
+    }
+  ]
+}
