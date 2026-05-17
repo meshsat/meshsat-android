@@ -12,9 +12,10 @@
         "app/src/main/java/com/cubeos/meshsat/data/AppDatabase.kt",
         "app/src/main/java/com/cubeos/meshsat/data/BridgeTrustEntity.kt",
         "app/src/main/java/com/cubeos/meshsat/data/BridgeTrustDao.kt",
-        "app/src/test/java/com/cubeos/meshsat/data/BridgeTrustDaoTest.kt"
+        "app/src/test/java/com/cubeos/meshsat/BridgeTrustDaoTest.kt"
       ],
-      "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/cubeos/meshsat-android && ./gradlew :app:testDebugUnitTest --tests com.cubeos.meshsat.data.BridgeTrustDaoTest'",
+      "_files_owned_note": "CGC-verified 2026-05-18: BridgeTrustEntity.kt + BridgeTrustDao.kt EXIST at the listed paths. AppDatabase.kt EXISTS with MIGRATION_12_13 defining bridge_trust table (current DB version = 14). Tests use flat layout per the repo convention (app/src/test/java/com/cubeos/meshsat/*Test.kt). BridgeTrustDaoTest.kt remains future-work (not in repo as of audit).",
+      "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/cubeos/meshsat-android && ./gradlew :app:testDebugUnitTest --tests com.cubeos.meshsat.BridgeTrustDaoTest'",
       "dependencies": [],
       "parallelizable": true,
       "bounded_context": "data",
@@ -31,10 +32,10 @@
       "prompt": "FIRST: read spec/001-tofu-bundle-v2/{requirements.md, design.md, contracts/schemas/key-bundle-v2.json, acceptance/tofu-pin.feature}. SECOND: implement the importer end-to-end — REQ-001 (URI parse), REQ-002 (Ed25519 signature verify covering bytes 0..53 + 118..end), REQ-003 (first-pin → NEW_TRUSTED + insert row), REQ-004 (matching pubkey → EXISTING_TRUSTED), REQ-005 (mismatched pubkey → KeyMismatch, do NOT apply), REQ-006 (bad sig → InvalidSignature), REQ-007 (malformed → Malformed with reason), REQ-008 (v1 → UNVERIFIED_V1 + apply), REQ-009 (acceptRepinForBridgeHash → update pubkey + apply + REPINNED_AFTER_MISMATCH), REQ-011 (sealed class with exactly 4 variants), REQ-013 (java.util.Base64 — Constitution Article VI), REQ-014 (per-channel AES keys applied to channel-keys storage), REQ-015 (touch last_seen_at on EXISTING_TRUSTED), REQ-016 (binary wire format exact byte layout), REQ-017 (constructor takes DAO interfaces, no Context). Ed25519 verification MUST pass \"BC\" explicitly to Signature.getInstance per Constitution Article III. Tests: 11 unit-test cases covering every REQ-NNN row plus the negative paths in the feature file.",
       "files_owned": [
         "app/src/main/java/com/cubeos/meshsat/crypto/KeyBundleImporter.kt",
-        "app/src/main/java/com/cubeos/meshsat/crypto/ImportResult.kt",
-        "app/src/test/java/com/cubeos/meshsat/crypto/KeyBundleImporterTest.kt"
+        "app/src/test/java/com/cubeos/meshsat/KeyBundleImporterTest.kt"
       ],
-      "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/cubeos/meshsat-android && ./gradlew :app:testDebugUnitTest --tests com.cubeos.meshsat.crypto.KeyBundleImporterTest'",
+      "_files_owned_note": "CGC-verified 2026-05-18: KeyBundleImporter.kt EXISTS at the listed path. The sealed class ImportResult is INLINE at line 95 of KeyBundleImporter.kt — no separate ImportResult.kt file (removed from files_owned). KeyBundleImporterTest.kt EXISTS at app/src/test/java/com/cubeos/meshsat/KeyBundleImporterTest.kt (flat test layout per repo convention).",
+      "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/cubeos/meshsat-android && ./gradlew :app:testDebugUnitTest --tests com.cubeos.meshsat.KeyBundleImporterTest'",
       "dependencies": ["T-001"],
       "parallelizable": false,
       "bounded_context": "crypto",

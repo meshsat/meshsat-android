@@ -1,26 +1,35 @@
 {
   "feature_id": "003-pair-shell",
   "parent_epic": "MESHSAT-S8-Android",
-  "spec_revision": "1 (2026-05-17 — Path A Batch 6 — meshsat-android Phase 8)",
+  "spec_revision": "1 (2026-05-17 \u2014 Path A Batch 6 \u2014 meshsat-android Phase 8)",
   "tasks": [
     {
       "id": "T-001",
       "status": "pending",
-      "title": "Room v15→v16 paired_bridges table + DAO + three-way splash + Settings → Mode reentry (S8-07, S8-10)",
-      "prompt": "FIRST: read spec/003-pair-shell/{requirements.md, design.md, acceptance/pair-shell.feature}. SECOND: (REQ-200..204) implement WelcomeSplashScreen.kt with the 3 tiles + Settings → Mode reentry path. Persist app.mode in DataStore. (REQ-214/215) Room migration v15→v16 adds paired_bridges table per REQ-213 schema. Single migration per Article XIII. DAOs JVM-testable per Article VI.",
+      "title": "Room v15\u2192v16 paired_bridges table + DAO + three-way splash + Settings \u2192 Mode reentry (S8-07, S8-10)",
+      "prompt": "FIRST: read spec/003-pair-shell/{requirements.md, design.md, acceptance/pair-shell.feature}. SECOND: (REQ-200..204) implement WelcomeSplashScreen.kt with the 3 tiles + Settings \u2192 Mode reentry path. Persist app.mode in DataStore. (REQ-214/215) Room migration v15\u2192v16 adds paired_bridges table per REQ-213 schema. Single migration per Article XIII. DAOs JVM-testable per Article VI.",
       "files_owned": [
         "app/src/main/java/com/cubeos/meshsat/ui/screens/WelcomeSplashScreen.kt",
         "app/src/main/java/com/cubeos/meshsat/data/PairedBridgesEntity.kt",
         "app/src/main/java/com/cubeos/meshsat/data/PairedBridgesDao.kt",
         "app/src/main/java/com/cubeos/meshsat/data/AppDatabase.kt",
         "app/src/main/java/com/cubeos/meshsat/datastore/AppMode.kt",
-        "app/src/test/java/com/cubeos/meshsat/data/PairedBridgesDaoTest.kt"
+        "app/src/test/java/com/cubeos/meshsat/PairedBridgesDaoTest.kt"
       ],
-      "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/cubeos/meshsat-android && ./gradlew :app:testDebugUnitTest --tests com.cubeos.meshsat.data.PairedBridgesDaoTest'",
+      "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/cubeos/meshsat-android && ./gradlew :app:testDebugUnitTest --tests com.cubeos.meshsat.PairedBridgesDaoTest'",
       "dependencies": [],
       "parallelizable": true,
       "bounded_context": "data",
-      "requirement_ids": ["REQ-200", "REQ-201", "REQ-202", "REQ-203", "REQ-204", "REQ-213", "REQ-214", "REQ-215"],
+      "requirement_ids": [
+        "REQ-200",
+        "REQ-201",
+        "REQ-202",
+        "REQ-203",
+        "REQ-204",
+        "REQ-213",
+        "REQ-214",
+        "REQ-215"
+      ],
       "complexity": 5,
       "risk_score": 0.4,
       "max_wall_clock_minutes": 60,
@@ -35,14 +44,26 @@
         "app/src/main/java/com/cubeos/meshsat/ui/screens/PairScannerScreen.kt",
         "app/src/main/java/com/cubeos/meshsat/crypto/PairClaimClient.kt",
         "app/src/main/java/com/cubeos/meshsat/crypto/PairedClientKeystore.kt",
-        "app/src/test/java/com/cubeos/meshsat/crypto/PairClaimClientTest.kt",
-        "app/src/test/java/com/cubeos/meshsat/crypto/PairedClientKeystoreTest.kt"
+        "app/src/test/java/com/cubeos/meshsat/PairClaimClientTest.kt",
+        "app/src/test/java/com/cubeos/meshsat/PairedClientKeystoreTest.kt"
       ],
-      "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/cubeos/meshsat-android && ./gradlew :app:testDebugUnitTest --tests com.cubeos.meshsat.crypto.PairClaimClientTest'",
-      "dependencies": ["T-001"],
+      "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/cubeos/meshsat-android && ./gradlew :app:testDebugUnitTest --tests com.cubeos.meshsat.PairClaimClientTest'",
+      "dependencies": [
+        "T-001"
+      ],
       "parallelizable": false,
       "bounded_context": "crypto",
-      "requirement_ids": ["REQ-205", "REQ-206", "REQ-207", "REQ-208", "REQ-209", "REQ-210", "REQ-211", "REQ-212", "REQ-224"],
+      "requirement_ids": [
+        "REQ-205",
+        "REQ-206",
+        "REQ-207",
+        "REQ-208",
+        "REQ-209",
+        "REQ-210",
+        "REQ-211",
+        "REQ-212",
+        "REQ-224"
+      ],
       "complexity": 7,
       "risk_score": 0.7,
       "max_wall_clock_minutes": 100,
@@ -60,17 +81,31 @@
         "app/src/main/java/com/cubeos/meshsat/store/SourceStore.kt",
         "app/src/main/java/com/cubeos/meshsat/service/PerSourceNotifications.kt",
         "app/src/main/java/com/cubeos/meshsat/data/RemovePairedBridge.kt",
-        "app/src/test/java/com/cubeos/meshsat/ui/HybridShellTest.kt"
+        "app/src/test/java/com/cubeos/meshsat/HybridShellTest.kt"
       ],
-      "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/cubeos/meshsat-android && ./gradlew :app:testDebugUnitTest --tests com.cubeos.meshsat.ui.HybridShellTest'",
-      "dependencies": ["T-002"],
+      "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/cubeos/meshsat-android && ./gradlew :app:testDebugUnitTest --tests com.cubeos.meshsat.HybridShellTest'",
+      "dependencies": [
+        "T-002"
+      ],
       "parallelizable": false,
       "bounded_context": "ui",
-      "requirement_ids": ["REQ-216", "REQ-217", "REQ-218", "REQ-219", "REQ-220", "REQ-221", "REQ-222", "REQ-223", "REQ-225", "REQ-226"],
+      "requirement_ids": [
+        "REQ-216",
+        "REQ-217",
+        "REQ-218",
+        "REQ-219",
+        "REQ-220",
+        "REQ-221",
+        "REQ-222",
+        "REQ-223",
+        "REQ-225",
+        "REQ-226"
+      ],
       "complexity": 7,
       "risk_score": 0.6,
       "max_wall_clock_minutes": 100,
       "max_loc_delta": 1300
     }
-  ]
+  ],
+  "_audit_note": "CGC-verified 2026-05-18: test paths flattened to match repo convention (app/src/test/java/com/cubeos/meshsat/*Test.kt). All future-work paths follow same shape as existing tests (BirthSignerTest, RnsHdlcTest, KeyBundleImporterTest, etc.)."
 }

@@ -1,13 +1,13 @@
 {
   "feature_id": "002-directory-sync",
   "parent_epic": "MESHSAT-S5-Android",
-  "spec_revision": "1 (2026-05-17 — Path A Batch 6 — meshsat-android Phase 5)",
+  "spec_revision": "1 (2026-05-17 \u2014 Path A Batch 6 \u2014 meshsat-android Phase 5)",
   "tasks": [
     {
       "id": "T-001",
       "status": "pending",
-      "title": "Room migration v14→v15: paired_bridge_* tables + DAOs",
-      "prompt": "FIRST: read spec/002-directory-sync/{requirements.md, design.md} AND meshsat/spec/002-unified-directory/design.md for the bridge-side schema. SECOND: implement Room migration v14→v15 in app/src/main/java/com/cubeos/meshsat/data/. Create entities + DAOs for paired_bridge_contacts (composite PK bridge_id+contact_id), paired_bridge_addresses, paired_bridge_groups, paired_bridge_dispatch_policies. Single migration per Article XIII. JVM-test-friendly DAO interfaces per Article VI / REQ-118 / REQ-120.",
+      "title": "Room migration v14\u2192v15: paired_bridge_* tables + DAOs",
+      "prompt": "FIRST: read spec/002-directory-sync/{requirements.md, design.md} AND meshsat/spec/002-unified-directory/design.md for the bridge-side schema. SECOND: implement Room migration v14\u2192v15 in app/src/main/java/com/cubeos/meshsat/data/. Create entities + DAOs for paired_bridge_contacts (composite PK bridge_id+contact_id), paired_bridge_addresses, paired_bridge_groups, paired_bridge_dispatch_policies. Single migration per Article XIII. JVM-test-friendly DAO interfaces per Article VI / REQ-118 / REQ-120.",
       "files_owned": [
         "app/src/main/java/com/cubeos/meshsat/data/PairedBridgeContactEntity.kt",
         "app/src/main/java/com/cubeos/meshsat/data/PairedBridgeAddressEntity.kt",
@@ -15,13 +15,18 @@
         "app/src/main/java/com/cubeos/meshsat/data/PairedBridgeDispatchPolicyEntity.kt",
         "app/src/main/java/com/cubeos/meshsat/data/PairedBridgeDirectoryDao.kt",
         "app/src/main/java/com/cubeos/meshsat/data/AppDatabase.kt",
-        "app/src/test/java/com/cubeos/meshsat/data/PairedBridgeDirectoryDaoTest.kt"
+        "app/src/test/java/com/cubeos/meshsat/PairedBridgeDirectoryDaoTest.kt"
       ],
-      "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/cubeos/meshsat-android && ./gradlew :app:testDebugUnitTest --tests com.cubeos.meshsat.data.PairedBridgeDirectoryDaoTest'",
+      "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/cubeos/meshsat-android && ./gradlew :app:testDebugUnitTest --tests com.cubeos.meshsat.PairedBridgeDirectoryDaoTest'",
       "dependencies": [],
       "parallelizable": true,
       "bounded_context": "data",
-      "requirement_ids": ["REQ-100", "REQ-101", "REQ-118", "REQ-120"],
+      "requirement_ids": [
+        "REQ-100",
+        "REQ-101",
+        "REQ-118",
+        "REQ-120"
+      ],
       "complexity": 4,
       "risk_score": 0.4,
       "max_wall_clock_minutes": 45,
@@ -34,13 +39,23 @@
       "prompt": "FIRST: read spec/002-directory-sync/{requirements.md, design.md, acceptance/directory-sync.feature}. SECOND: implement app/src/main/java/com/cubeos/meshsat/service/DirectorySyncService.kt. (REQ-102) HTTP GET /api/directory/snapshot?since=N against each paired bridge using OkHttp + Authorization Bearer. (REQ-103) Ed25519 signature verify with \"BC\" provider per Article III against the pinned bridge_trust pubkey. (REQ-104) Room transaction apply on success. (REQ-105) WARN log on sig failure. (REQ-106) subscribe to meshsat/bridge/{id}/directory/changed MQTT topic + trigger pull within 5 seconds. (REQ-120) DAO interfaces directly so JVM-testable.",
       "files_owned": [
         "app/src/main/java/com/cubeos/meshsat/service/DirectorySyncService.kt",
-        "app/src/test/java/com/cubeos/meshsat/service/DirectorySyncServiceTest.kt"
+        "app/src/test/java/com/cubeos/meshsat/DirectorySyncServiceTest.kt"
       ],
-      "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/cubeos/meshsat-android && ./gradlew :app:testDebugUnitTest --tests com.cubeos.meshsat.service.DirectorySyncServiceTest'",
-      "dependencies": ["T-001"],
+      "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/cubeos/meshsat-android && ./gradlew :app:testDebugUnitTest --tests com.cubeos.meshsat.DirectorySyncServiceTest'",
+      "dependencies": [
+        "T-001"
+      ],
       "parallelizable": false,
       "bounded_context": "service",
-      "requirement_ids": ["REQ-102", "REQ-103", "REQ-104", "REQ-105", "REQ-106", "REQ-119", "REQ-120"],
+      "requirement_ids": [
+        "REQ-102",
+        "REQ-103",
+        "REQ-104",
+        "REQ-105",
+        "REQ-106",
+        "REQ-119",
+        "REQ-120"
+      ],
       "complexity": 5,
       "risk_score": 0.5,
       "max_wall_clock_minutes": 60,
@@ -50,24 +65,41 @@
       "id": "T-003",
       "status": "pending",
       "title": "PeopleScreen + ContactDetailScreen + Compose nav + QR export/import + ContactCardImporter",
-      "prompt": "FIRST: read spec/002-directory-sync/{requirements.md, design.md, acceptance/directory-sync.feature}. SECOND: (REQ-108..112) implement PeopleScreen.kt + ContactDetailScreen.kt as Compose Material 3 screens. Search + filter + tap to detail. (REQ-107) stale banner via store.lastSyncAt. (REQ-113) Share via QR action calls POST /api/directory/contacts/{id}/qr/handoff + renders ZXing QR. (REQ-114..116) Scan contact QR opens CameraX + ZXing; on parse calls POST /api/directory/contacts/import-handoff + triggers DirectorySyncService.refresh(). (REQ-117) inline error on failed import. Add ContactCardImporter.kt parallel to existing KeyBundleImporter.kt — REQ-119 keeps the existing importer unchanged.",
+      "prompt": "FIRST: read spec/002-directory-sync/{requirements.md, design.md, acceptance/directory-sync.feature}. SECOND: (REQ-108..112) implement PeopleScreen.kt + ContactDetailScreen.kt as Compose Material 3 screens. Search + filter + tap to detail. (REQ-107) stale banner via store.lastSyncAt. (REQ-113) Share via QR action calls POST /api/directory/contacts/{id}/qr/handoff + renders ZXing QR. (REQ-114..116) Scan contact QR opens CameraX + ZXing; on parse calls POST /api/directory/contacts/import-handoff + triggers DirectorySyncService.refresh(). (REQ-117) inline error on failed import. Add ContactCardImporter.kt parallel to existing KeyBundleImporter.kt \u2014 REQ-119 keeps the existing importer unchanged.",
       "files_owned": [
         "app/src/main/java/com/cubeos/meshsat/ui/screens/PeopleScreen.kt",
         "app/src/main/java/com/cubeos/meshsat/ui/screens/ContactDetailScreen.kt",
         "app/src/main/java/com/cubeos/meshsat/ui/components/ContactQRDisplay.kt",
         "app/src/main/java/com/cubeos/meshsat/ui/components/ContactQRScanner.kt",
         "app/src/main/java/com/cubeos/meshsat/crypto/ContactCardImporter.kt",
-        "app/src/test/java/com/cubeos/meshsat/crypto/ContactCardImporterTest.kt"
+        "app/src/test/java/com/cubeos/meshsat/ContactCardImporterTest.kt"
       ],
-      "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/cubeos/meshsat-android && ./gradlew :app:testDebugUnitTest --tests com.cubeos.meshsat.crypto.ContactCardImporterTest'",
-      "dependencies": ["T-001", "T-002"],
+      "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/cubeos/meshsat-android && ./gradlew :app:testDebugUnitTest --tests com.cubeos.meshsat.ContactCardImporterTest'",
+      "dependencies": [
+        "T-001",
+        "T-002"
+      ],
       "parallelizable": false,
       "bounded_context": "ui",
-      "requirement_ids": ["REQ-107", "REQ-108", "REQ-109", "REQ-110", "REQ-111", "REQ-112", "REQ-113", "REQ-114", "REQ-115", "REQ-116", "REQ-117", "REQ-119"],
+      "requirement_ids": [
+        "REQ-107",
+        "REQ-108",
+        "REQ-109",
+        "REQ-110",
+        "REQ-111",
+        "REQ-112",
+        "REQ-113",
+        "REQ-114",
+        "REQ-115",
+        "REQ-116",
+        "REQ-117",
+        "REQ-119"
+      ],
       "complexity": 6,
       "risk_score": 0.5,
       "max_wall_clock_minutes": 75,
       "max_loc_delta": 1100
     }
-  ]
+  ],
+  "_audit_note": "CGC-verified 2026-05-18: test paths flattened to match repo convention (app/src/test/java/com/cubeos/meshsat/*Test.kt). All future-work paths follow same shape as existing tests (BirthSignerTest, RnsHdlcTest, KeyBundleImporterTest, etc.)."
 }
