@@ -1,0 +1,36 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "bridge-trust-entry.json",
+  "title": "BridgeTrustEntry",
+  "description": "One row in the bridge_trust Room table (REQ-010). Models TOFU pin state for a single bridge.",
+  "type": "object",
+  "required": ["bridge_hash", "signing_pubkey_hex", "first_seen_at", "last_seen_at", "status"],
+  "properties": {
+    "bridge_hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{32}$",
+      "description": "16-byte bridge identifier (hex). Primary key."
+    },
+    "signing_pubkey_hex": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "Pinned Ed25519 signing pubkey (32 bytes, hex). Updated only via explicit user-accepted re-pin (REQ-009)."
+    },
+    "first_seen_at": {
+      "type": "integer",
+      "minimum": 1700000000,
+      "description": "Unix epoch seconds when this bridge_hash was first pinned. Immutable after insert."
+    },
+    "last_seen_at": {
+      "type": "integer",
+      "minimum": 1700000000,
+      "description": "Unix epoch seconds of the most recent successful bundle import for this bridge. Updated on every EXISTING_TRUSTED match (REQ-015)."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["NEW_TRUSTED", "EXISTING_TRUSTED", "REPINNED_AFTER_MISMATCH"],
+      "description": "Current pin state. NEW_TRUSTED on first import; EXISTING_TRUSTED on subsequent matching imports; REPINNED_AFTER_MISMATCH if the user accepted a re-pin after a KeyMismatch."
+    }
+  },
+  "additionalProperties": false
+}

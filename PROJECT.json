@@ -1,0 +1,77 @@
+{
+  "slug": "meshsat-android",
+  "title": "MeshSat Android \u2014 standalone field-gateway mobile app",
+  "youtrack_prefix": "MESHSAT",
+  "youtrack_disambiguator": "tag:android OR summary contains 'Compose'/'Android'/'Kotlin' \u2014 see ROUTING.md",
+  "matrix_room": "!miZJJDwFQZDkuMcBqL:matrix.nuclearlighters.net",
+  "primary_language": "kotlin",
+  "test_command": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/cubeos/meshsat-android && ./gradlew testDebugUnitTest'",
+  "lint_command": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/cubeos/meshsat-android && ./gradlew lintDebug'",
+  "build_command": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/cubeos/meshsat-android && ./gradlew assembleDebug'",
+  "ci_pipeline": ".gitlab-ci.yml",
+  "bounded_contexts": [
+    "api",
+    "aprs",
+    "ble",
+    "bt",
+    "channel",
+    "codec",
+    "config",
+    "crypto",
+    "data",
+    "dedup",
+    "dtn",
+    "engine",
+    "fec",
+    "hemb",
+    "hub",
+    "map",
+    "mqtt",
+    "ratelimit",
+    "reticulum",
+    "rlnc",
+    "routing",
+    "rules",
+    "satellite",
+    "service",
+    "sms",
+    "tak",
+    "timesync",
+    "ui",
+    "app-entry",
+    "build-config",
+    "android-resources"
+  ],
+  "max_parallel_workers": 3,
+  "max_loc_per_worker": 500,
+  "owners": [
+    "ufwtqkgz@meshsat.net"
+  ],
+  "risk_profile": "medium",
+  "gitlab_project_id": 31,
+  "android_min_sdk": 26,
+  "android_target_sdk": 35,
+  "android_compile_sdk": 35,
+  "current_version": "v2.8.6 / versionCode 51 (2026-04-05)",
+  "build_host_required": "nllei01androidsdk01 (192.168.181.101) \u2014 gradlew MUST NOT run locally",
+  "distribution": [
+    "GitHub Releases (primary, APK sideload)",
+    "Play Store (secondary, AAB)"
+  ],
+  "release_workflow": "push-to-main-builds-automatically",
+  "parallel_dev_exception": {
+    "allowed": true,
+    "workflow": "merge/<feature_id> short-lived branch + 1 MR per feature + auto-delete branch on merge",
+    "rationale": "Repo's default 'push to main' rule conflicts with parallel-dev. Override only applies to parallel-dev waves."
+  },
+  "test_infrastructure_gaps": [
+    "NO androidTest/ directory \u2014 instrumented tests not in CI",
+    "Real-device validation requires emulator on nllei01androidsdk01 (shared resource)"
+  ],
+  "surfaces": {
+    "http_api": true,
+    "events": false,
+    "persistent_data": true
+  },
+  "_bounded_contexts_note": "1:1 mapping with actual Kotlin packages under com.cubeos.meshsat/. + app-entry for top-level MainActivity/MeshSatApp + build-config for Gradle/proguard + android-resources for res/."
+}

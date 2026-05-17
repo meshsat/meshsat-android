@@ -1,0 +1,107 @@
+openapi: 3.0.3
+info:
+  title: MeshSat Android — Key Bundle Import (Local REST API)
+  version: 1.0.0
+  description: >
+    REST surface exposed on localhost:6051 by the on-device NanoHTTPD server.
+    Used by Hub-driven automation and E2E tests to drive bundle imports
+    without operator interaction. Constitution Article X requires this
+    surface to be preserved across releases.
+servers:
+  - url: http://localhost:6051
+    description: On-device API server (loopback only)
+components:
+  schemas:
+    BundleImportRequest:
+      type: object
+      required:
+        - uri
+      properties:
+        uri:
+          type: string
+          pattern: '^meshsat://key/[A-Za-z0-9_-]+$'
+          description: meshsat://key/<base64url-payload> from QR scan
+        acceptRepinForBridgeHash:
+          type: string
+          description: When provided, accept a prior KeyMismatch outcome and update the stored pubkey for this bridge_hash
+    ImportResultResponse:
+      type: object
+      required:
+        - kind
+      properties:
+        kind:
+          type: string
+          enum:
+            - Success
+            - KeyMismatch
+            - InvalidSignature
+            - Malformed
+        bridge_hash:
+          type: string
+        status:
+          type: string
+          enum:
+            - NEW_TRUSTED
+            - EXISTING_TRUSTED
+            - UNVERIFIED_V1
+            - REPINNED_AFTER_MISMATCH
+        reason:
+          type: string
+          description: Present when kind=Malformed
+    BridgeTrustEntry:
+      type: object
+      required:
+        - bridge_hash
+        - signing_pubkey_hex
+        - first_seen_at
+        - last_seen_at
+        - status
+      properties:
+        bridge_hash:
+          type: string
+        signing_pubkey_hex:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+        first_seen_at:
+          type: integer
+          minimum: 1700000000
+        last_seen_at:
+          type: integer
+          minimum: 1700000000
+        status:
+          type: string
+          enum:
+            - NEW_TRUSTED
+            - EXISTING_TRUSTED
+            - REPINNED_AFTER_MISMATCH
+paths:
+  /api/keybundle/import:
+    post:
+      summary: Import a key bundle from a QR-scanned URI
+      operationId: importKeyBundle
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BundleImportRequest'
+      responses:
+        '200':
+          description: Bundle was processed (check kind field for outcome)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportResultResponse'
+  /api/keybundle/bridge_trust:
+    get:
+      summary: List all pinned bridge trust entries
+      operationId: listBridgeTrust
+      responses:
+        '200':
+          description: Array of bridge_trust rows
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/BridgeTrustEntry'

@@ -1,0 +1,48 @@
+{
+  "feature_id": "001-tofu-bundle-v2",
+  "parent_epic": "MESHSAT-495",
+  "spec_revision": "1 (2026-05-17 retrospective — feature shipped v2.8.5, versionCode 50, 2026-03)",
+  "tasks": [
+    {
+      "id": "T-001",
+      "status": "completed",
+      "title": "data/AppDatabase.kt — Room migration 12→13 + bridge_trust entity + DAO",
+      "prompt": "FIRST: read spec/001-tofu-bundle-v2/{requirements.md, design.md, contracts/schemas/bridge-trust-entry.json}. SECOND: implement the Room schema delta — REQ-010 (table columns + types per design.md), REQ-012 (migration 12→13 atomic + block imports while running per Constitution Article XIII single-migration-per-version). Add BridgeTrustEntity, BridgeTrustDao (with the contract methods getByHash, insert, updatePubkey, touchLastSeen, listAll). Wire into AppDatabase entities list. Update DB version constant. Migration MUST be Kotlin-test-runnable (Room migration test harness).",
+      "files_owned": [
+        "app/src/main/java/com/cubeos/meshsat/data/AppDatabase.kt",
+        "app/src/main/java/com/cubeos/meshsat/data/BridgeTrustEntity.kt",
+        "app/src/main/java/com/cubeos/meshsat/data/BridgeTrustDao.kt",
+        "app/src/test/java/com/cubeos/meshsat/data/BridgeTrustDaoTest.kt"
+      ],
+      "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/cubeos/meshsat-android && ./gradlew :app:testDebugUnitTest --tests com.cubeos.meshsat.data.BridgeTrustDaoTest'",
+      "dependencies": [],
+      "parallelizable": true,
+      "bounded_context": "data",
+      "requirement_ids": ["REQ-010", "REQ-012"],
+      "complexity": 3,
+      "risk_score": 0.3,
+      "max_wall_clock_minutes": 30,
+      "max_loc_delta": 300
+    },
+    {
+      "id": "T-002",
+      "status": "completed",
+      "title": "crypto/KeyBundleImporter.kt — v1+v2 codec + Ed25519 verify + TOFU + ImportResult sealed class",
+      "prompt": "FIRST: read spec/001-tofu-bundle-v2/{requirements.md, design.md, contracts/schemas/key-bundle-v2.json, acceptance/tofu-pin.feature}. SECOND: implement the importer end-to-end — REQ-001 (URI parse), REQ-002 (Ed25519 signature verify covering bytes 0..53 + 118..end), REQ-003 (first-pin → NEW_TRUSTED + insert row), REQ-004 (matching pubkey → EXISTING_TRUSTED), REQ-005 (mismatched pubkey → KeyMismatch, do NOT apply), REQ-006 (bad sig → InvalidSignature), REQ-007 (malformed → Malformed with reason), REQ-008 (v1 → UNVERIFIED_V1 + apply), REQ-009 (acceptRepinForBridgeHash → update pubkey + apply + REPINNED_AFTER_MISMATCH), REQ-011 (sealed class with exactly 4 variants), REQ-013 (java.util.Base64 — Constitution Article VI), REQ-014 (per-channel AES keys applied to channel-keys storage), REQ-015 (touch last_seen_at on EXISTING_TRUSTED), REQ-016 (binary wire format exact byte layout), REQ-017 (constructor takes DAO interfaces, no Context). Ed25519 verification MUST pass \"BC\" explicitly to Signature.getInstance per Constitution Article III. Tests: 11 unit-test cases covering every REQ-NNN row plus the negative paths in the feature file.",
+      "files_owned": [
+        "app/src/main/java/com/cubeos/meshsat/crypto/KeyBundleImporter.kt",
+        "app/src/main/java/com/cubeos/meshsat/crypto/ImportResult.kt",
+        "app/src/test/java/com/cubeos/meshsat/crypto/KeyBundleImporterTest.kt"
+      ],
+      "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/cubeos/meshsat-android && ./gradlew :app:testDebugUnitTest --tests com.cubeos.meshsat.crypto.KeyBundleImporterTest'",
+      "dependencies": ["T-001"],
+      "parallelizable": false,
+      "bounded_context": "crypto",
+      "requirement_ids": ["REQ-001", "REQ-002", "REQ-003", "REQ-004", "REQ-005", "REQ-006", "REQ-007", "REQ-008", "REQ-009", "REQ-011", "REQ-013", "REQ-014", "REQ-015", "REQ-016", "REQ-017"],
+      "complexity": 6,
+      "risk_score": 0.6,
+      "max_wall_clock_minutes": 60,
+      "max_loc_delta": 700
+    }
+  ]
+}

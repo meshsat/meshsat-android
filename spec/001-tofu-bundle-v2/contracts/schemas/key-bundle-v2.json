@@ -1,0 +1,60 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "key-bundle-v2.json",
+  "title": "KeyBundleV2",
+  "description": "Decoded form of the v2 binary bundle. The on-wire format is binary (REQ-016); this JSON Schema constrains the parsed Kotlin object for test fixtures, REST inspection, and operator debugging.",
+  "type": "object",
+  "required": ["version", "bridge_hash_hex", "timestamp", "signing_pubkey_hex", "signature_hex", "entries"],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "const": 2
+    },
+    "bridge_hash_hex": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{32}$",
+      "description": "16-byte bridge hash, hex-encoded (lowercase, no separators)"
+    },
+    "timestamp": {
+      "type": "integer",
+      "minimum": 1700000000,
+      "description": "Unix epoch seconds when bundle was minted"
+    },
+    "entry_count": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 255
+    },
+    "signing_pubkey_hex": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "32-byte Ed25519 public key, hex-encoded"
+    },
+    "signature_hex": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{128}$",
+      "description": "64-byte Ed25519 signature, hex-encoded"
+    },
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["channel_id", "aes_key_hex"],
+        "properties": {
+          "channel_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "aes_key_hex": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "description": "32-byte AES-256 key, hex-encoded"
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

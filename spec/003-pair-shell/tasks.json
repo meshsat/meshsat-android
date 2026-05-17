@@ -1,0 +1,76 @@
+{
+  "feature_id": "003-pair-shell",
+  "parent_epic": "MESHSAT-S8-Android",
+  "spec_revision": "1 (2026-05-17 — Path A Batch 6 — meshsat-android Phase 8)",
+  "tasks": [
+    {
+      "id": "T-001",
+      "status": "pending",
+      "title": "Room v15→v16 paired_bridges table + DAO + three-way splash + Settings → Mode reentry (S8-07, S8-10)",
+      "prompt": "FIRST: read spec/003-pair-shell/{requirements.md, design.md, acceptance/pair-shell.feature}. SECOND: (REQ-200..204) implement WelcomeSplashScreen.kt with the 3 tiles + Settings → Mode reentry path. Persist app.mode in DataStore. (REQ-214/215) Room migration v15→v16 adds paired_bridges table per REQ-213 schema. Single migration per Article XIII. DAOs JVM-testable per Article VI.",
+      "files_owned": [
+        "app/src/main/java/com/cubeos/meshsat/ui/screens/WelcomeSplashScreen.kt",
+        "app/src/main/java/com/cubeos/meshsat/data/PairedBridgesEntity.kt",
+        "app/src/main/java/com/cubeos/meshsat/data/PairedBridgesDao.kt",
+        "app/src/main/java/com/cubeos/meshsat/data/AppDatabase.kt",
+        "app/src/main/java/com/cubeos/meshsat/datastore/AppMode.kt",
+        "app/src/test/java/com/cubeos/meshsat/data/PairedBridgesDaoTest.kt"
+      ],
+      "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/cubeos/meshsat-android && ./gradlew :app:testDebugUnitTest --tests com.cubeos.meshsat.data.PairedBridgesDaoTest'",
+      "dependencies": [],
+      "parallelizable": true,
+      "bounded_context": "data",
+      "requirement_ids": ["REQ-200", "REQ-201", "REQ-202", "REQ-203", "REQ-204", "REQ-213", "REQ-214", "REQ-215"],
+      "complexity": 5,
+      "risk_score": 0.4,
+      "max_wall_clock_minutes": 60,
+      "max_loc_delta": 800
+    },
+    {
+      "id": "T-002",
+      "status": "pending",
+      "title": "PairScannerScreen + ECDH/CSR/HMAC pair-claim + Keystore storage (S8-08, S8-09)",
+      "prompt": "FIRST: read spec/003-pair-shell/{requirements.md, design.md, acceptance/pair-shell.feature} AND meshsat/spec/001-pair-protocol/ for protocol details. SECOND: (REQ-205) PairScannerScreen.kt with CameraX + ZXing. (REQ-206) verify QR's Ed25519 sig with \"BC\" provider per Article III. (REQ-207/208) X25519 + Ed25519 keypair generation + CSR + HKDF-SHA256. (REQ-209/210) TLS 1.3 with OkHttp CertificatePinner against QR.fp; abort on mismatch. (REQ-211) POST /api/v2/pair/claim with HMAC-SHA256(ss, ...). (REQ-212) on 200, store cert+JWT in Android Keystore via PairedClientKeystore.kt + EncryptedSharedPreferences for JWT. (REQ-224) NEVER persist raw private key bytes outside the Keystore. Tests cover happy path + SPKI mismatch + sig invalid.",
+      "files_owned": [
+        "app/src/main/java/com/cubeos/meshsat/ui/screens/PairScannerScreen.kt",
+        "app/src/main/java/com/cubeos/meshsat/crypto/PairClaimClient.kt",
+        "app/src/main/java/com/cubeos/meshsat/crypto/PairedClientKeystore.kt",
+        "app/src/test/java/com/cubeos/meshsat/crypto/PairClaimClientTest.kt",
+        "app/src/test/java/com/cubeos/meshsat/crypto/PairedClientKeystoreTest.kt"
+      ],
+      "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/cubeos/meshsat-android && ./gradlew :app:testDebugUnitTest --tests com.cubeos.meshsat.crypto.PairClaimClientTest'",
+      "dependencies": ["T-001"],
+      "parallelizable": false,
+      "bounded_context": "crypto",
+      "requirement_ids": ["REQ-205", "REQ-206", "REQ-207", "REQ-208", "REQ-209", "REQ-210", "REQ-211", "REQ-212", "REQ-224"],
+      "complexity": 7,
+      "risk_score": 0.7,
+      "max_wall_clock_minutes": 100,
+      "max_loc_delta": 1200
+    },
+    {
+      "id": "T-003",
+      "status": "pending",
+      "title": "Hybrid Compose+WebView shell + Source switcher + per-source notifications + remove-pairing flow (S8-11, S8-12)",
+      "prompt": "FIRST: read spec/003-pair-shell/{requirements.md, design.md, acceptance/pair-shell.feature}. SECOND: (REQ-216) implement HybridShell.kt orchestrating native vs WebView routing per the table in design.md. (REQ-217/218/226) WebView client uses OkHttp interceptor for Authorization Bearer + TLS SPKI verification; on mismatch reject with explicit error AND NO load. Per Article XIV, Compose state via rememberSaveable. (REQ-219/220/221) SourceSwitcher.kt as Material 3 top-drawer + Pinia-equivalent state pattern (Kotlin shared store). Per-source data scope reload within 2s. (REQ-222/223) tagged notifications per spec/009 REQ-803 + nav on tap. (REQ-225) removePairedBridge() wipes Keystore alias + paired_bridges row + paired_bridge_* rows.",
+      "files_owned": [
+        "app/src/main/java/com/cubeos/meshsat/ui/HybridShell.kt",
+        "app/src/main/java/com/cubeos/meshsat/ui/SourceSwitcher.kt",
+        "app/src/main/java/com/cubeos/meshsat/ui/web/PinnedWebViewClient.kt",
+        "app/src/main/java/com/cubeos/meshsat/store/SourceStore.kt",
+        "app/src/main/java/com/cubeos/meshsat/service/PerSourceNotifications.kt",
+        "app/src/main/java/com/cubeos/meshsat/data/RemovePairedBridge.kt",
+        "app/src/test/java/com/cubeos/meshsat/ui/HybridShellTest.kt"
+      ],
+      "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/cubeos/meshsat-android && ./gradlew :app:testDebugUnitTest --tests com.cubeos.meshsat.ui.HybridShellTest'",
+      "dependencies": ["T-002"],
+      "parallelizable": false,
+      "bounded_context": "ui",
+      "requirement_ids": ["REQ-216", "REQ-217", "REQ-218", "REQ-219", "REQ-220", "REQ-221", "REQ-222", "REQ-223", "REQ-225", "REQ-226"],
+      "complexity": 7,
+      "risk_score": 0.6,
+      "max_wall_clock_minutes": 100,
+      "max_loc_delta": 1300
+    }
+  ]
+}
