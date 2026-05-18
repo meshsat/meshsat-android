@@ -35,7 +35,21 @@
       "complexity": 5,
       "risk_score": 0.4,
       "max_wall_clock_minutes": 70,
-      "max_loc_delta": 800
+      "max_loc_delta": 800,
+      "observability": {
+        "prometheus_metrics": [
+          "meshsat_android_pair_shell_requests_total",
+          "meshsat_android_pair_shell_request_duration_seconds",
+          "meshsat_android_pair_shell_errors_total"
+        ],
+        "slo_targets": {
+          "p95_latency_ms": 200,
+          "p99_latency_ms": 500,
+          "error_rate_max": 0.001,
+          "_notes": "placeholder \u2014 refine during task execution based on profiling"
+        },
+        "_notes": "Placeholder block for T-001. Replace with concrete metric names as code lands. If this task does NOT need metrics (e.g. CI/build task), replace this block with `no_observability_required: \"<reason>\"` instead."
+      }
     },
     {
       "id": "T-002",
@@ -69,7 +83,21 @@
       "complexity": 7,
       "risk_score": 0.7,
       "max_wall_clock_minutes": 110,
-      "max_loc_delta": 1300
+      "max_loc_delta": 1300,
+      "observability": {
+        "prometheus_metrics": [
+          "meshsat_android_pair_shell_requests_total",
+          "meshsat_android_pair_shell_request_duration_seconds",
+          "meshsat_android_pair_shell_errors_total"
+        ],
+        "slo_targets": {
+          "p95_latency_ms": 200,
+          "p99_latency_ms": 500,
+          "error_rate_max": 0.001,
+          "_notes": "placeholder \u2014 refine during task execution based on profiling"
+        },
+        "_notes": "Placeholder block for T-002. Replace with concrete metric names as code lands. If this task does NOT need metrics (e.g. CI/build task), replace this block with `no_observability_required: \"<reason>\"` instead."
+      }
     },
     {
       "id": "T-003",
@@ -105,7 +133,21 @@
       "complexity": 7,
       "risk_score": 0.6,
       "max_wall_clock_minutes": 110,
-      "max_loc_delta": 1400
+      "max_loc_delta": 1400,
+      "observability": {
+        "prometheus_metrics": [
+          "meshsat_android_pair_shell_requests_total",
+          "meshsat_android_pair_shell_request_duration_seconds",
+          "meshsat_android_pair_shell_errors_total"
+        ],
+        "slo_targets": {
+          "p95_latency_ms": 200,
+          "p99_latency_ms": 500,
+          "error_rate_max": 0.001,
+          "_notes": "placeholder \u2014 refine during task execution based on profiling"
+        },
+        "_notes": "Placeholder block for T-003. Replace with concrete metric names as code lands. If this task does NOT need metrics (e.g. CI/build task), replace this block with `no_observability_required: \"<reason>\"` instead."
+      }
     }
   ]
 }
