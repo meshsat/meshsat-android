@@ -1,5 +1,7 @@
 Feature: Android directory sync (spec/002)
 
+  # Covers: REQ-100, REQ-101, REQ-102, REQ-103, REQ-104, REQ-105, REQ-106, REQ-107, REQ-108, REQ-109, REQ-110, REQ-111, REQ-112, REQ-113, REQ-114, REQ-115, REQ-116, REQ-117, REQ-118, REQ-119, REQ-120
+
   Background:
     Given the Android app is paired with bridge B (bridge_trust row exists)
     And Room is at version 15 with paired_bridge_* tables

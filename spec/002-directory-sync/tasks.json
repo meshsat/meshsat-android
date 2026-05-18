@@ -1,7 +1,8 @@
 {
   "feature_id": "002-directory-sync",
+  "_cgc_verified_at": "2026-05-18",
   "parent_epic": "MESHSAT-S5-Android",
-  "spec_revision": "1 (2026-05-18 — CGC-verified paths)",
+  "spec_revision": "1 (2026-05-18 \u2014 CGC-verified paths)",
   "tasks": [
     {
       "id": "T-001",
@@ -21,7 +22,12 @@
       "dependencies": [],
       "parallelizable": true,
       "bounded_context": "data",
-      "requirement_ids": ["REQ-100", "REQ-101", "REQ-102", "REQ-118"],
+      "requirement_ids": [
+        "REQ-100",
+        "REQ-101",
+        "REQ-102",
+        "REQ-118"
+      ],
       "complexity": 5,
       "risk_score": 0.4,
       "max_wall_clock_minutes": 75,
@@ -31,7 +37,7 @@
       "id": "T-002",
       "status": "pending",
       "title": "DirectorySyncService + ContactCardImporter",
-      "prompt": "FIRST: read spec/002-directory-sync/{requirements.md, design.md, acceptance/directory-sync.feature}. SECOND: add service/DirectorySyncService.kt (alongside existing GatewayService.kt + TransportRegistry.kt) and crypto/ContactCardImporter.kt (alongside KeyBundleImporter.kt — same shape: sealed class inline, explicit \"BC\" provider per Article C-II). Per-bridge poll + Ed25519 verify against bridge_trust.pubkey + Room transaction apply + MQTT-trigger subscriber. Tests at FLAT layout per Article C-VIII.",
+      "prompt": "FIRST: read spec/002-directory-sync/{requirements.md, design.md, acceptance/directory-sync.feature}. SECOND: add service/DirectorySyncService.kt (alongside existing GatewayService.kt + TransportRegistry.kt) and crypto/ContactCardImporter.kt (alongside KeyBundleImporter.kt \u2014 same shape: sealed class inline, explicit \"BC\" provider per Article C-II). Per-bridge poll + Ed25519 verify against bridge_trust.pubkey + Room transaction apply + MQTT-trigger subscriber. Tests at FLAT layout per Article C-VIII.",
       "files_owned": [
         "app/src/main/java/com/cubeos/meshsat/service/DirectorySyncService.kt",
         "app/src/main/java/com/cubeos/meshsat/crypto/ContactCardImporter.kt",
@@ -39,10 +45,25 @@
         "app/src/test/java/com/cubeos/meshsat/ContactCardImporterTest.kt"
       ],
       "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/cubeos/meshsat-android && ./gradlew :app:testDebugUnitTest --tests com.cubeos.meshsat.DirectorySyncServiceTest --tests com.cubeos.meshsat.ContactCardImporterTest'",
-      "dependencies": ["T-001"],
+      "dependencies": [
+        "T-001"
+      ],
       "parallelizable": false,
       "bounded_context": "service",
-      "requirement_ids": ["REQ-103", "REQ-104", "REQ-105", "REQ-106", "REQ-107", "REQ-108", "REQ-114", "REQ-115", "REQ-116", "REQ-117", "REQ-119", "REQ-120"],
+      "requirement_ids": [
+        "REQ-103",
+        "REQ-104",
+        "REQ-105",
+        "REQ-106",
+        "REQ-107",
+        "REQ-108",
+        "REQ-114",
+        "REQ-115",
+        "REQ-116",
+        "REQ-117",
+        "REQ-119",
+        "REQ-120"
+      ],
       "complexity": 6,
       "risk_score": 0.5,
       "max_wall_clock_minutes": 100,
@@ -60,10 +81,19 @@
         "app/src/main/java/com/cubeos/meshsat/ui/components/ContactQRScanner.kt"
       ],
       "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/cubeos/meshsat-android && ./gradlew :app:assembleDebug'",
-      "dependencies": ["T-001", "T-002"],
+      "dependencies": [
+        "T-001",
+        "T-002"
+      ],
       "parallelizable": false,
       "bounded_context": "ui",
-      "requirement_ids": ["REQ-109", "REQ-110", "REQ-111", "REQ-112", "REQ-113"],
+      "requirement_ids": [
+        "REQ-109",
+        "REQ-110",
+        "REQ-111",
+        "REQ-112",
+        "REQ-113"
+      ],
       "complexity": 5,
       "risk_score": 0.4,
       "max_wall_clock_minutes": 80,

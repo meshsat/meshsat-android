@@ -1,5 +1,7 @@
 Feature: Android pair shell (spec/003)
 
+  # Covers: REQ-200, REQ-201, REQ-202, REQ-203, REQ-204, REQ-205, REQ-206, REQ-207, REQ-208, REQ-209, REQ-210, REQ-211, REQ-212, REQ-213, REQ-214, REQ-215, REQ-216, REQ-217, REQ-218, REQ-219, REQ-220, REQ-221, REQ-222, REQ-223, REQ-224, REQ-225, REQ-226
+
   Background:
     Given the Android app launches for the first time
     And no paired_bridges row exists in Room v16
