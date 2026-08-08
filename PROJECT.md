@@ -14,9 +14,17 @@ Inter-node protocol: `meshsat-uplink/v1` (Sparkplug-B-inspired BIRTH/DATA/DEATH 
 
 ## What this repo owns (CGC-verified scope as of 2026-05-18)
 
-The current shipped feature set spans **29 top-level packages** holding 269 source files / 9,993 functions / 680 classes / 18 Room entities (DB v14). Functional groups:
+The current shipped feature set spans **28 top-level packages** under
+`app/src/main/java/com/cubeos/meshsat/`, holding **194 Kotlin source files** (239 including
+tests), **1.523 function declarations**, **360 class, object and interface declarations**,
+41.906 lines, and **18 Room entities** (DB v14). Test suite: 519 `@Test` functions.
 
-1. **Transport adapters** — BLE Meshtastic (`ble/`), Iridium SPP over Bluetooth (`bt/`), APRS over KISS (`aprs/`), AX.25, Astrocast SPP (`astrocast/`), SMS native (`sms/`), MQTT, TAK/CoT (`tak/`).
+Recounted from the tree 2026-08-08, superseding the CGC-derived figures dated 2026-05-18 which
+claimed 269 source files / 9.993 functions / 680 classes / 29 packages — the function count was
+out by roughly six and a half times and the class count by about two. Recount before quoting any
+of these externally.
+
+1. **Transport adapters** — BLE Meshtastic (`ble/`), Iridium SPP over Bluetooth (`bt/`), APRS over KISS (`aprs/`), AX.25, SMS native (`sms/`), MQTT, TAK/CoT (`tak/`).
 2. **Codec + crypto** — SMAZ2 (`codec/`), AES-GCM (`crypto/AesGcmCrypto.kt`), MSVQ-SC compression decoder (`crypto/MsvqscEncoder.kt` + tokenizer), Android Keystore (`crypto/SecureKeyStore.kt`), TOFU key-bundle import (`crypto/KeyBundleImporter.kt`).
 3. **Routing engine** — Reticulum (`reticulum/`), HeMB heterogeneous media bonding (`hemb/`), DTN bundle store/forward (`dtn/`), FEC + RLNC (`fec/` + `rlnc/`), per-rule access filtering (`rules/`).
 4. **Engine internals** — Dispatcher (`engine/Dispatcher.kt`), DeadManSwitch, GeofenceMonitor, HealthScorer, InterfaceManager, BurstQueue, CreditTracker, SequenceTracker, TelemetryLogger.

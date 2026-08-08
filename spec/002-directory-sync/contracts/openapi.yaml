@@ -95,7 +95,7 @@ components:
         contact_id: {type: string}
         address_type:
           type: string
-          enum: [meshtastic, iridium, sms, aprs, mqtt, tak, ble, astrocast]
+          enum: [meshtastic, iridium, sms, aprs, mqtt, tak, ble]
         address_value: {type: string}
     Group:
       type: object

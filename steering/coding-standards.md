@@ -10,7 +10,7 @@ Source: `app/src/main/java/com/cubeos/meshsat/<pkg>/<File>.kt`.
 
 | Functional group | Packages | Examples |
 |---|---|---|
-| Transports | `aprs`, `astrocast`, `ble`, `bt`, `sms`, `mqtt`, `tak`, `satellite` | `aprs/AprsBeacon.kt`, `ble/MeshtasticBle.kt` |
+| Transports | `aprs`, `ble`, `bt`, `sms`, `mqtt`, `tak`, `satellite` | `aprs/AprsBeacon.kt`, `ble/MeshtasticBle.kt` |
 | Codec + crypto | `codec`, `crypto`, `fec`, `rlnc` | `codec/Smaz2.kt`, `crypto/AesGcmCrypto.kt` |
 | Routing engine | `engine`, `reticulum`, `routing`, `rules`, `dtn`, `hemb`, `dedup`, `ratelimit` | `engine/Dispatcher.kt`, `hemb/HembBonder.kt` |
 | Data layer | `data` | `data/AppDatabase.kt`, `data/Message.kt` |
