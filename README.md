@@ -1,6 +1,6 @@
 # MeshSat Android -- Standalone Mobile Gateway & Reticulum Transport Node
 
-[![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
+[![License](https://img.shields.io/badge/license-GPLv3-blue)](LICENSE)
 [![GitHub Release](https://img.shields.io/github/v/release/cubeos-app/meshsat-android)](https://github.com/cubeos-app/meshsat-android/releases)
 
 Native Android app that turns a phone into a standalone field gateway and full Reticulum Transport Node. Bridges Meshtastic mesh (BLE), Iridium satellite (9603N SBD + 9704 IMT), APRS, cellular SMS, and MQTT -- with end-to-end encryption, semantic compression, and intelligent routing.
@@ -459,4 +459,11 @@ For security issues, please email disclosure to `security@nuclearlighters.net` r
 
 ## License
 
-Copyright 2026 Nuclear Lighters Inc. Licensed under the [Apache License 2.0](LICENSE).
+Copyright 2026 Nuclear Lighters Inc. Licensed under the
+[GNU General Public License v3.0](LICENSE).
+
+The app is GPLv3 because it incorporates the Meshtastic protobuf definitions
+vendored under `app/src/main/proto/meshtastic/`, which are themselves GPL-3.0.
+A permissive licence is therefore not available without replacing or
+re-deriving those definitions. See [NOTICE](NOTICE) for third-party
+components and their licences.

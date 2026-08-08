@@ -1,0 +1,87 @@
+MeshSat Android
+Copyright 2026 Nuclear Lighters Inc.
+
+This product is licensed under the GNU General Public License v3.0.
+See the LICENSE file for the full text.
+
+================================================================================
+WHY GPLv3
+================================================================================
+
+The application incorporates the Meshtastic protobuf definitions vendored under
+app/src/main/proto/meshtastic/, which are licensed GPL-3.0. Because those
+definitions are compiled into the shipped binary, the application as a whole is
+distributed under GPL-3.0. A permissive licence is not available for this
+project without replacing or re-deriving those definitions and re-verifying
+every dependency below.
+
+Earlier revisions of README.md and CONTRIBUTING.md stated Apache-2.0. That was
+an error introduced when the README was edited without changing LICENSE; it has
+been corrected. No relicensing was ever performed or intended.
+
+================================================================================
+VENDORED SOURCES
+================================================================================
+
+Meshtastic protobuf definitions
+  Location: app/src/main/proto/meshtastic/
+  Upstream: https://github.com/meshtastic/protobufs
+  Licence:  GPL-3.0
+
+TAK protobuf definitions
+  Location: app/src/main/proto/takproto/
+  Licence:  NEEDS VERIFICATION — confirm the upstream source and its licence
+            terms before the next release, and record the result here.
+
+JSPR protocol implementation for the RockBLOCK 9704
+  Location: app/src/main/java/com/cubeos/meshsat/bt/Iridium9704Spp.kt
+  Derived from Ground Control's reference C library (MIT licence).
+  Attribution is recorded here; the file itself carries no header.
+
+================================================================================
+THIRD-PARTY DEPENDENCIES
+================================================================================
+
+Apache License 2.0
+  androidx.core:core-ktx
+  androidx.lifecycle:lifecycle-runtime-ktx
+  androidx.activity:activity-compose
+  androidx.compose.* (ui, ui-graphics, ui-tooling-preview, material3,
+                      material-icons-extended)
+  androidx.navigation:navigation-compose
+  androidx.room:room-runtime, androidx.room:room-ktx
+  androidx.datastore:datastore-preferences
+  androidx.security:security-crypto
+  org.jetbrains.kotlinx:kotlinx-coroutines-android
+  org.osmdroid:osmdroid-android
+  com.journeyapps:zxing-android-embedded
+
+MIT License
+  com.microsoft.onnxruntime:onnxruntime-android
+
+Bouncy Castle Licence (MIT-style)
+  org.bouncycastle:bcprov-jdk18on
+
+BSD 3-Clause
+  com.google.protobuf:protobuf-javalite
+  no.nordicsemi.android:ble
+  org.nanohttpd:nanohttpd
+
+Eclipse Public License 1.0 / Eclipse Distribution License 1.0 (dual)
+  org.eclipse.paho:org.eclipse.paho.client.mqttv3
+  NOTE: EPL-1.0 is not compatible with GPL-3.0. This project relies on the
+  EDL-1.0 (BSD-3-Clause) arm of Paho's dual licence. Confirm this election is
+  documented and correct before the next release.
+
+================================================================================
+OUTSTANDING VERIFICATION
+================================================================================
+
+The two NEEDS VERIFICATION items above (TAK protobuf licence, Paho EDL
+election) are open. Neither blocks development, but both should be closed
+before any distribution that a third party relies on, and before this file is
+cited as evidence of licence hygiene.
+
+Bundled ML assets (codebook_v1.bin, corpus_index.bin, encoder.onnx, vocab.txt)
+are project-generated artefacts. If any is derived from a third-party model or
+corpus, its provenance and licence must be recorded here.

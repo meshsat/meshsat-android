@@ -59,4 +59,9 @@ When reporting test results for hardware, include:
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the Apache License 2.0.
+By contributing, you agree that your contributions will be licensed under the
+GNU General Public License v3.0, the licence in [LICENSE](LICENSE).
+
+This repository previously stated Apache-2.0 here. That was an error: the app
+vendors GPL-3.0 Meshtastic protobuf definitions, so Apache-2.0 was never a
+licence this project could grant.
