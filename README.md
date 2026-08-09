@@ -459,7 +459,7 @@ For security issues, please email disclosure to `security@nuclearlighters.net` r
 
 ## License
 
-Copyright 2026 Nuclear Lighters Inc. Licensed under the
+Copyright 2026 - Elli & Kyriakos. Licensed under the
 [GNU General Public License v3.0](LICENSE).
 
 The app is GPLv3 because it incorporates the Meshtastic protobuf definitions
