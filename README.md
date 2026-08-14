@@ -129,7 +129,7 @@ Phone (MeshSat Android)
 | APRS | Direwolf KISS TNC | KISS TNC + APRS-IS |
 | TAK gateway (CoT XML server) | Full server + client | Receive-only (Hub broadcast) |
 | Webhooks | Outbound HTTP | -- |
-| HeMB bonding (RLNC) | Measured on hardware (multi-bearer) | -- |
+| HeMB bonding (RLNC) | Measured on hardware (multi-bearer) | Ported from the Go implementation (`hemb/` + `rlnc/` packages); spec-derived conformance validation pending |
 | Dead Man Switch | Yes | Yes |
 | Geofence Monitor | Yes | Yes |
 | Hub client (mTLS + 8 commands) | Yes | Yes |
