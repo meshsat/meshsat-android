@@ -1,11 +1,11 @@
 #!/bin/bash
-# MESHSAT-496 P0: Set GitHub repo metadata for cubeos-app/meshsat-android
+# MESHSAT-496 P0: Set GitHub repo metadata for meshsat/meshsat-android
 # Run manually with a GitHub token that has repo admin access:
 #   GITHUB_TOKEN=ghp_xxx bash docs/github-metadata.sh
 
 set -euo pipefail
 
-REPO="cubeos-app/meshsat-android"
+REPO="meshsat/meshsat-android"
 TOKEN="${GITHUB_TOKEN:?Set GITHUB_TOKEN env var}"
 
 echo "==> Setting description + homepage..."

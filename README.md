@@ -1,7 +1,7 @@
 # MeshSat Android -- Standalone Mobile Gateway & Reticulum Transport Node
 
 [![License](https://img.shields.io/badge/license-GPLv3-blue)](LICENSE)
-[![GitHub Release](https://img.shields.io/github/v/release/cubeos-app/meshsat-android)](https://github.com/cubeos-app/meshsat-android/releases)
+[![GitHub Release](https://img.shields.io/github/v/release/meshsat/meshsat-android)](https://github.com/meshsat/meshsat-android/releases)
 
 Native Android app that turns a phone into a standalone field gateway and full Reticulum Transport Node. Bridges Meshtastic mesh (BLE), Iridium satellite (9603N SBD + 9704 IMT), APRS, cellular SMS, and MQTT -- with end-to-end encryption, semantic compression, and intelligent routing.
 
@@ -24,7 +24,7 @@ The phone IS the gateway. No companion app, no server dependency, no internet re
 
 ### End Users -- Install from GitHub Releases
 
-1. Download the latest signed APK from [GitHub Releases](https://github.com/cubeos-app/meshsat-android/releases)
+1. Download the latest signed APK from [GitHub Releases](https://github.com/meshsat/meshsat-android/releases)
 2. On your phone, enable **Settings > Security > Install unknown apps** for your browser
 3. Open the downloaded `.apk` and tap **Install**
 4. If Google Play Protect warns about an unknown developer, tap **Install anyway** -- the APK is signed (see [Release Signing](#release-signing) below)
@@ -35,7 +35,7 @@ The phone IS the gateway. No companion app, no server dependency, no internet re
 Requires Android SDK (compileSdk 35) and JDK 17.
 
 ```bash
-git clone https://github.com/cubeos-app/meshsat-android.git
+git clone https://github.com/meshsat/meshsat-android.git
 cd meshsat-android
 ./gradlew assembleDebug
 # APK at app/build/outputs/apk/debug/app-debug.apk
@@ -389,7 +389,7 @@ Other modern Android devices (Android 8.0+ / API 26+) should work — the app's 
 - MSVQ-SC compression, AES-GCM encryption
 - Field intelligence (dead man switch, geofence, health scores)
 
-For detailed release notes, see [GitHub Releases](https://github.com/cubeos-app/meshsat-android/releases).
+For detailed release notes, see [GitHub Releases](https://github.com/meshsat/meshsat-android/releases).
 
 ## Config Management
 
@@ -435,14 +435,14 @@ DataStore for all settings including encryption keys, transport config, routing 
 
 ## Related Projects
 
-- [MeshSat Bridge](https://github.com/cubeos-app/meshsat) -- Go gateway for Raspberry Pi / Linux (same transport suite, USB devices)
+- [MeshSat Bridge](https://github.com/meshsat/meshsat) -- Go gateway for Raspberry Pi / Linux (same transport suite, USB devices)
 - [MeshSat Hub](https://hub.meshsat.net) -- Multi-tenant SaaS fleet management platform
 - [MeshSat Website](https://meshsat.net) -- Documentation, install scripts, getting started guide
 - [CubeOS](https://cubeos.app) -- Self-hosted OS for SBCs and edge devices
 
 ## Community
 
-- GitHub: [github.com/cubeos-app/meshsat-android](https://github.com/cubeos-app/meshsat-android)
+- GitHub: [github.com/meshsat/meshsat-android](https://github.com/meshsat/meshsat-android)
 - Issues: Use GitHub Issues for bugs and feature requests
 - Website: [meshsat.net](https://meshsat.net)
 

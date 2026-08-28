@@ -12,7 +12,7 @@ stages:
   - release
 
 variables:
-  GITHUB_REPO: "cubeos-app/meshsat-android"
+  GITHUB_REPO: "meshsat/meshsat-android"
   BAO_ADDR: "https://openbao.nuclearlighters.net:8200"
 
 # =============================================================================
