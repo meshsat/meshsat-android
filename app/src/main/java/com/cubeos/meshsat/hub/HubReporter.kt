@@ -132,6 +132,18 @@ class HubReporter(
                             Log.i(TAG, "Certificate pinning enabled for Hub MQTT")
                         }
                     }
+
+                    // The edge routes mqtt-hub by SNI at the TCP layer, and Paho's
+                    // wss module creates hostless sockets that send none (MESHSAT-749).
+                    if (config.hubUrl.startsWith("wss://") || config.hubUrl.startsWith("ssl://")) {
+                        val sniHost = runCatching { java.net.URI(config.hubUrl).host }.getOrNull().orEmpty()
+                        if (sniHost.isNotBlank()) {
+                            val base = (socketFactory as? javax.net.ssl.SSLSocketFactory)
+                                ?: javax.net.ssl.SSLSocketFactory.getDefault() as javax.net.ssl.SSLSocketFactory
+                            socketFactory = com.cubeos.meshsat.mqtt.SniSSLSocketFactory(base, sniHost)
+                            Log.i(TAG, "SNI forced for $sniHost")
+                        }
+                    }
                 }
 
                 mqttClient.setCallback(object : MqttCallback {
