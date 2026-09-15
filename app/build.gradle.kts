@@ -141,9 +141,13 @@ dependencies {
     // QR code scanning (Hub key sync — MESHSAT-205)
     implementation("com.journeyapps:zxing-android-embedded:4.3.0")
 
+    // WebSocket client for the Hub relay tunnel (MESHSAT-1157)
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+
     // Test
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
+    testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
 
     // Debug
     debugImplementation("androidx.compose.ui:ui-tooling")
