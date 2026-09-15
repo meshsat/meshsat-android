@@ -83,6 +83,11 @@ class SettingsRepository(private val context: Context) {
         val KEY_HUB_USERNAME = stringPreferencesKey("hub_username")
         val KEY_HUB_HEALTH_INTERVAL = stringPreferencesKey("hub_health_interval") // seconds as string
 
+        // Hub relay client (MESHSAT-1157)
+        val KEY_HUB_RELAY_ENABLED = booleanPreferencesKey("hub_relay_enabled")
+        val KEY_HUB_RELAY_TARGET = stringPreferencesKey("hub_relay_target")
+        val KEY_HUB_RELAY_URL = stringPreferencesKey("hub_relay_url")
+
         // mTLS settings (MESHSAT-387)
         val KEY_HUB_CLIENT_CERT = stringPreferencesKey("hub_client_cert_pem")
         val KEY_HUB_CLIENT_KEY = stringPreferencesKey("hub_client_key_pem")
@@ -593,6 +598,23 @@ class SettingsRepository(private val context: Context) {
     suspend fun setHubHealthInterval(interval: String) {
         context.dataStore.edit { it[KEY_HUB_HEALTH_INTERVAL] = interval }
     }
+
+    // --- Hub relay client (MESHSAT-1157) ---
+    // The relay is the fallback below LAN and RNS TCP for reaching a kit. It rides on the
+    // Hub Reporter's identity (bridge id, MQTT password, Hub-issued certificate), so it is
+    // on by default whenever the Hub is configured and only needs a target bridge id.
+
+    val hubRelayEnabled: Flow<Boolean> = context.dataStore.data.map { it[KEY_HUB_RELAY_ENABLED] ?: true }
+
+    /** The bridge id the phone tunnels to. Blank = relay not started. */
+    val hubRelayTarget: Flow<String> = context.dataStore.data.map { it[KEY_HUB_RELAY_TARGET] ?: "" }
+
+    /** Hub API base URL override (https://hub.example). Blank = derived from the MQTT URL. */
+    val hubRelayUrl: Flow<String> = context.dataStore.data.map { it[KEY_HUB_RELAY_URL] ?: "" }
+
+    suspend fun setHubRelayEnabled(enabled: Boolean) { context.dataStore.edit { it[KEY_HUB_RELAY_ENABLED] = enabled } }
+    suspend fun setHubRelayTarget(bridgeId: String) { context.dataStore.edit { it[KEY_HUB_RELAY_TARGET] = bridgeId.trim() } }
+    suspend fun setHubRelayUrl(url: String) { context.dataStore.edit { it[KEY_HUB_RELAY_URL] = url.trim() } }
 
     // --- mTLS settings (MESHSAT-387) ---
 

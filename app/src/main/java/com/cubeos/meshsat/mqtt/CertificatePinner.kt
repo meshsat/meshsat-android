@@ -40,64 +40,24 @@ class CertificatePinner private constructor(
             caCertPem: String? = null,
         ): SSLSocketFactory {
             val cf = java.security.cert.CertificateFactory.getInstance("X.509")
-            val clientCert = cf.generateCertificate(clientCertPem.byteInputStream()) as X509Certificate
 
-            val isSec1 = clientKeyPem.contains("BEGIN EC PRIVATE KEY")
-            val keyPem = clientKeyPem
-                .replace("-----BEGIN PRIVATE KEY-----", "")
-                .replace("-----END PRIVATE KEY-----", "")
-                .replace("-----BEGIN RSA PRIVATE KEY-----", "")
-                .replace("-----END RSA PRIVATE KEY-----", "")
-                .replace("-----BEGIN EC PRIVATE KEY-----", "")
-                .replace("-----END EC PRIVATE KEY-----", "")
-                .replace("\\s".toRegex(), "")
-            val rawKeyBytes = Base64.decode(keyPem, Base64.DEFAULT)
+            // PEM parsing (including the SEC1 -> PKCS#8 wrap the Hub's EC keys need) is
+            // shared with the relay tunnel's inner TLS (MESHSAT-1157), pure JVM.
+            val kmf = com.cubeos.meshsat.hub.relay.RelayTls.keyManagers(clientCertPem, clientKeyPem)
 
-            // SEC1 (BEGIN EC PRIVATE KEY) must be wrapped in PKCS#8 for Android KeyFactory
-            val keyBytes = if (isSec1) wrapSec1InPkcs8(rawKeyBytes) else rawKeyBytes
-
-            val keySpec = java.security.spec.PKCS8EncodedKeySpec(keyBytes)
-            val privateKey = try {
-                java.security.KeyFactory.getInstance("EC").generatePrivate(keySpec)
-            } catch (_: Exception) {
-                java.security.KeyFactory.getInstance("RSA").generatePrivate(keySpec)
+            // Server verification uses the SYSTEM roots only (Let's Encrypt at NATS and at
+            // the stunnel edge). The Hub bridge CA that arrives beside the client
+            // certificate (ca_pem) is deliberately NOT added here: it is the root for the
+            // TLS session INSIDE a relay tunnel (hub/relay/RelayTls) and for nothing
+            // else. The parameter stays so callers need not change; it is validated and
+            // otherwise unused on this path (MESHSAT-1157, Hub docs/relay.md).
+            if (caCertPem != null && caCertPem.isNotBlank()) {
+                cf.generateCertificate(caCertPem.byteInputStream()) as X509Certificate
             }
-
-            val clientKs = java.security.KeyStore.getInstance(java.security.KeyStore.getDefaultType())
-            clientKs.load(null, null)
-            clientKs.setKeyEntry("client", privateKey, charArrayOf(), arrayOf(clientCert))
-
-            val kmf = javax.net.ssl.KeyManagerFactory.getInstance(javax.net.ssl.KeyManagerFactory.getDefaultAlgorithm())
-            kmf.init(clientKs, charArrayOf())
-
-            // Always trust system CAs (Let's Encrypt, etc.) for server cert verification.
-            // If a custom CA is provided, add it to the trust store alongside system CAs.
-            val ks = java.security.KeyStore.getInstance(java.security.KeyStore.getDefaultType())
-            ks.load(null, null)
-
-            // Load system CAs into our keystore
-            val systemTmf = javax.net.ssl.TrustManagerFactory.getInstance(
-                javax.net.ssl.TrustManagerFactory.getDefaultAlgorithm()
-            )
-            systemTmf.init(null as java.security.KeyStore?)
-            for (tm in systemTmf.trustManagers) {
-                if (tm is javax.net.ssl.X509TrustManager) {
-                    for ((i, cert) in tm.acceptedIssuers.withIndex()) {
-                        ks.setCertificateEntry("system-$i", cert)
-                    }
-                }
-            }
-
-            // Add custom CA if provided (e.g., Hub Bridge CA)
-            if (caCertPem != null) {
-                val caCert = cf.generateCertificate(caCertPem.byteInputStream()) as X509Certificate
-                ks.setCertificateEntry("custom-ca", caCert)
-            }
-
             val tmf = javax.net.ssl.TrustManagerFactory.getInstance(
                 javax.net.ssl.TrustManagerFactory.getDefaultAlgorithm()
             )
-            tmf.init(ks)
+            tmf.init(null as java.security.KeyStore?)
             val trustManagers = tmf.trustManagers
 
             val sslContext = SSLContext.getInstance("TLS")
@@ -105,32 +65,6 @@ class CertificatePinner private constructor(
             return sslContext.socketFactory
         }
 
-        /**
-         * Wrap a SEC1 EC private key in PKCS#8 envelope.
-         * SEC1 = "BEGIN EC PRIVATE KEY", PKCS#8 = "BEGIN PRIVATE KEY"
-         * Android's KeyFactory requires PKCS#8.
-         */
-        private fun wrapSec1InPkcs8(sec1Der: ByteArray): ByteArray {
-            // PKCS#8 header for EC P-256 (secp256r1)
-            val algId = byteArrayOf(
-                0x30, 0x13,
-                0x06, 0x07, 0x2a, 0x86.toByte(), 0x48, 0xce.toByte(), 0x3d, 0x02, 0x01,
-                0x06, 0x08, 0x2a, 0x86.toByte(), 0x48, 0xce.toByte(), 0x3d, 0x03, 0x01, 0x07,
-            )
-            val version = byteArrayOf(0x02, 0x01, 0x00)
-            val octetString = if (sec1Der.size < 128) {
-                byteArrayOf(0x04, sec1Der.size.toByte()) + sec1Der
-            } else {
-                byteArrayOf(0x04, 0x81.toByte(), sec1Der.size.toByte()) + sec1Der
-            }
-            val innerLen = version.size + algId.size + octetString.size
-            val outer = if (innerLen < 128) {
-                byteArrayOf(0x30, innerLen.toByte())
-            } else {
-                byteArrayOf(0x30, 0x81.toByte(), innerLen.toByte())
-            }
-            return outer + version + algId + octetString
-        }
     }
 
     /**

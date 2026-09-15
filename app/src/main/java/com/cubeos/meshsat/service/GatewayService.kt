@@ -176,6 +176,10 @@ class GatewayService : Service() {
         var hubReporter: com.cubeos.meshsat.hub.HubReporter? = null
             private set
 
+        // Hub relay client — Reticulum over a Hub WebSocket tunnel to one kit (MESHSAT-1157)
+        var hubRelayTransport: com.cubeos.meshsat.hub.relay.RelayBridgeTransport? = null
+            private set
+
         // Pass-aware satellite scheduling (MESHSAT-386)
         var passScheduler: com.cubeos.meshsat.satellite.PassScheduler? = null
             private set
@@ -268,6 +272,7 @@ class GatewayService : Service() {
             initSmsRelay()
             initAprs()
             initRnsTcp()
+            initHubRelay()
             initReticulumTransportNode()
             initHubReporter()
             // 15. Pass-aware scheduling (MESHSAT-386)
@@ -355,6 +360,8 @@ class GatewayService : Service() {
         sosJob?.cancel()
         rnsTransportNode?.stop()
         rnsTransportNode = null
+        hubRelayTransport?.shutdown()
+        hubRelayTransport = null
         meshtasticBle?.disconnect()
         iridiumSpp?.disconnect()
         iridium9704Spp?.disconnect()
@@ -531,6 +538,9 @@ class GatewayService : Service() {
                             settings["hub_callsign"]?.let { s.setHubCallsign(it) }
                             settings["hub_username"]?.let { s.setHubUsername(it) }
                             settings["hub_password"]?.let { s.setHubPassword(it) }
+                            settings["hub_relay_enabled"]?.let { s.setHubRelayEnabled(it.toBoolean()) }
+                            settings["hub_relay_target"]?.let { s.setHubRelayTarget(it) }
+                            settings["hub_relay_url"]?.let { s.setHubRelayUrl(it) }
                             settings["tak_enabled"]?.let { s.setTakEnabled(it.toBoolean()) }
                             settings["tak_callsign_prefix"]?.let { s.setTakCallsignPrefix(it) }
                             settings["tak_mqtt_export"]?.let { s.setTakMqttExport(it.toBoolean()) }
@@ -1556,6 +1566,90 @@ class GatewayService : Service() {
     }
 
     /**
+     * Initialize the Hub relay client (MESHSAT-1157).
+     *
+     * The fallback below LAN and RNS TCP: a WebSocket tunnel through the Hub to one
+     * kit, carrying Reticulum packets as bare frames. Rides on the Hub Reporter's
+     * identity (bridge id and MQTT password) and needs only a target bridge id.
+     */
+    private fun initHubRelay() {
+        scope.launch {
+            try {
+                if (!settings.hubEnabled.first() || !settings.hubRelayEnabled.first()) {
+                    Log.d("MeshSat", "Hub relay disabled in settings")
+                    return@launch
+                }
+                val target = settings.hubRelayTarget.first()
+                if (target.isBlank()) {
+                    Log.d("MeshSat", "Hub relay: no target bridge configured")
+                    return@launch
+                }
+                val hubApiBase = com.cubeos.meshsat.hub.relay.RelayTunnel.deriveHubApiBase(
+                    settings.hubUrl.first(),
+                    settings.hubRelayUrl.first(),
+                )
+                val ownId = settings.hubBridgeId.first().ifEmpty {
+                    android.provider.Settings.Secure.getString(
+                        contentResolver,
+                        android.provider.Settings.Secure.ANDROID_ID,
+                    ) ?: "android-unknown"
+                }
+                val password = settings.hubPassword.first()
+                if (hubApiBase.isBlank() || password.isBlank()) {
+                    Log.w("MeshSat", "Hub relay: Hub URL or password not configured")
+                    return@launch
+                }
+                if (target == ownId) {
+                    Log.w("MeshSat", "Hub relay: target is this device, not started")
+                    return@launch
+                }
+
+                val relay = com.cubeos.meshsat.hub.relay.RelayBridgeTransport(
+                    scope = scope,
+                    config = com.cubeos.meshsat.hub.relay.RelayBridgeTransport.Config(
+                        hubApiBase = hubApiBase,
+                        targetBridgeId = target,
+                        ownBridgeId = ownId,
+                        password = password,
+                    ),
+                )
+                // Wire receive immediately: the transport node may not have started yet.
+                relay.setReceiveCallback(com.cubeos.meshsat.reticulum.RnsReceiveCallback { ifaceId, raw ->
+                    rnsTransportNode?.let { node ->
+                        scope.launch { node.onPacketReceived(ifaceId, raw) }
+                    }
+                })
+                relay.start()
+                hubRelayTransport = relay
+                registry.register(relay.interfaceId, relay)
+                scope.launch {
+                    relay.state.collect { state ->
+                        when (state) {
+                            is com.cubeos.meshsat.hub.relay.RelayTunnel.RelayState.Open ->
+                                interfaceManager?.setOnline(relay.interfaceId)
+                            is com.cubeos.meshsat.hub.relay.RelayTunnel.RelayState.Connecting ->
+                                interfaceManager?.setConnecting(relay.interfaceId)
+                            is com.cubeos.meshsat.hub.relay.RelayTunnel.RelayState.Refused ->
+                                interfaceManager?.setError(relay.interfaceId, "hub refused: HTTP ${state.httpCode}")
+                            is com.cubeos.meshsat.hub.relay.RelayTunnel.RelayState.Closed ->
+                                when (state.reason) {
+                                    com.cubeos.meshsat.hub.relay.RelayTunnel.CloseReason.Normal,
+                                    com.cubeos.meshsat.hub.relay.RelayTunnel.CloseReason.Local ->
+                                        interfaceManager?.setOffline(relay.interfaceId)
+                                    else ->
+                                        interfaceManager?.setError(relay.interfaceId, "${state.reason}: ${state.detail}")
+                                }
+                        }
+                    }
+                }
+                Log.i("MeshSat", "Hub relay initialized: $ownId -> $target via $hubApiBase")
+            } catch (e: Exception) {
+                Log.w("MeshSat", "Hub relay init failed (non-fatal): ${e.message}")
+            }
+        }
+    }
+
+    /**
      * Initialize Reticulum Transport Node (MESHSAT-199/267).
      * Creates the routing identity, all RnsInterfaces, and starts the transport node.
      */
@@ -1604,6 +1698,8 @@ class GatewayService : Service() {
                     }
                     // MQTT Reticulum interface (MESHSAT-354)
                     rnsMqttInterface?.let { map["mqtt_rns_0"] = it }
+                    // Hub relay tunnel to one kit (MESHSAT-1157)
+                    hubRelayTransport?.let { map[it.interfaceId] = it }
                     map
                 }
 
@@ -1716,6 +1812,12 @@ class GatewayService : Service() {
             autoReconnect = true,
             initialBackoff = 5.seconds,
             maxBackoff = 60.seconds,
+        ))
+        // Hub relay tunnel (MESHSAT-1157): the transport reconnects by itself, so the
+        // manager only mirrors its state and never schedules a reconnect of its own.
+        mgr.register(InterfaceConfig(
+            id = com.cubeos.meshsat.hub.relay.RelayBridgeTransport.INTERFACE_ID, channelType = "tcp",
+            autoReconnect = false,
         ))
 
         // Connect callback — triggers actual BLE/SPP connection
@@ -1867,7 +1969,7 @@ class GatewayService : Service() {
             }
         }
 
-        Log.i("MeshSat", "InterfaceManager initialized with 7 interfaces")
+        Log.i("MeshSat", "InterfaceManager initialized with 8 interfaces")
     }
 
     /**

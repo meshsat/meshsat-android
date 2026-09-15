@@ -147,6 +147,10 @@ fun SettingsScreen(navController: NavController? = null) {
     val hubUsername by settings.hubUsername.collectAsState(initial = "")
     val hubPassword by settings.hubPassword.collectAsState(initial = "")
     val hubHealthInterval by settings.hubHealthInterval.collectAsState(initial = "30")
+    // Hub relay client (MESHSAT-1157)
+    val hubRelayEnabled by settings.hubRelayEnabled.collectAsState(initial = true)
+    val hubRelayTarget by settings.hubRelayTarget.collectAsState(initial = "")
+    val hubRelayUrl by settings.hubRelayUrl.collectAsState(initial = "")
 
     var keyInput by remember(encryptionKey) { mutableStateOf(encryptionKey) }
     var phoneInput by remember(piPhone) { mutableStateOf(piPhone) }
@@ -182,6 +186,8 @@ fun SettingsScreen(navController: NavController? = null) {
     var hubUsernameInput by remember(hubUsername) { mutableStateOf(hubUsername) }
     var hubPasswordInput by remember(hubPassword) { mutableStateOf(hubPassword) }
     var hubHealthIntervalInput by remember(hubHealthInterval) { mutableStateOf(hubHealthInterval) }
+    var hubRelayTargetInput by remember(hubRelayTarget) { mutableStateOf(hubRelayTarget) }
+    var hubRelayUrlInput by remember(hubRelayUrl) { mutableStateOf(hubRelayUrl) }
     var showHubPassword by remember { mutableStateOf(false) }
 
     // QR provisioning state
@@ -1808,6 +1814,40 @@ fun SettingsScreen(navController: NavController? = null) {
                 colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = MeshSatTeal, unfocusedBorderColor = MeshSatBorder),
             )
 
+            // --- Hub relay client (MESHSAT-1157): fallback tunnel to one kit through the Hub ---
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Hub relay to a kit (fallback)", style = MaterialTheme.typography.bodyMedium)
+                Switch(
+                    checked = hubRelayEnabled,
+                    onCheckedChange = { scope.launch { settings.setHubRelayEnabled(it) } },
+                    colors = SwitchDefaults.colors(checkedTrackColor = MeshSatTeal),
+                )
+            }
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = hubRelayTargetInput,
+                    onValueChange = { hubRelayTargetInput = it },
+                    label = { Text("Relay target bridge ID", style = MaterialTheme.typography.bodySmall) },
+                    placeholder = { Text("kit-a", style = MaterialTheme.typography.bodySmall, color = MeshSatTextMuted) },
+                    singleLine = true, modifier = Modifier.weight(1f),
+                    textStyle = MaterialTheme.typography.bodyMedium,
+                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = MeshSatTeal, unfocusedBorderColor = MeshSatBorder),
+                )
+                OutlinedTextField(
+                    value = hubRelayUrlInput,
+                    onValueChange = { hubRelayUrlInput = it },
+                    label = { Text("Hub API URL (optional)", style = MaterialTheme.typography.bodySmall) },
+                    placeholder = { Text("derived from MQTT URL", style = MaterialTheme.typography.bodySmall, color = MeshSatTextMuted) },
+                    singleLine = true, modifier = Modifier.weight(1f),
+                    textStyle = MaterialTheme.typography.bodyMedium,
+                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = MeshSatTeal, unfocusedBorderColor = MeshSatBorder),
+                )
+            }
+
             Button(
                 onClick = {
                     scope.launch {
@@ -1817,6 +1857,8 @@ fun SettingsScreen(navController: NavController? = null) {
                         settings.setHubUsername(hubUsernameInput)
                         settings.setHubPassword(hubPasswordInput)
                         settings.setHubHealthInterval(hubHealthIntervalInput)
+                        settings.setHubRelayTarget(hubRelayTargetInput)
+                        settings.setHubRelayUrl(hubRelayUrlInput)
                     }
                     Toast.makeText(context, "Hub Reporter settings saved (restart to apply)", Toast.LENGTH_SHORT).show()
                 },
