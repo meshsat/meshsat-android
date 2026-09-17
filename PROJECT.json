@@ -5,9 +5,9 @@
   "youtrack_disambiguator": "tag:android OR summary contains 'android' / 'compose' / 'kotlin' / 'gradle'",
   "matrix_room": "!miZJJDwFQZDkuMcBqL:matrix.nuclearlighters.net",
   "primary_language": "kotlin",
-  "test_command": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/cubeos/meshsat-android && ./gradlew :app:testDebugUnitTest'",
-  "lint_command": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/cubeos/meshsat-android && ./gradlew :app:lintDebug'",
-  "build_command": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/cubeos/meshsat-android && ./gradlew :app:assembleDebug'",
+  "test_command": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:testDebugUnitTest'",
+  "lint_command": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:lintDebug'",
+  "build_command": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:assembleDebug'",
   "ci_pipeline": ".gitlab-ci.yml",
   "parent_project": {
     "slug": "cubeos",

@@ -14,7 +14,7 @@
         "app/src/main/java/com/cubeos/meshsat/data/BridgeTrustDao.kt",
         "app/src/main/java/com/cubeos/meshsat/data/AppDatabase.kt"
       ],
-      "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/cubeos/meshsat-android && ./gradlew :app:assembleDebug' && [ -f app/src/main/java/com/cubeos/meshsat/data/BridgeTrustEntity.kt ]",
+      "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:assembleDebug' && [ -f app/src/main/java/com/cubeos/meshsat/data/BridgeTrustEntity.kt ]",
       "dependencies": [],
       "parallelizable": true,
       "bounded_context": "data",
@@ -51,7 +51,7 @@
         "app/src/main/java/com/cubeos/meshsat/crypto/KeyBundleImporter.kt",
         "app/src/test/java/com/cubeos/meshsat/KeyBundleImporterTest.kt"
       ],
-      "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/cubeos/meshsat-android && ./gradlew :app:testDebugUnitTest --tests com.cubeos.meshsat.KeyBundleImporterTest'",
+      "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:testDebugUnitTest --tests com.cubeos.meshsat.KeyBundleImporterTest'",
       "dependencies": [
         "T-001"
       ],

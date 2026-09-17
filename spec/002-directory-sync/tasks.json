@@ -18,7 +18,7 @@
         "app/src/main/java/com/cubeos/meshsat/data/PairedBridgeDirectoryDao.kt",
         "app/src/test/java/com/cubeos/meshsat/PairedBridgeDirectoryDaoTest.kt"
       ],
-      "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/cubeos/meshsat-android && ./gradlew :app:testDebugUnitTest --tests com.cubeos.meshsat.PairedBridgeDirectoryDaoTest'",
+      "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:testDebugUnitTest --tests com.cubeos.meshsat.PairedBridgeDirectoryDaoTest'",
       "dependencies": [],
       "parallelizable": true,
       "bounded_context": "data",
@@ -58,7 +58,7 @@
         "app/src/test/java/com/cubeos/meshsat/DirectorySyncServiceTest.kt",
         "app/src/test/java/com/cubeos/meshsat/ContactCardImporterTest.kt"
       ],
-      "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/cubeos/meshsat-android && ./gradlew :app:testDebugUnitTest --tests com.cubeos.meshsat.DirectorySyncServiceTest --tests com.cubeos.meshsat.ContactCardImporterTest'",
+      "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:testDebugUnitTest --tests com.cubeos.meshsat.DirectorySyncServiceTest --tests com.cubeos.meshsat.ContactCardImporterTest'",
       "dependencies": [
         "T-001"
       ],
@@ -108,7 +108,7 @@
         "app/src/main/java/com/cubeos/meshsat/ui/components/ContactQRDisplay.kt",
         "app/src/main/java/com/cubeos/meshsat/ui/components/ContactQRScanner.kt"
       ],
-      "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/cubeos/meshsat-android && ./gradlew :app:assembleDebug'",
+      "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:assembleDebug'",
       "dependencies": [
         "T-001",
         "T-002"

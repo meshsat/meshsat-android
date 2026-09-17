@@ -47,9 +47,9 @@ Inherits the full CubeOS project-level constitution + the MeshSat sub-family con
 
 ```bash
 # Build runs on a remote SDK host — see ADR-0002 for rationale
-ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/cubeos/meshsat-android && ./gradlew :app:assembleDebug'
-ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/cubeos/meshsat-android && ./gradlew :app:testDebugUnitTest'
-ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/cubeos/meshsat-android && ./gradlew :app:lintDebug'
+ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:assembleDebug'
+ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:testDebugUnitTest'
+ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:lintDebug'
 ```
 
 `app/build.gradle.kts`:
@@ -66,6 +66,6 @@ All 45 existing tests live FLAT at `app/src/test/java/com/cubeos/meshsat/<Name>T
 
 - `meshsat-android/CLAUDE.md` (local-only operator notes)
 - Parent: `/home/claude-runner/gitlab/products/cubeos/docs/architecture/02_ARCHITECTURE.md` (CubeOS system architecture)
-- Parent: `/home/claude-runner/gitlab/products/cubeos/meshsat/UX-MULTI-ACCESS-KIOSK-PAIRING.md` (pair-shell protocol design)
-- Parent: `/home/claude-runner/gitlab/products/cubeos/meshsat/EXECUTION-PLAN.md` (cross-cut Android stories under §6.5 + §6.8)
+- Parent: `/home/claude-runner/gitlab/products/meshsat/meshsat/UX-MULTI-ACCESS-KIOSK-PAIRING.md` (pair-shell protocol design)
+- Parent: `/home/claude-runner/gitlab/products/meshsat/meshsat/EXECUTION-PLAN.md` (cross-cut Android stories under §6.5 + §6.8)
 - CGC audit: `claude-gateway/docs/sdd-audits/meshsat-android-cgc-2026-05-18.md`
