@@ -17,7 +17,7 @@
         "app/src/main/java/com/cubeos/meshsat/config/AppMode.kt",
         "app/src/test/java/com/cubeos/meshsat/PairedBridgesDaoTest.kt"
       ],
-      "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/cubeos/meshsat-android && ./gradlew :app:testDebugUnitTest --tests com.cubeos.meshsat.PairedBridgesDaoTest'",
+      "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:testDebugUnitTest --tests com.cubeos.meshsat.PairedBridgesDaoTest'",
       "dependencies": [],
       "parallelizable": true,
       "bounded_context": "data",
@@ -63,7 +63,7 @@
         "app/src/test/java/com/cubeos/meshsat/PairClaimClientTest.kt",
         "app/src/test/java/com/cubeos/meshsat/PairedClientKeystoreTest.kt"
       ],
-      "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/cubeos/meshsat-android && ./gradlew :app:testDebugUnitTest --tests com.cubeos.meshsat.PairClaimClientTest --tests com.cubeos.meshsat.PairedClientKeystoreTest'",
+      "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:testDebugUnitTest --tests com.cubeos.meshsat.PairClaimClientTest --tests com.cubeos.meshsat.PairedClientKeystoreTest'",
       "dependencies": [
         "T-001"
       ],
@@ -113,7 +113,7 @@
         "app/src/main/java/com/cubeos/meshsat/data/RemovePairedBridge.kt",
         "app/src/test/java/com/cubeos/meshsat/HybridShellTest.kt"
       ],
-      "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/cubeos/meshsat-android && ./gradlew :app:testDebugUnitTest --tests com.cubeos.meshsat.HybridShellTest'",
+      "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:testDebugUnitTest --tests com.cubeos.meshsat.HybridShellTest'",
       "dependencies": [
         "T-002"
       ],

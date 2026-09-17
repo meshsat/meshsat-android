@@ -15,7 +15,7 @@ Android builds need the Android SDK, JDK 17, ARM toolchains, AAPT2, kapt process
 All `./gradlew` invocations route via SSH to the SDK host:
 
 ```bash
-ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/cubeos/meshsat-android && ./gradlew <task>'
+ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew <task>'
 ```
 
 This applies to: assembleDebug, assembleRelease, testDebugUnitTest, lintDebug, etc. Local-workstation gradle is NOT supported.

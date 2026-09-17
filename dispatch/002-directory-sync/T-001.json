@@ -6,8 +6,8 @@
     "youtrack_prefix": "MESHSAT",
     "matrix_room": "!miZJJDwFQZDkuMcBqL:matrix.nuclearlighters.net",
     "primary_language": "kotlin",
-    "test_command": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/cubeos/meshsat-android && ./gradlew :app:testDebugUnitTest'",
-    "lint_command": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/cubeos/meshsat-android && ./gradlew :app:lintDebug'",
+    "test_command": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:testDebugUnitTest'",
+    "lint_command": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:lintDebug'",
     "security_posture": "private network app; mTLS to paired bridges; Android Keystore for client cert + private keys; never store private key bytes outside Keystore",
     "parent_project": {
       "slug": "cubeos",
@@ -37,7 +37,7 @@
       "app/src/main/java/com/cubeos/meshsat/data/PairedBridgeDirectoryDao.kt",
       "app/src/test/java/com/cubeos/meshsat/PairedBridgeDirectoryDaoTest.kt"
     ],
-    "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/cubeos/meshsat-android && ./gradlew :app:testDebugUnitTest --tests com.cubeos.meshsat.PairedBridgeDirectoryDaoTest'",
+    "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:testDebugUnitTest --tests com.cubeos.meshsat.PairedBridgeDirectoryDaoTest'",
     "dependencies": [],
     "parallelizable": true,
     "bounded_context": "data",
