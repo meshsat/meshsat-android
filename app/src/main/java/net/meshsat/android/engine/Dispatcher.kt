@@ -66,11 +66,41 @@ class Dispatcher(
     @Volatile var onUnconfirmed: (suspend (MessageDeliveryEntity, String) -> Unit)? = null
 
     /**
+     * Asked before each send; false stops the delivery for good (status dead, "cancelled"). An SOS
+     * that was cancelled while one of its sends was under way must not go out on the retry, after
+     * its cancellation (MESHSAT-1249).
+     */
+    @Volatile var mayDeliver: (suspend (MessageDeliveryEntity) -> Boolean)? = null
+
+    /**
+     * The signed audit log (MESHSAT-1249): "deliver" when a delivery went out, "drop" when it was
+     * given up or stopped, as on the Bridge. [detail] names the kind of message, never its text or
+     * its recipient.
+     */
+    @Volatile var onAudit: (suspend (event: String, interfaceId: String, deliveryId: Long, ruleId: Long?, detail: String) -> Unit)? = null
+
+    private suspend fun audit(event: String, channelId: String, del: MessageDeliveryEntity, why: String = "") {
+        try {
+            val kind = del.msgRef.substringBefore(':').ifBlank { "message" }
+            onAudit?.invoke(event, channelId, del.id, del.ruleId, if (why.isBlank()) kind else "$kind: $why")
+        } catch (e: Exception) {
+            Log.w(TAG, "Audit of ${del.id} failed: ${e.message}")
+        }
+    }
+
+    /**
      * Queue a message the user wrote for [destInterface], outside the routing rules: it is
      * stored, so it survives a restart, and retried until it goes out, with no retry cap
      * and no expiry (MESHSAT-1243). Returns the delivery id, or null if it was not stored.
      */
-    suspend fun enqueueDirect(destInterface: String, payload: ByteArray, textPreview: String, msgRef: String, priority: Int = 1): Long? =
+    suspend fun enqueueDirect(
+        destInterface: String,
+        payload: ByteArray,
+        textPreview: String,
+        msgRef: String,
+        priority: Int = 1,
+        recipient: String = "",
+    ): Long? =
         try {
             deliveryDao.insert(
                 MessageDeliveryEntity(
@@ -82,6 +112,7 @@ class Dispatcher(
                     textPreview = if (textPreview.length > 200) textPreview.take(200) else textPreview,
                     maxRetries = 0,
                     qosLevel = 1,
+                    recipient = recipient,
                 )
             ).also { Log.i(TAG, "Delivery queued directly: dest=$destInterface ref=$msgRef") }
         } catch (e: Exception) {
@@ -91,8 +122,11 @@ class Dispatcher(
 
     /** Callback for actual message delivery to a transport. */
     fun interface DeliveryCallback {
-        /** Send a message to the given interface. Returns null on success, error message on failure. */
-        suspend fun deliver(interfaceId: String, payload: ByteArray, textPreview: String): String?
+        /**
+         * Send a message to the given interface, to [recipient] when the delivery names one (empty:
+         * the interface's own destination). Returns null on success, error message on failure.
+         */
+        suspend fun deliver(interfaceId: String, payload: ByteArray, textPreview: String, recipient: String): String?
     }
 
     // Loop prevention metrics
@@ -364,6 +398,12 @@ class Dispatcher(
         // Re-check status (may have changed)
         val fresh = deliveryDao.getById(del.id) ?: return true
         if (fresh.status in listOf("sent", "dead", "cancelled", "delivered")) return true
+        if (mayDeliver?.invoke(fresh) == false) {
+            deliveryDao.setStatus(del.id, "dead", "cancelled")
+            audit("drop", channelId, fresh, "cancelled")
+            Log.i(TAG, "Delivery ${del.id} stopped: ${fresh.msgRef} was cancelled")
+            return true
+        }
 
         // Egress rule check
         if (accessEvaluator.hasEgressRules(channelId)) {
@@ -389,7 +429,7 @@ class Dispatcher(
             deliveryDao.setStatus(del.id, "sending")
 
             val payload = del.payload ?: del.textPreview.toByteArray()
-            val error = deliveryCallback.deliver(channelId, payload, del.textPreview)
+            val error = deliveryCallback.deliver(channelId, payload, del.textPreview, del.recipient)
 
             when {
                 error == null -> {
@@ -425,6 +465,7 @@ class Dispatcher(
         deliveryDao.setSeqNum(del.id, seqNum)
 
         deliveryDao.setStatus(del.id, "sent")
+        audit("deliver", channelId, del)
         try {
             onSent?.invoke(del)
         } catch (e: Exception) {
@@ -449,6 +490,7 @@ class Dispatcher(
         // QoS 0: no retry
         if (del.qosLevel == 0) {
             deliveryDao.setStatus(del.id, "dead", error)
+            audit("drop", channelId, del, error.take(80))
             Log.i(TAG, "QoS 0 delivery ${del.id} failed (no retry): $error")
             return
         }
@@ -456,17 +498,18 @@ class Dispatcher(
         val newRetries = del.retries + 1
         if (del.maxRetries > 0 && newRetries >= del.maxRetries) {
             deliveryDao.setStatus(del.id, "dead", error)
+            audit("drop", channelId, del, error.take(80))
             Log.w(TAG, "Delivery ${del.id} exhausted retries ($newRetries): $error")
             return
         }
 
         // Schedule retry with backoff
-        val nextRetry = calculateNextRetry(channelId, newRetries)
+        val nextRetry = calculateNextRetry(channelId, newRetries, del.priority)
         deliveryDao.scheduleRetry(del.id, newRetries, nextRetry, error)
         Log.w(TAG, "Delivery ${del.id} retry $newRetries scheduled for $channelId: $error")
     }
 
-    private fun calculateNextRetry(channelId: String, retries: Int): Long {
+    private fun calculateNextRetry(channelId: String, retries: Int, priority: Int = 1): Long {
         val channelType = channelId.substringBeforeLast('_')
         val desc = registry.get(channelType)
         val config = desc?.retryConfig
@@ -477,6 +520,9 @@ class Dispatcher(
 
         if (backoffFunc == "isu") {
             val now = System.currentTimeMillis()
+            // An SOS (priority 0) tries again as soon as the modem allows, pass window or not: a
+            // session that finds no satellite costs nothing, and a gap in the sky mask is still a chance.
+            if (priority == 0) return satelliteRetryAt(now, 1, initialWait, maxWait, null)
             return satelliteRetryAt(now, retries, initialWait, maxWait, nextWindowStart?.invoke(channelId, now))
         }
 

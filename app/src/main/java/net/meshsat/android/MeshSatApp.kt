@@ -19,6 +19,7 @@ class MeshSatApp : Application() {
          * after it exists, hence the new id; the old one is deleted (MESHSAT-1241).
          */
         const val CHANNEL_IRIDIUM_SIGNAL = "meshsat_iridium_status"
+        const val CHANNEL_SOS = "meshsat_sos"
         private const val CHANNEL_IRIDIUM_SIGNAL_OLD = "meshsat_iridium_signal"
     }
 
@@ -65,6 +66,17 @@ class MeshSatApp : Application() {
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
                 description = "Incoming mesh and satellite messages"
+            }
+        )
+
+        // An SOS in progress: loud once, then kept up to date quietly (MESHSAT-1249).
+        manager.createNotificationChannel(
+            NotificationChannel(
+                CHANNEL_SOS,
+                "SOS",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "An SOS or alarm test in progress, with a button to cancel it"
             }
         )
 

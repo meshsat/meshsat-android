@@ -99,6 +99,17 @@ interface MessageDeliveryDao {
     @Query("UPDATE message_deliveries SET status = 'retry', last_error = 'recovered after restart', next_retry = :now, updated_at = :now WHERE status = 'sending'")
     suspend fun recoverStale(now: Long = System.currentTimeMillis()): Int
 
+    /** The deliveries of one SOS (msg_ref "sos:<run>:..."), for its result screen (MESHSAT-1249). */
+    @Query("SELECT * FROM message_deliveries WHERE msg_ref LIKE :prefix || '%' ORDER BY created_at ASC, id ASC")
+    fun observeByRefPrefix(prefix: String): Flow<List<MessageDeliveryEntity>>
+
+    @Query("SELECT * FROM message_deliveries WHERE msg_ref LIKE :prefix || '%' ORDER BY created_at ASC, id ASC")
+    suspend fun getByRefPrefix(prefix: String): List<MessageDeliveryEntity>
+
+    /** Stop every delivery of one SOS that has not gone out yet, as [cancelWaiting] does for one. */
+    @Query("UPDATE message_deliveries SET status = 'dead', last_error = 'cancelled', held_at = NULL, updated_at = :now WHERE msg_ref LIKE :prefix || '%' AND status IN ('queued', 'retry', 'held')")
+    suspend fun cancelWaitingByRefPrefix(prefix: String, now: Long = System.currentTimeMillis()): Int
+
     /** Recent deliveries for UI display. */
     @Query("SELECT * FROM message_deliveries ORDER BY created_at DESC LIMIT :limit")
     fun getRecent(limit: Int = 100): Flow<List<MessageDeliveryEntity>>

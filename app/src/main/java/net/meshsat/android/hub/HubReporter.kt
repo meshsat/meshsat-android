@@ -295,6 +295,61 @@ class HubReporter(
         )
     }
 
+    /**
+     * Tell the Hub about an SOS over the internet, as a MeshSat kit does (MESHSAT-1249): the message
+     * on mo/decoded with "sos" set, which is what the Hub's SOS detector escalates, and the event on
+     * the device's sos topic for the live map. [id] is the alert's id at the Hub: the one the Hub gives
+     * the same SOS arriving by satellite, so one SOS pages once whichever way it arrives first. A
+     * cancellation goes with [sos] false and a text the detector does not match. A test goes with
+     * [asMessage] false, on the sos topic only: mo/decoded feeds the Hub's routing engine, whose relay
+     * routes text real phones (meshsat-hub CLAUDE.md rule 14). Blocks until the broker has it; false
+     * when the Hub is not connected or the publish failed.
+     */
+    fun publishSos(
+        deviceId: String,
+        id: String,
+        text: String,
+        sos: Boolean,
+        type: String,
+        lat: Double?,
+        lon: Double?,
+        asMessage: Boolean = true,
+    ): Boolean {
+        val c = client
+        if (c == null || !c.isConnected) return false
+        val device = HubTopics.segment(deviceId)
+        val now = HubProtocol.isoTimestamp()
+        val decoded = JSONObject().apply {
+            put("id", id)
+            put("imei", deviceId)
+            put("bridge_id", config.bridgeId)
+            put("text", text)
+            put("sos", sos)
+            put("channel", "mqtt")
+            put("source", "android_sos")
+            if (lat != null && lon != null) { put("lat", lat); put("lon", lon) }
+            put("timestamp", now)
+        }
+        val event = JSONObject().apply {
+            put("device_id", deviceId)
+            put("bridge_id", config.bridgeId)
+            put("type", type)
+            put("message", text)
+            if (lat != null && lon != null) { put("lat", lat); put("lon", lon) }
+            put("timestamp", now)
+        }
+        return try {
+            if (asMessage) {
+                c.publish(HubTopics.deviceMODecoded(device), MqttMessage(decoded.toString().toByteArray(StandardCharsets.UTF_8)).apply { qos = QOS_AT_LEAST_ONCE })
+            }
+            c.publish(HubTopics.deviceSOS(device), MqttMessage(event.toString().toByteArray(StandardCharsets.UTF_8)).apply { qos = QOS_AT_LEAST_ONCE })
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "SOS publish to the Hub failed: ${e.message}")
+            false
+        }
+    }
+
     /** Respond to a Hub command. */
     fun publishCommandResponse(response: CommandResponse) {
         publish(

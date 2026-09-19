@@ -121,11 +121,6 @@ fun DashboardScreen(navigate: (String) -> Unit = {}) {
     val meshHistory by db.signalDao().getSince("mesh", sixHoursAgo).collectAsState(initial = emptyList())
     val cellularHistory by db.signalDao().getSince("cellular", sixHoursAgo).collectAsState(initial = emptyList())
 
-    // --- SOS state ---
-    val sosActive by GatewayService.sosActive.collectAsState()
-    val sosSends by GatewayService.sosSends.collectAsState()
-    var showSosDialog by remember { mutableStateOf(false) }
-
     // --- Phone GPS ---
     val phoneLocation by GatewayService.phoneLocation.collectAsState()
 
@@ -269,86 +264,8 @@ fun DashboardScreen(navigate: (String) -> Unit = {}) {
                 }
                 }
                 "sos" -> {
-                // ====== 3. SOS Card ======
-                item {
-                    DashboardCard(title = "SOS Emergency") {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            // Status indicator
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                modifier = Modifier.weight(1f),
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(10.dp)
-                                        .clip(CircleShape)
-                                        .background(if (sosActive) MeshSatRed else MeshSatTextMuted)
-                                )
-                                Text(
-                                    text = if (sosActive) "ARMED" else "Disarmed",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontWeight = if (sosActive) FontWeight.Bold else FontWeight.Normal,
-                                    color = if (sosActive) MeshSatRed else MeshSatTextMuted,
-                                )
-                            }
-
-                            if (sosActive) {
-                                Text(
-                                    text = "Sends: $sosSends/3",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MeshSatRed,
-                                )
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            if (sosActive) {
-                                Button(
-                                    onClick = {
-                                        context.startService(
-                                            Intent(context, GatewayService::class.java)
-                                                .setAction(GatewayService.ACTION_SOS_CANCEL)
-                                        )
-                                    },
-                                    colors = ButtonDefaults.buttonColors(containerColor = MeshSatRed),
-                                    modifier = Modifier.weight(1f),
-                                ) {
-                                    Text("CANCEL SOS")
-                                }
-                            } else {
-                                Button(
-                                    onClick = { showSosDialog = true },
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = MeshSatAmber,
-                                        contentColor = Color.Black,
-                                    ),
-                                    modifier = Modifier.weight(1f),
-                                ) {
-                                    Text("ARM SOS", fontWeight = FontWeight.Bold)
-                                }
-
-                                OutlinedButton(
-                                    onClick = {
-                                        Toast.makeText(context, "Test SOS sent", Toast.LENGTH_SHORT).show()
-                                    },
-                                ) {
-                                    Text("Send Test")
-                                }
-                            }
-                        }
-                    }
-                }
+                // Hold to send, or where the SOS in progress stands (MESHSAT-1249).
+                item { SosCard(navigate) }
                 }
                 "location" -> {
                 // Plain words, and a decimal point whatever the phone's language: the card showed
@@ -448,39 +365,6 @@ fun DashboardScreen(navigate: (String) -> Unit = {}) {
         }
     }
 
-    // --- SOS confirmation dialog ---
-    if (showSosDialog) {
-        AlertDialog(
-            onDismissRequest = { showSosDialog = false },
-            containerColor = MeshSatSurface,
-            title = { Text("ARM SOS Emergency") },
-            text = {
-                Text(
-                    "This will broadcast an emergency alert with your GPS position via all connected transports (Mesh, Iridium, SMS).\n\n3 messages will be sent at 30-second intervals.",
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        showSosDialog = false
-                        context.startService(
-                            Intent(context, GatewayService::class.java)
-                                .setAction(GatewayService.ACTION_SOS_ACTIVATE)
-                        )
-                        Toast.makeText(context, "SOS activated", Toast.LENGTH_LONG).show()
-                    },
-                ) {
-                    Text("SEND SOS", color = MeshSatRed, fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showSosDialog = false }) {
-                    Text("Cancel", color = MeshSatTextMuted)
-                }
-            },
-        )
-    }
 }
 
 // ============================================================================

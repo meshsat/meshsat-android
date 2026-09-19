@@ -65,9 +65,10 @@ class MainActivity : ComponentActivity() {
         }
 
         takeProvisionLink(intent)
+        takeRoute(intent)
         setContent {
             MeshSatTheme {
-                MeshSatUI()
+                MeshSatUI(openRoute = openRoute.value, onRouteOpened = { openRoute.value = null })
                 provisionLink.value?.let { url ->
                     ProvisionLinkDialog(url = url, onDone = { provisionLink.value = null })
                 }
@@ -78,6 +79,20 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         takeProvisionLink(intent)
+        takeRoute(intent)
+    }
+
+    /** A screen a notification asks to open, e.g. the SOS result screen (MESHSAT-1249). */
+    private val openRoute = mutableStateOf<String?>(null)
+
+    private fun takeRoute(intent: Intent?) {
+        val route = intent?.getStringExtra(EXTRA_ROUTE) ?: return
+        if (route in OPENABLE_ROUTES) openRoute.value = route
+    }
+
+    companion object {
+        const val EXTRA_ROUTE = "net.meshsat.android.ROUTE"
+        private val OPENABLE_ROUTES = setOf("sos", "messages", "home")
     }
 
     /** A `meshsat://provision/` link, confirmed by [ProvisionLinkDialog] (MESHSAT-1235). */

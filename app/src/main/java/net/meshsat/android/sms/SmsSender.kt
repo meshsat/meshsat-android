@@ -1,9 +1,18 @@
 package net.meshsat.android.sms
 
+import android.app.Activity
+import android.app.PendingIntent
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.telephony.SmsManager
 import android.util.Base64
 import android.util.Log
+import androidx.core.content.ContextCompat
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.withTimeoutOrNull
+import java.util.UUID
 import net.meshsat.android.codec.ProtocolVersion
 import net.meshsat.android.crypto.AesGcmCrypto
 import net.meshsat.android.crypto.MsvqscEncoder
@@ -98,5 +107,63 @@ object SmsSender {
         } else {
             smsManager.sendTextMessage(to, null, finalText, null, null)
         }
+    }
+
+    /**
+     * Send plain text and wait until the phone's radio reports on every part (MESHSAT-1249, the SOS
+     * to emergency contacts): null once the SMS has left the phone, otherwise why not, so the
+     * delivery queue tries again. "Left the phone" says nothing about the other phone.
+     */
+    suspend fun sendAndWait(context: Context, to: String, text: String, timeoutMs: Long = 60_000L): String? {
+        val smsManager = SmsCapability.manager(context) ?: return "This device cannot send SMS"
+        val parts = try {
+            smsManager.divideMessage(text)
+        } catch (e: Exception) {
+            return "SMS could not be prepared: ${e.message}"
+        }
+        if (parts.isEmpty()) return null
+        val action = "net.meshsat.android.SMS_SENT." + UUID.randomUUID()
+        val results = Channel<Int>(parts.size)
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(c: Context, intent: Intent) {
+                results.trySend(resultCode)
+            }
+        }
+        ContextCompat.registerReceiver(context, receiver, IntentFilter(action), ContextCompat.RECEIVER_NOT_EXPORTED)
+        try {
+            val sent = ArrayList<PendingIntent>(parts.size)
+            for (i in parts.indices) {
+                sent += PendingIntent.getBroadcast(
+                    context, i, Intent(action).setPackage(context.packageName),
+                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_ONE_SHOT,
+                )
+            }
+            if (parts.size == 1) smsManager.sendTextMessage(to, null, parts[0], sent[0], null)
+            else smsManager.sendMultipartTextMessage(to, null, parts, sent, null)
+            repeat(parts.size) {
+                val code = withTimeoutOrNull(timeoutMs) { results.receive() }
+                    ?: return "The phone did not say whether the SMS left"
+                if (code != Activity.RESULT_OK) return sentFailure(code)
+            }
+            Log.d(TAG, "SMS to $to left the phone (${parts.size} part(s))")
+            return null
+        } catch (e: SecurityException) {
+            return "SMS is not allowed: allow it in Setup, SMS"
+        } catch (e: Exception) {
+            return "SMS failed: ${e.message}"
+        } finally {
+            try {
+                context.unregisterReceiver(receiver)
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    private fun sentFailure(code: Int): String = when (code) {
+        SmsManager.RESULT_ERROR_NO_SERVICE -> "No mobile service"
+        SmsManager.RESULT_ERROR_RADIO_OFF -> "The phone's mobile radio is off (flight mode?)"
+        SmsManager.RESULT_ERROR_NULL_PDU -> "The SMS could not be encoded"
+        SmsManager.RESULT_ERROR_LIMIT_EXCEEDED -> "The phone is sending too many SMS; it will try again"
+        else -> "The phone could not send the SMS (code $code)"
     }
 }

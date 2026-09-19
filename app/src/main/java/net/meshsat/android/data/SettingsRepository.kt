@@ -697,4 +697,42 @@ class SettingsRepository(private val context: Context) {
     suspend fun setTelemetryEnabled(enabled: Boolean) {
         context.dataStore.edit { it[booleanPreferencesKey("telemetry_enabled")] = enabled }
     }
+
+    // --- SOS (MESHSAT-1249) ---
+
+    /** The people an SOS goes to by SMS, from the phone's own SIM. */
+    val sosContacts: Flow<List<EmergencyContact>> = context.dataStore.data.map {
+        EmergencyContact.decode(it[stringPreferencesKey("sos_contacts")] ?: "")
+    }
+
+    suspend fun setSosContacts(contacts: List<EmergencyContact>) {
+        context.dataStore.edit { it[stringPreferencesKey("sos_contacts")] = EmergencyContact.encode(contacts) }
+    }
+
+    /** The name an SOS gives for the person who needs help. */
+    val sosName: Flow<String> = context.dataStore.data.map {
+        it[stringPreferencesKey("sos_name")] ?: ""
+    }
+
+    suspend fun setSosName(name: String) {
+        context.dataStore.edit { it[stringPreferencesKey("sos_name")] = name }
+    }
+
+    /** The IMEI of the last satellite modem this phone talked to: an SOS uses the satellite when there is one. */
+    val lastModemImei: Flow<String> = context.dataStore.data.map {
+        it[stringPreferencesKey("last_modem_imei")] ?: ""
+    }
+
+    suspend fun setLastModemImei(imei: String) {
+        context.dataStore.edit { it[stringPreferencesKey("last_modem_imei")] = imei }
+    }
+
+    /** The SOS in progress or last sent, as JSON ([net.meshsat.android.sos.SosRun]), so it survives a restart. */
+    val sosRun: Flow<String> = context.dataStore.data.map {
+        it[stringPreferencesKey("sos_run")] ?: ""
+    }
+
+    suspend fun setSosRun(json: String) {
+        context.dataStore.edit { it[stringPreferencesKey("sos_run")] = json }
+    }
 }
