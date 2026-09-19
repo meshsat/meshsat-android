@@ -53,24 +53,25 @@ object MapTiles {
     val offline: StateFlow<Boolean> = _offline
 
     /**
-     * A dark treatment for light map tiles: colours keep their hue (water stays blue, parks green),
-     * with saturation cut to 40 % and brightness to half, and a small lift so the already dark
-     * world overview keeps its coastlines. The old filter inverted every colour.
+     * The map's dark theme (MESHSAT-1249): light tiles are inverted, then their hue is turned by
+     * 180 degrees so colours keep their meaning (water blue, parks green, labels light on dark), then
+     * toned to the app's surfaces (x 0.88, + 10). OSM land comes out near black, water dark blue.
+     * The filter before halved the brightness instead, and the map still read as a light map.
+     *
+     * One filter covers every tile source, so the bundled world overview, which is dark already, is
+     * stored in assets through this matrix's exact inverse: drawn through it, it looks as before
+     * (see MBTilesManager.BUNDLED_WORLD_MAP_VERSION). Rows: A (3 x 3) and the offset b of
+     * M(x) = k * H180 * (255 - x) + 10, with the feColorMatrix hue weights 0.213 / 0.715 / 0.072.
      */
-    val DIM_TILES: ColorMatrixColorFilter = ColorMatrixColorFilter(
-        ColorMatrix().apply {
-            setSaturation(0.4f)
-            postConcat(
-                ColorMatrix(
-                    floatArrayOf(
-                        0.5f, 0f, 0f, 0f, 12f,
-                        0f, 0.5f, 0f, 0f, 12f,
-                        0f, 0f, 0.5f, 0f, 12f,
-                        0f, 0f, 0f, 1f, 0f,
-                    ),
-                ),
-            )
-        },
+    val DARK_TILES: ColorMatrixColorFilter = ColorMatrixColorFilter(
+        ColorMatrix(
+            floatArrayOf(
+                0.5051f, -1.2584f, -0.1267f, 0f, 234.40f,
+                -0.3749f, -0.3784f, -0.1267f, 0f, 234.40f,
+                -0.3749f, -1.2584f, 0.7533f, 0f, 234.40f,
+                0f, 0f, 0f, 1f, 0f,
+            ),
+        ),
     )
 
     @Volatile
@@ -138,7 +139,7 @@ object MapTiles {
 
     private fun styleTiles(mapView: MapView) {
         val tiles = mapView.overlayManager.tilesOverlay
-        tiles.setColorFilter(DIM_TILES)
+        tiles.setColorFilter(DARK_TILES)
         tiles.setLoadingBackgroundColor(MeshSatBg.toArgb())
         tiles.setLoadingLineColor(MeshSatSurface.toArgb())
     }

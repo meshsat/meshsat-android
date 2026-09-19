@@ -29,6 +29,12 @@ object MBTilesManager {
 
     const val BUNDLED_WORLD_MAP = "world.mbtiles"
 
+    /**
+     * Bumped whenever assets/world.mbtiles changes, so an update replaces the copy made at first
+     * launch. 2: tiles stored through the inverse of MapTiles.DARK_TILES (MESHSAT-1249).
+     */
+    const val BUNDLED_WORLD_MAP_VERSION = "2"
+
     private fun mbtilesDir(context: Context): File {
         val dir = File(context.filesDir, DIR_NAME)
         if (!dir.exists()) dir.mkdirs()
@@ -43,18 +49,21 @@ object MBTilesManager {
 
     /**
      * Ensure the bundled world map (from assets) is extracted to internal storage.
-     * Only copies on first launch or if the file is missing.
+     * Copies on first launch, when the file is missing, and when BUNDLED_WORLD_MAP_VERSION changed.
      */
     fun ensureBundledMap(context: Context) {
         val dest = File(mbtilesDir(context), BUNDLED_WORLD_MAP)
-        if (dest.exists()) return
+        val marker = File(mbtilesDir(context), "$BUNDLED_WORLD_MAP.version")
+        val current = try { marker.readText().trim() } catch (_: Exception) { "" }
+        if (dest.exists() && current == BUNDLED_WORLD_MAP_VERSION) return
         try {
             context.assets.open(BUNDLED_WORLD_MAP).use { input ->
                 dest.outputStream().use { output ->
                     input.copyTo(output, bufferSize = 65536)
                 }
             }
-            Log.i(TAG, "Extracted bundled world map (${dest.length()} bytes)")
+            marker.writeText(BUNDLED_WORLD_MAP_VERSION)
+            Log.i(TAG, "Extracted bundled world map v$BUNDLED_WORLD_MAP_VERSION (${dest.length()} bytes)")
         } catch (e: Exception) {
             Log.w(TAG, "No bundled world map in assets: ${e.message}")
         }
