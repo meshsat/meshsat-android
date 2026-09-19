@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothGattService
+import android.util.Log
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
@@ -58,15 +59,28 @@ class IridiumBlePipe internal constructor(
     suspend fun claim(timeoutMs: Long = 8_000): Boolean {
         val tx = tx ?: return false
         val status = status
+        // One retry each: the first write can fail while the link is still being encrypted,
+        // and without STATUS notifications the handover is never heard.
         if (status != null) {
-            GattCompat.setNotify(queue, gatt, status, true).await()
-            GattCompat.read(queue, gatt, status)
+            val watching = (1..2).any { GattCompat.setNotify(queue, gatt, status, true).await() == GattOpQueue.STATUS_SUCCESS }
+            if (!watching) Log.w(TAG, "Iridium pipe: STATUS notifications could not be enabled; reading it instead")
         }
-        // One retry: the first attempt can fail while the link is still being encrypted.
         val subscribed = (1..2).any { GattCompat.setNotify(queue, gatt, tx, true).await() == GattOpQueue.STATUS_SUCCESS }
-        if (!subscribed) return false
-        if (status == null) _owner.value = Owner.Phone
-        return withTimeoutOrNull(timeoutMs) { owner.first { it == Owner.Phone || it == Owner.Node } } == Owner.Phone
+        if (!subscribed) {
+            Log.w(TAG, "Iridium pipe: TX subscription failed")
+            return false
+        }
+        // Subscribing to TX is what hands the modem over: read STATUS after it, so the answer
+        // arrives even when its notification does not.
+        if (status == null) _owner.value = Owner.Phone else refreshStatus()
+        val owner = withTimeoutOrNull(timeoutMs) { owner.first { it == Owner.Phone || it == Owner.Node } }
+        Log.i(TAG, "Iridium pipe: claim answered ${owner ?: "nothing within ${timeoutMs / 1000} s"}")
+        return owner == Owner.Phone
+    }
+
+    /** Ask STATUS again, for a notification that may have been lost. */
+    fun refreshStatus() {
+        status?.let { GattCompat.read(queue, gatt, it) }
     }
 
     /** Hand the modem back to the node. */
@@ -105,6 +119,7 @@ class IridiumBlePipe internal constructor(
     }
 
     companion object {
+        private const val TAG = "IridiumBlePipe"
         val SERVICE_UUID: UUID = UUID.fromString(IridiumPipeContract.SERVICE_UUID)
 
         fun isPipeCharacteristic(uuid: UUID): Boolean = uuid.toString().let {

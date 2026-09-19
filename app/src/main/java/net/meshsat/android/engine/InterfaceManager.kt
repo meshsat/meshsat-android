@@ -192,6 +192,8 @@ class InterfaceManager(
     fun setError(id: String, error: String) {
         val rt = runtimes[id] ?: return
         val old = rt.state
+        // Disabled by the user: an error from the link going down must not schedule a reconnect.
+        if (old == InterfaceState.Disabled) return
 
         rt.state = InterfaceState.Error
         rt.errorMsg = error

@@ -80,6 +80,10 @@ interface MessageDeliveryDao {
     """)
     suspend fun cancelRunaway(safetyLimit: Int = 15, now: Long = System.currentTimeMillis()): Int
 
+    /** Make every waiting retry of [channel] due now: the interface has just come online. */
+    @Query("UPDATE message_deliveries SET next_retry = :now, updated_at = :now WHERE channel = :channel AND status = 'retry'")
+    suspend fun retryNowForChannel(channel: String, now: Long = System.currentTimeMillis()): Int
+
     @Query("UPDATE message_deliveries SET status = 'retry', last_error = 'recovered after restart', next_retry = :now, updated_at = :now WHERE status = 'sending'")
     suspend fun recoverStale(now: Long = System.currentTimeMillis()): Int
 
