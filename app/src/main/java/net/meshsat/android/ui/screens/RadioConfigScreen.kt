@@ -114,11 +114,6 @@ fun RadioConfigScreen() {
             .padding(16.dp),
     ) {
         Text(
-            text = "Meshtastic",
-            style = MaterialTheme.typography.headlineMedium,
-            modifier = Modifier.padding(bottom = 4.dp),
-        )
-        Text(
             text = "Radio settings and device administration",
             style = MaterialTheme.typography.bodySmall,
             color = MeshSatTextMuted,

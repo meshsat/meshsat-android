@@ -91,7 +91,6 @@ fun CredentialsScreen() {
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("Credentials", style = MaterialTheme.typography.headlineSmall)
             Button(
                 onClick = { filePickerLauncher.launch("*/*") },
                 colors = ButtonDefaults.buttonColors(containerColor = MeshSatTeal),

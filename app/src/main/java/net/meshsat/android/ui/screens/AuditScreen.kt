@@ -102,10 +102,6 @@ fun AuditScreen() {
             .padding(16.dp),
     ) {
         // Header
-        Text(
-            text = "Audit Log",
-            style = MaterialTheme.typography.headlineMedium,
-        )
 
         Row(
             modifier = Modifier

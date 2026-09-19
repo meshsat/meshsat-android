@@ -62,6 +62,10 @@ interface MessageDao {
     @Query("SELECT COUNT(*) FROM messages WHERE timestamp > :since")
     fun countSince(since: Long): Flow<Int>
 
+    /** Messages on one transport since a moment, for Home's lanes. */
+    @Query("SELECT COUNT(*) FROM messages WHERE transport = :transport AND timestamp > :since")
+    suspend fun countByTransportSince(transport: String, since: Long): Int
+
     /** Messages for a conversation (both directions). */
     @Query("SELECT * FROM messages WHERE sender = :peer OR (recipient = :peer AND direction = 'tx') ORDER BY timestamp DESC LIMIT :limit")
     fun getConversation(peer: String, limit: Int = 500): Flow<List<Message>>

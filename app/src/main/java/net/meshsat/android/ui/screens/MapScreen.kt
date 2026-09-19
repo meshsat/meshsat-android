@@ -51,6 +51,7 @@ import net.meshsat.android.ui.theme.MeshSatSurface
 import net.meshsat.android.ui.theme.MeshSatBlue
 import net.meshsat.android.ui.theme.MeshSatGreen
 import net.meshsat.android.ui.theme.MeshSatTeal
+import net.meshsat.android.ui.theme.MeshSatTextSecondary
 import net.meshsat.android.ui.theme.MeshSatTextMuted
 import net.meshsat.android.ui.theme.ThemeState
 import androidx.lifecycle.Lifecycle
@@ -111,7 +112,7 @@ fun MapScreen() {
         modifier = Modifier.fillMaxSize().padding(16.dp),
     ) {
         Text(
-            text = "Node Map",
+            text = "Map",
             style = MaterialTheme.typography.headlineMedium,
             modifier = Modifier.padding(bottom = 8.dp),
         )
@@ -144,7 +145,7 @@ fun MapScreen() {
                         .border(1.dp, MeshSatBorder, RoundedCornerShape(8.dp))
                         .padding(12.dp),
                 ) {
-                    Text("LAYERS", style = MaterialTheme.typography.titleSmall, color = MeshSatTeal,
+                    Text("Layers", style = MaterialTheme.typography.titleSmall, color = MeshSatTextSecondary,
                         modifier = Modifier.padding(bottom = 4.dp))
                     LayerToggleRow("GPS", MeshSatGreen, showGps) { showGps = it }
                     LayerToggleRow("Mesh Nodes", ColorMesh, showMeshNodes) { showMeshNodes = it }
@@ -163,7 +164,7 @@ fun MapScreen() {
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Text("NODE FILTERS", style = MaterialTheme.typography.titleSmall, color = MeshSatTeal)
+                            Text("Nodes shown", style = MaterialTheme.typography.titleSmall, color = MeshSatTextSecondary)
                             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                                 Text("Show all", style = MaterialTheme.typography.bodySmall, color = MeshSatTeal,
                                     modifier = Modifier.clickable { visibleNodeIds = meshNodes.map { it.nodeId }.toSet() })
@@ -191,7 +192,7 @@ fun MapScreen() {
 
                 if (showGps) {
                     phoneLocation?.let { loc ->
-                        Text("Phone GPS", style = MaterialTheme.typography.titleMedium, color = MeshSatTeal)
+                        Text("This phone", style = MaterialTheme.typography.titleMedium, color = MeshSatTextSecondary)
                         Row(
                             modifier = Modifier.fillMaxWidth()
                                 .background(MeshSatSurface, RoundedCornerShape(6.dp))

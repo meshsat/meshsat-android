@@ -90,10 +90,6 @@ fun GeofenceScreen() {
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
-                text = "Geofence Zones",
-                style = MaterialTheme.typography.headlineMedium,
-            )
             Button(
                 onClick = { showAddDialog = true },
                 colors = ButtonDefaults.buttonColors(containerColor = MeshSatTeal),

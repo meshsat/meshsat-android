@@ -62,10 +62,6 @@ fun DecryptScreen() {
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text(
-            text = "Encrypt / Decrypt",
-            style = MaterialTheme.typography.headlineMedium,
-        )
 
         if (encryptionKey.isEmpty()) {
             Text(

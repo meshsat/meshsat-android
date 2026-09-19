@@ -92,10 +92,6 @@ fun DeliveryScreen() {
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text(
-            text = "Delivery Status",
-            style = MaterialTheme.typography.headlineMedium,
-        )
 
         // Summary bar
         Row(
