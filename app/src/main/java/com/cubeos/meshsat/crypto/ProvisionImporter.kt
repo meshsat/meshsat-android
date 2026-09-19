@@ -70,6 +70,19 @@ object ProvisionImporter {
         }
     }
 
+    /**
+     * The claim parameters of a `meshsat://provision/` deep link, for a caller that
+     * shows them before anything is fetched (MESHSAT-1235). Any app or web page can
+     * fire a link, unlike a QR the user chose to scan, so only the nonce form is
+     * accepted: an inline bundle carries the credentials in the link itself.
+     */
+    fun parseLink(url: String): ProvisionRequest {
+        require(url.startsWith(URL_PREFIX)) { "Not a MeshSat provisioning link" }
+        val payload = url.substring(URL_PREFIX.length)
+        require(payload.contains("?hub=")) { "Inline provisioning codes must be scanned in Settings" }
+        return parseNonceUrl(payload)
+    }
+
     /** Parse inline base64url-encoded JSON bundle (v2.2.0 format). */
     private fun parseInlineBundle(encoded: String): ProvisionBundle {
         val jsonBytes = android.util.Base64.decode(encoded,

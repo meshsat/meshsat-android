@@ -9,8 +9,11 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.mutableStateOf
 import androidx.core.content.ContextCompat
+import com.cubeos.meshsat.crypto.ProvisionImporter
 import com.cubeos.meshsat.ui.MeshSatUI
+import com.cubeos.meshsat.ui.components.ProvisionLinkDialog
 import com.cubeos.meshsat.ui.theme.MeshSatTheme
 
 class MainActivity : ComponentActivity() {
@@ -55,11 +58,28 @@ class MainActivity : ComponentActivity() {
             startGatewayService()
         }
 
+        takeProvisionLink(intent)
         setContent {
             MeshSatTheme {
                 MeshSatUI()
+                provisionLink.value?.let { url ->
+                    ProvisionLinkDialog(url = url, onDone = { provisionLink.value = null })
+                }
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        takeProvisionLink(intent)
+    }
+
+    /** A `meshsat://provision/` link, confirmed by [ProvisionLinkDialog] (MESHSAT-1235). */
+    private val provisionLink = mutableStateOf<String?>(null)
+
+    private fun takeProvisionLink(intent: Intent?) {
+        val url = intent?.dataString ?: return
+        if (ProvisionImporter.isProvisionUrl(url)) provisionLink.value = url
     }
 
     private fun startGatewayService() {
