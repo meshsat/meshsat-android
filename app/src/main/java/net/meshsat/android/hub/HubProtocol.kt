@@ -56,6 +56,8 @@ object HubTopics {
     fun bridgeHealth(bridgeID: String) = "meshsat/bridge/$bridgeID/health"
     fun bridgeCmd(bridgeID: String) = "meshsat/bridge/$bridgeID/cmd"
     fun bridgeCmdResponse(bridgeID: String) = "meshsat/bridge/$bridgeID/cmd/response"
+    /** The Hub's receipt for an MO from one of this bridge's modems (MESHSAT-1246). */
+    fun bridgeMOAck(bridgeID: String) = "meshsat/bridge/$bridgeID/mo/ack"
     fun deviceBirth(bridgeID: String, deviceID: String) = "meshsat/bridge/$bridgeID/device/$deviceID/birth"
     fun deviceDeath(bridgeID: String, deviceID: String) = "meshsat/bridge/$bridgeID/device/$deviceID/death"
     fun devicePosition(deviceID: String) = "meshsat/$deviceID/position"

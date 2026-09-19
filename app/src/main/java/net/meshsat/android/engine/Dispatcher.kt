@@ -124,9 +124,11 @@ class Dispatcher(
     fun interface DeliveryCallback {
         /**
          * Send a message to the given interface, to [recipient] when the delivery names one (empty:
-         * the interface's own destination). Returns null on success, error message on failure.
+         * the interface's own destination). [deliveryId] lets the transport record what the send
+         * learned, such as the satellite session's MOMSN (MESHSAT-1246). Returns null on success,
+         * error message on failure.
          */
-        suspend fun deliver(interfaceId: String, payload: ByteArray, textPreview: String, recipient: String): String?
+        suspend fun deliver(interfaceId: String, payload: ByteArray, textPreview: String, recipient: String, deliveryId: Long): String?
     }
 
     // Loop prevention metrics
@@ -429,7 +431,7 @@ class Dispatcher(
             deliveryDao.setStatus(del.id, "sending")
 
             val payload = del.payload ?: del.textPreview.toByteArray()
-            val error = deliveryCallback.deliver(channelId, payload, del.textPreview, del.recipient)
+            val error = deliveryCallback.deliver(channelId, payload, del.textPreview, del.recipient, del.id)
 
             when {
                 error == null -> {
