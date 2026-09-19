@@ -40,6 +40,14 @@ interface MessageDeliveryDao {
     @Query("UPDATE message_deliveries SET status = 'queued', next_retry = NULL, updated_at = :now WHERE id = :id AND status IN ('failed', 'dead')")
     suspend fun retryNow(id: Long, now: Long = System.currentTimeMillis())
 
+    /**
+     * Cancel a delivery that is still waiting, including one on hold until its link is back
+     * (MESHSAT-1249: the queue offers Cancel on every waiting message, and [cancel] leaves a held
+     * one untouched). Returns the rows changed: 0 when it was sent or stopped in the meantime.
+     */
+    @Query("UPDATE message_deliveries SET status = 'dead', last_error = 'cancelled', held_at = NULL, updated_at = :now WHERE id = :id AND status IN ('queued', 'retry', 'held')")
+    suspend fun cancelWaiting(id: Long, now: Long = System.currentTimeMillis()): Int
+
     @Query("SELECT COUNT(*) FROM message_deliveries WHERE channel = :channel AND status IN ('queued', 'retry', 'held', 'sending')")
     suspend fun queueDepth(channel: String): Int
 
