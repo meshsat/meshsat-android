@@ -12,7 +12,14 @@ class MeshSatApp : Application() {
     companion object {
         const val CHANNEL_GATEWAY = "meshsat_gateway"
         const val CHANNEL_MESSAGES = "meshsat_messages"
-        const val CHANNEL_IRIDIUM_SIGNAL = "meshsat_iridium_signal"
+        /**
+         * The status-bar satellite icon. A silent (LOW) channel is hidden from the status bar
+         * by Android's default "Hide silent notifications in status bar", so this one is
+         * DEFAULT importance with no sound or vibration. A channel's importance cannot be raised
+         * after it exists, hence the new id; the old one is deleted (MESHSAT-1241).
+         */
+        const val CHANNEL_IRIDIUM_SIGNAL = "meshsat_iridium_status"
+        private const val CHANNEL_IRIDIUM_SIGNAL_OLD = "meshsat_iridium_signal"
     }
 
     override fun onCreate() {
@@ -62,13 +69,17 @@ class MeshSatApp : Application() {
         )
 
         // Low importance: the icon shows in the status bar, with no sound or badge (MESHSAT-1241).
+        manager.deleteNotificationChannel(CHANNEL_IRIDIUM_SIGNAL_OLD)
         manager.createNotificationChannel(
             NotificationChannel(
                 CHANNEL_IRIDIUM_SIGNAL,
                 "Iridium signal",
-                NotificationManager.IMPORTANCE_LOW
+                NotificationManager.IMPORTANCE_DEFAULT
             ).apply {
                 description = "Satellite icon with the Iridium signal while the modem is connected"
+                setSound(null, null)
+                enableVibration(false)
+                enableLights(false)
                 setShowBadge(false)
             }
         )

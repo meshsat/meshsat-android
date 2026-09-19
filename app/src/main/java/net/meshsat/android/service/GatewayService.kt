@@ -2484,10 +2484,11 @@ class GatewayService : Service() {
                     .setContentTitle("Iridium signal $bars/5")
                     .setContentText(if (imei.isNotBlank()) "RockBLOCK ${imei.takeLast(6)} via the MeshSat node" else "Iridium modem connected")
                     .setOngoing(true)
-                    .setSilent(true)
+                    // Not setSilent: a silent notification's icon is hidden from the status bar
+                    // on Pixels by default. The channel has no sound, and updates never alert.
                     .setOnlyAlertOnce(true)
                     .setShowWhen(false)
-                    .setPriority(NotificationCompat.PRIORITY_LOW)
+                    .setPriority(NotificationCompat.PRIORITY_DEFAULT)
                     .setContentIntent(tap)
                     .build()
                 try {
