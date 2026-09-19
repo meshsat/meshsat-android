@@ -284,6 +284,16 @@ fun MessagesScreen() {
                     selectedLabelColor = MeshSatTeal,
                 ),
             )
+            // A message the app itself sends (satellite or mesh), even from an empty inbox.
+            FilterChip(
+                selected = false,
+                onClick = { selectedSender = "self" },
+                label = { Text("New message", style = MaterialTheme.typography.bodySmall) },
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = MeshSatTeal.copy(alpha = 0.2f),
+                    selectedLabelColor = MeshSatTeal,
+                ),
+            )
         }
 
         if (viewMode == "all") {
@@ -453,7 +463,8 @@ private fun ConversationChatView(
 
     // Compose bar state
     var composeText by remember { mutableStateOf("") }
-    var sendTransport by remember { mutableStateOf("sms") } // default to sms for conversations
+    // Conversations with a person default to SMS; the app's own sends default to the satellite.
+    var sendTransport by remember { mutableStateOf(if (peer == "self") "iridium" else "sms") }
     var transportExpanded by remember { mutableStateOf(false) }
 
     val meshConnected = GatewayService.meshtasticBle?.state?.collectAsState()?.value == MeshtasticBle.State.Connected
@@ -654,7 +665,7 @@ private fun sendMessage(
                     .setAction(GatewayService.ACTION_SEND_IRIDIUM)
                     .putExtra(GatewayService.EXTRA_TEXT, text)
             )
-            Toast.makeText(context, "Sent via IRIDIUM", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "Sending via IRIDIUM...", Toast.LENGTH_SHORT).show()
         }
     }
 }
