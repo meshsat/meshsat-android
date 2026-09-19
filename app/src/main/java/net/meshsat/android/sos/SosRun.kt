@@ -158,7 +158,14 @@ object SosProgress {
     }
 
     private fun detailOf(d: MessageDeliveryEntity): String = when (stateOf(d)) {
-        SosRouteStatus.State.Sent -> "Sent"
+        // A confirmation from the far end (MESHSAT-1246): the Hub's receipt by satellite, the
+        // carrier's delivery report by SMS.
+        SosRouteStatus.State.Sent -> when {
+            d.ackStatus != "acked" -> "Sent"
+            d.channel.startsWith("iridium") -> "Sent, and the Hub has it"
+            d.channel.startsWith("sms") -> "Delivered to their phone"
+            else -> "Sent"
+        }
         SosRouteStatus.State.Sending -> "Sending now"
         SosRouteStatus.State.Stopped -> "Stopped"
         SosRouteStatus.State.Waiting ->

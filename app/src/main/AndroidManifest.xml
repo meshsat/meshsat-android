@@ -66,6 +66,11 @@
             </intent-filter>
         </receiver>
 
+        <!-- An SMS the app sent: left the phone, and the carrier's delivery report (MESHSAT-1246) -->
+        <receiver
+            android:name=".sms.SmsStatusReceiver"
+            android:exported="false" />
+
         <!-- Start after a phone restart or an app update, when the user chose it (MESHSAT-1249) -->
         <receiver
             android:name=".service.BootReceiver"

@@ -99,6 +99,20 @@ interface MessageDeliveryDao {
     @Query("UPDATE message_deliveries SET status = 'retry', last_error = 'recovered after restart', next_retry = :now, updated_at = :now WHERE status = 'sending'")
     suspend fun recoverStale(now: Long = System.currentTimeMillis()): Int
 
+    /** The satellite session ("imei:momsn") a delivery went out in (MESHSAT-1246). */
+    @Query("UPDATE message_deliveries SET sat_ref = :ref, updated_at = :now WHERE id = :id")
+    suspend fun setSatRef(id: Long, ref: String, now: Long = System.currentTimeMillis())
+
+    @Query("SELECT * FROM message_deliveries WHERE sat_ref = :ref")
+    suspend fun getBySatRef(ref: String): List<MessageDeliveryEntity>
+
+    /** The far end confirmed it: the Hub's receipt for a satellite session, or an SMS delivery report. */
+    @Query("UPDATE message_deliveries SET ack_status = 'acked', ack_timestamp = :now, updated_at = :now WHERE sat_ref = :ref")
+    suspend fun markAckedBySatRef(ref: String, now: Long = System.currentTimeMillis()): Int
+
+    @Query("UPDATE message_deliveries SET ack_status = 'acked', ack_timestamp = :now, updated_at = :now WHERE id = :id")
+    suspend fun markAcked(id: Long, now: Long = System.currentTimeMillis()): Int
+
     /** The deliveries of one SOS (msg_ref "sos:<run>:..."), for its result screen (MESHSAT-1249). */
     @Query("SELECT * FROM message_deliveries WHERE msg_ref LIKE :prefix || '%' ORDER BY created_at ASC, id ASC")
     fun observeByRefPrefix(prefix: String): Flow<List<MessageDeliveryEntity>>

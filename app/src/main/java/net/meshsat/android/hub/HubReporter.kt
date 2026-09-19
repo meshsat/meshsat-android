@@ -368,8 +368,9 @@ class HubReporter(
             arrayOf(
                 HubTopics.bridgeCmd(config.bridgeId),
                 "meshsat/broadcast/tak/cot/in",
+                HubTopics.bridgeMOAck(config.bridgeId),
             ),
-            intArrayOf(QOS_AT_LEAST_ONCE, QOS_AT_LEAST_ONCE),
+            intArrayOf(QOS_AT_LEAST_ONCE, QOS_AT_LEAST_ONCE, QOS_AT_LEAST_ONCE),
         )
         publishBirth()
     }
@@ -476,6 +477,10 @@ class HubReporter(
             onTakCot?.invoke(payload)
             return
         }
+        if (topic.endsWith("/mo/ack")) {
+            handleMoAck(payload)
+            return
+        }
         if (!topic.endsWith("/cmd")) return
         try {
             val json = JSONObject(payload)
@@ -496,6 +501,29 @@ class HubReporter(
             onCommand?.invoke(cmd)
         } catch (e: Exception) {
             Log.w(TAG, "Failed to parse Hub command: ${e.message}")
+        }
+    }
+
+    /**
+     * The Hub has an MO from one of this phone's modems (MESHSAT-1246): {imei, momsn, ...}.
+     * Checked before use, as anything read off the network is: a 15-digit IMEI and a MOMSN
+     * in the modem's range (0 to 65535).
+     */
+    @Volatile var onMoAck: ((imei: String, momsn: Int) -> Unit)? = null
+
+    private fun handleMoAck(payload: String) {
+        try {
+            val json = JSONObject(payload)
+            val imei = json.optString("imei")
+            val momsn = json.optInt("momsn", -1)
+            if (imei.length != 15 || !imei.all { it.isDigit() } || momsn !in 0..65535) {
+                Log.w(TAG, "Ignoring a malformed MO receipt")
+                return
+            }
+            Log.i(TAG, "The Hub has MOMSN $momsn")
+            onMoAck?.invoke(imei, momsn)
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to parse an MO receipt: ${e.message}")
         }
     }
 

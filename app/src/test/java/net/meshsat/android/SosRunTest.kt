@@ -52,6 +52,16 @@ class SosRunTest {
     }
 
     @Test
+    fun `a confirmed route says who confirmed it`() {
+        val sat = MessageDeliveryEntity(msgRef = "sos:1000:sat", channel = "iridium_0", status = "sent", ackStatus = "acked")
+        val sms = MessageDeliveryEntity(msgRef = "sos:1000:sms:+31600000000", channel = "sms_0", status = "sent", ackStatus = "acked")
+        val statuses = SosProgress.routes(run(hubWanted = false), listOf(sat, sms))
+        assertEquals(listOf("Sent, and the Hub has it", "Delivered to their phone"), statuses.map { it.detail })
+        val unconfirmed = SosProgress.routes(run(hubWanted = false), listOf(sat.copy(ackStatus = "pending"), sms.copy(ackStatus = null)))
+        assertEquals(listOf("Sent", "Sent"), unconfirmed.map { it.detail })
+    }
+
+    @Test
     fun `refs name the run and whether it is a cancellation`() {
         assertEquals(1_000L to false, SosRun.parseRef("sos:1000:sms:+31600000000"))
         assertEquals(1_000L to true, SosRun.parseRef("sos:1000:cancel:sat"))

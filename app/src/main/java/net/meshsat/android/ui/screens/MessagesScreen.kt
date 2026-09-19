@@ -43,6 +43,7 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Done
+import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
@@ -705,24 +706,34 @@ private fun sendMessage(
 private fun deliveryLabel(forwardedTo: String): String = when (forwardedTo) {
     GatewayService.IRIDIUM_QUEUED -> "Queued"
     GatewayService.IRIDIUM_UNCONFIRMED -> "May have been sent"
-    "iridium:sbd" -> "Sent"
-    "iridium:failed" -> "Failed"
+    "iridium:sbd", net.meshsat.android.sms.SmsStatusReceiver.SENT -> "Sent"
+    GatewayService.IRIDIUM_DELIVERED -> "The Hub has it"
+    net.meshsat.android.sms.SmsStatusReceiver.DELIVERED -> "Delivered"
+    net.meshsat.android.sms.SmsStatusReceiver.SENDING -> "Sending"
+    "iridium:failed", net.meshsat.android.sms.SmsStatusReceiver.FAILED -> "Failed"
     else -> "Forwarded"
 }
 
 /**
  * The delivery mark on a message the phone sent, as chat apps show it: a clock while an Iridium
  * message waits for the modem, one check once it has left the phone (for Iridium: the satellite
- * network accepted it), a red mark when it failed. There is no second check: nothing confirms
- * delivery at the far end yet.
+ * network accepted it), a red mark when it failed, and two checks only on a confirmation from the
+ * far end: the Hub's receipt for a satellite message, the carrier's delivery report for an SMS
+ * (MESHSAT-1246). A mesh message never gets a second check.
  */
 @Composable
 private fun DeliveryMark(forwardedTo: String) {
     val (icon, tint, label) = when (forwardedTo) {
-        GatewayService.IRIDIUM_QUEUED -> Triple(Icons.Default.Schedule, MeshSatTextMuted, "Queued")
+        GatewayService.IRIDIUM_QUEUED, net.meshsat.android.sms.SmsStatusReceiver.SENDING ->
+            Triple(Icons.Default.Schedule, MeshSatTextMuted, "Queued")
         // The link dropped after the upload: it may have arrived, and it is being sent again.
         GatewayService.IRIDIUM_UNCONFIRMED -> Triple(Icons.AutoMirrored.Filled.HelpOutline, MeshSatAmber, "May have been sent")
-        "iridium:failed" -> Triple(Icons.Default.ErrorOutline, MeshSatRed, "Failed")
+        "iridium:failed", net.meshsat.android.sms.SmsStatusReceiver.FAILED ->
+            Triple(Icons.Default.ErrorOutline, MeshSatRed, "Failed")
+        // The second tick, only on a confirmation: the Hub's receipt for a satellite message, the
+        // carrier's delivery report for an SMS (MESHSAT-1246).
+        GatewayService.IRIDIUM_DELIVERED, net.meshsat.android.sms.SmsStatusReceiver.DELIVERED ->
+            Triple(Icons.Default.DoneAll, MeshSatTeal, "Delivered")
         else -> Triple(Icons.Default.Done, MeshSatTeal, "Sent")
     }
     Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(14.dp))

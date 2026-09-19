@@ -44,6 +44,9 @@ data class MessageDeliveryEntity(
     // phone number of an SOS emergency contact on "sms_0" (MESHSAT-1249). Empty means the channel's
     // own default destination.
     @ColumnInfo(name = "recipient", defaultValue = "''") val recipient: String = "",
+    // "imei:momsn" of the satellite session that carried this delivery, so the Hub's receipt
+    // (meshsat/bridge/{id}/mo/ack) can be matched to it (MESHSAT-1246). Empty until sent.
+    @ColumnInfo(name = "sat_ref", defaultValue = "''") val satRef: String = "",
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true

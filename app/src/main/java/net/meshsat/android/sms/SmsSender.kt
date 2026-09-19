@@ -46,6 +46,8 @@ object SmsSender {
         smaz2: Boolean = false,
         msvqscEncoder: MsvqscEncoder? = null,
         msvqscStages: Int = 3,
+        sentIntent: PendingIntent? = null,
+        deliveryIntent: PendingIntent? = null,
     ) {
         var payload: ByteArray = text.toByteArray(Charsets.UTF_8)
         var compressed = false
@@ -101,11 +103,15 @@ object SmsSender {
             Log.w(TAG, "No SmsManager on this device")
             return
         }
-        if (finalText.length > 160) {
-            val parts = smsManager.divideMessage(finalText)
-            smsManager.sendMultipartTextMessage(to, null, parts, null, null)
+        // The sent and delivery intents ride on the last part: its result stands for the message
+        // (MESHSAT-1246).
+        val parts = smsManager.divideMessage(finalText)
+        if (parts.size > 1) {
+            val sent = ArrayList<PendingIntent?>(List(parts.size) { i -> if (i == parts.size - 1) sentIntent else null })
+            val delivered = ArrayList<PendingIntent?>(List(parts.size) { i -> if (i == parts.size - 1) deliveryIntent else null })
+            smsManager.sendMultipartTextMessage(to, null, parts, sent, delivered)
         } else {
-            smsManager.sendTextMessage(to, null, finalText, null, null)
+            smsManager.sendTextMessage(to, null, finalText, sentIntent, deliveryIntent)
         }
     }
 
@@ -114,7 +120,13 @@ object SmsSender {
      * to emergency contacts): null once the SMS has left the phone, otherwise why not, so the
      * delivery queue tries again. "Left the phone" says nothing about the other phone.
      */
-    suspend fun sendAndWait(context: Context, to: String, text: String, timeoutMs: Long = 60_000L): String? {
+    suspend fun sendAndWait(
+        context: Context,
+        to: String,
+        text: String,
+        timeoutMs: Long = 60_000L,
+        deliveryIntent: PendingIntent? = null,
+    ): String? {
         val smsManager = SmsCapability.manager(context) ?: return "This device cannot send SMS"
         val parts = try {
             smsManager.divideMessage(text)
@@ -138,8 +150,10 @@ object SmsSender {
                     PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_ONE_SHOT,
                 )
             }
-            if (parts.size == 1) smsManager.sendTextMessage(to, null, parts[0], sent[0], null)
-            else smsManager.sendMultipartTextMessage(to, null, parts, sent, null)
+            // The carrier's delivery report, when asked for, rides on the last part (MESHSAT-1246).
+            val delivered = ArrayList<PendingIntent?>(List(parts.size) { i -> if (i == parts.size - 1) deliveryIntent else null })
+            if (parts.size == 1) smsManager.sendTextMessage(to, null, parts[0], sent[0], deliveryIntent)
+            else smsManager.sendMultipartTextMessage(to, null, parts, sent, delivered)
             repeat(parts.size) {
                 val code = withTimeoutOrNull(timeoutMs) { results.receive() }
                     ?: return "The phone did not say whether the SMS left"

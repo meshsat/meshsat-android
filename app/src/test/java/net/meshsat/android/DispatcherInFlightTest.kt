@@ -82,7 +82,7 @@ class DispatcherInFlightTest {
             accessEvaluator = AccessEvaluator(fake<AccessRuleDao>(), fake<ObjectGroupDao>(), scope),
             failoverResolver = null,
             registry = ChannelRegistry(),
-            deliveryCallback = { _, _, _, _ ->
+            deliveryCallback = { _, _, _, _, _ ->
                 started.complete(Unit)
                 release.await()
                 null
@@ -120,7 +120,7 @@ class DispatcherInFlightTest {
             accessEvaluator = AccessEvaluator(fake<AccessRuleDao>(), fake<ObjectGroupDao>(), scope),
             failoverResolver = null,
             registry = ChannelRegistry(),
-            deliveryCallback = { _, _, _, _ -> "offline" },
+            deliveryCallback = { _, _, _, _, _ -> "offline" },
             scope = scope,
         )
         try {
@@ -156,7 +156,7 @@ class DispatcherInFlightTest {
             accessEvaluator = AccessEvaluator(fake<AccessRuleDao>(), fake<ObjectGroupDao>(), scope),
             failoverResolver = null,
             registry = ChannelRegistry(),
-            deliveryCallback = { _, _, text, _ ->
+            deliveryCallback = { _, _, text, _, _ ->
                 attempts.add(text)
                 "${Dispatcher.NOT_NOW}120000 the modem pauses"
             },
@@ -192,7 +192,7 @@ class DispatcherInFlightTest {
             accessEvaluator = AccessEvaluator(fake<AccessRuleDao>(), fake<ObjectGroupDao>(), scope),
             failoverResolver = null,
             registry = ChannelRegistry(),
-            deliveryCallback = { _, _, _, _ -> null },
+            deliveryCallback = { _, _, _, _, _ -> null },
             scope = scope,
         )
         try {

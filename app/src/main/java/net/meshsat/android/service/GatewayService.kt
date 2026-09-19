@@ -115,6 +115,8 @@ class GatewayService : Service() {
         const val IRIDIUM_QUEUED = "iridium:queued"
         /** A satellite send that reported a failure after the upload, so it may have arrived. */
         const val IRIDIUM_UNCONFIRMED = "iridium:unconfirmed"
+        /** The Hub confirmed it has the satellite message: the second tick (MESHSAT-1246). */
+        const val IRIDIUM_DELIVERED = "iridium:delivered"
         /** How often the node is asked again for its modem while the phone does not hold it. */
         private const val PIPE_CLAIM_RETRY_MS = 15_000L
         private const val PIPE_CLAIM_FIRST_RETRY_MS = 3_000L
@@ -807,6 +809,7 @@ class GatewayService : Service() {
                         }
                     }
                 }
+                reporter.onMoAck = { imei, momsn -> scope.launch { onHubReceipt(imei, momsn) } }
                 reporter.start()
                 hubReporter = reporter
                 Log.i("MeshSat", "Hub Reporter initialized: bridge=$bridgeId")
@@ -2093,8 +2096,8 @@ class GatewayService : Service() {
                 val failover = FailoverResolver(db.failoverGroupDao(), statusProvider)
 
                 // Delivery callback: routes to the correct transport
-                val callback = Dispatcher.DeliveryCallback { interfaceId, payload, textPreview, recipient ->
-                    deliverToTransport(interfaceId, payload, textPreview, recipient)
+                val callback = Dispatcher.DeliveryCallback { interfaceId, payload, textPreview, recipient, deliveryId ->
+                    deliverToTransport(interfaceId, payload, textPreview, recipient, deliveryId)
                 }
 
                 // Create and start dispatcher (Phase C: with sequence tracker)
@@ -2135,7 +2138,7 @@ class GatewayService : Service() {
                     if (del.channel == "iridium_0") {
                         val msgId = del.msgRef.removePrefix("msg:").toLongOrNull()
                         if (del.msgRef.startsWith("msg:") && msgId != null) {
-                            db.messageDao().setForwardedTo(msgId, "iridium:sbd")
+                            db.messageDao().setForwardedToUnlessDelivered(msgId, "iridium:sbd")
                         } else {
                             db.messageDao().insert(
                                 Message(
@@ -2176,7 +2179,7 @@ class GatewayService : Service() {
      * Delivery callback: sends a message payload to the named interface.
      * Returns null on success, error message on failure.
      */
-    private suspend fun deliverToTransport(interfaceId: String, payload: ByteArray, textPreview: String, recipient: String = ""): String? {
+    private suspend fun deliverToTransport(interfaceId: String, payload: ByteArray, textPreview: String, recipient: String = "", deliveryId: Long = 0): String? {
         return try {
             when {
                 interfaceId.startsWith("mesh") -> {
@@ -2209,6 +2212,7 @@ class GatewayService : Service() {
                     // Fragment messages >340B using Iridium 2-byte header.
                     val fragments = IridiumFragment.fragment(data, IridiumFragment.MO_MTU, nextMsgID())
                     val chunks = fragments ?: listOf(data)
+                    var momsn = -1
                     for ((i, chunk) in chunks.withIndex()) {
                         val part = if (chunks.size > 1) " (part ${i + 1} of ${chunks.size})" else ""
                         val written = spp.writeMoBuffer(chunk)
@@ -2220,6 +2224,13 @@ class GatewayService : Service() {
                             // and retry all the same, so a message is never lost (a duplicate costs a credit).
                             return if (result.moStatus in IridiumSpp.MO_MAYBE_SENT) "${Dispatcher.UNCONFIRMED} $why" else "Not sent: $why"
                         }
+                        momsn = result.moMsn
+                    }
+                    // The session's MOMSN, for the Hub's receipt (MESHSAT-1246). One part only: a
+                    // message in fragments would need every part confirmed, so it keeps one tick.
+                    val imei = spp.modemInfo.value.imei
+                    if (chunks.size == 1 && deliveryId > 0 && imei.isNotBlank() && momsn >= 0) {
+                        db.messageDeliveryDao().setSatRef(deliveryId, "$imei:$momsn")
                     }
                     null // success: Dispatcher.onSent records it
                 }
@@ -2249,7 +2260,11 @@ class GatewayService : Service() {
                     val phone = recipient.ifBlank { settings.meshsatPiPhone.first() }
                     if (phone.isBlank()) return "no SMS destination configured"
                     // Wait for the phone to say the SMS left, so "no service" is retried, not lost.
-                    SmsSender.sendAndWait(context = this, to = phone, text = textPreview)?.let { return it }
+                    SmsSender.sendAndWait(
+                        context = this, to = phone, text = textPreview,
+                        // The carrier's delivery report marks the delivery acknowledged (MESHSAT-1246).
+                        deliveryIntent = if (deliveryId > 0) net.meshsat.android.sms.SmsStatusReceiver.deliveredIntent(this, deliveryId = deliveryId) else null,
+                    )?.let { return it }
                     db.messageDao().insert(
                         Message(
                             transport = "sms", direction = "tx", sender = "self",
@@ -3251,17 +3266,9 @@ class GatewayService : Service() {
         val compressMode = settings.compressSms.first()
         val stages = settings.msvqscStages.first().toIntOrNull() ?: 3
 
-        SmsSender.send(
-            context = this,
-            to = recipient,
-            text = text,
-            encryptionKey = keyToUse,
-            smaz2 = compressMode == "smaz2" || (keyToUse != null && compressMode != "msvqsc"),
-            msvqscEncoder = if (compressMode == "msvqsc") msvqscEncoder else null,
-            msvqscStages = stages,
-        )
-
-        db.messageDao().insert(
+        // The row first, so the phone's "sent" and the carrier's delivery report can find it: the
+        // chat shows a clock, one tick once it left the phone, two once delivered (MESHSAT-1246).
+        val messageId = db.messageDao().insert(
             Message(
                 transport = "sms",
                 direction = "tx",
@@ -3271,8 +3278,26 @@ class GatewayService : Service() {
                 rawText = "",
                 encrypted = keyToUse != null,
                 timestamp = System.currentTimeMillis(),
+                forwardedTo = net.meshsat.android.sms.SmsStatusReceiver.SENDING,
             )
         )
+
+        try {
+            SmsSender.send(
+                context = this,
+                to = recipient,
+                text = text,
+                encryptionKey = keyToUse,
+                smaz2 = compressMode == "smaz2" || (keyToUse != null && compressMode != "msvqsc"),
+                msvqscEncoder = if (compressMode == "msvqsc") msvqscEncoder else null,
+                msvqscStages = stages,
+                sentIntent = net.meshsat.android.sms.SmsStatusReceiver.sentIntent(this, messageId),
+                deliveryIntent = net.meshsat.android.sms.SmsStatusReceiver.deliveredIntent(this, messageId = messageId),
+            )
+        } catch (e: Exception) {
+            Log.w("MeshSat", "SMS to $recipient failed: ${e.message}")
+            db.messageDao().setForwardedTo(messageId, net.meshsat.android.sms.SmsStatusReceiver.FAILED)
+        }
     }
 
     // --- Notifications ---
@@ -3300,6 +3325,23 @@ class GatewayService : Service() {
         try {
             NotificationManagerCompat.from(this).notify(notificationId++, notification)
         } catch (_: SecurityException) {}
+    }
+
+    /**
+     * The Hub has the satellite message sent in session [momsn] (MESHSAT-1246): its delivery is
+     * acknowledged, and a chat message gets its second tick.
+     */
+    private suspend fun onHubReceipt(imei: String, momsn: Int) {
+        val ref = "$imei:$momsn"
+        val dao = db.messageDeliveryDao()
+        val rows = dao.getBySatRef(ref)
+        if (rows.isEmpty()) return
+        dao.markAckedBySatRef(ref)
+        for (del in rows) {
+            val msgId = del.msgRef.removePrefix("msg:").toLongOrNull()
+            if (del.msgRef.startsWith("msg:") && msgId != null) db.messageDao().setForwardedTo(msgId, IRIDIUM_DELIVERED)
+        }
+        Log.i("MeshSat", "The Hub has MOMSN $momsn: ${rows.size} delivery(ies) confirmed")
     }
 
     // --- SOS (MESHSAT-1249) ---

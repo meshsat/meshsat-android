@@ -15,6 +15,13 @@ interface MessageDao {
     @Query("UPDATE messages SET forwardedTo = :forwardedTo WHERE id = :id")
     suspend fun setForwardedTo(id: Long, forwardedTo: String)
 
+    /**
+     * The same, but never over a confirmed delivery: a receipt or a delivery report can arrive
+     * before the "sent" it follows is written (MESHSAT-1246).
+     */
+    @Query("UPDATE messages SET forwardedTo = :forwardedTo WHERE id = :id AND forwardedTo NOT IN ('iridium:delivered', 'sms:delivered')")
+    suspend fun setForwardedToUnlessDelivered(id: Long, forwardedTo: String)
+
     @Query("SELECT * FROM messages ORDER BY timestamp DESC LIMIT :limit")
     fun getRecent(limit: Int = 100): Flow<List<Message>>
 
