@@ -32,6 +32,8 @@ class IridiumSppOverPipeTest {
         var sbdixReply = "+SBDIX: 0, 219, 0, 0, 0, 0"
         var sbdsxReply = "+SBDSX: 0, 218, 0, -1, 0, 0"
         var mt: ByteArray = ByteArray(0)
+        /** Commands to ignore first, as a modem still powering up does. */
+        @Volatile var silentFor = 0
         var moWritten: ByteArray? = null
         private var receiver: ((ByteArray) -> Unit)? = null
         private val line = StringBuilder()
@@ -82,6 +84,10 @@ class IridiumSppOverPipeTest {
             val command = line.toString()
             line.setLength(0)
             commands.add(command)
+            if (silentFor > 0) {
+                silentFor--
+                return
+            }
             when {
                 command == "ATE0" -> { reply(command, "\r\nOK\r\n"); echo = false }
                 command == "AT+CGMI" -> reply(command, "\r\nIridium\r\n\r\nOK\r\n")
@@ -114,7 +120,19 @@ class IridiumSppOverPipeTest {
     }
 
     private val baseline = System.currentTimeMillis()
-    private var now = baseline
+    @Volatile private var now = baseline
+
+    /** Runs [block] with the clock racing ahead (a second every 10 ms), so timeouts pass quickly. */
+    private fun <T> fastClock(block: () -> T): T {
+        val running = AtomicBoolean(true)
+        val ticker = Thread { while (running.get()) { now += 1_000; Thread.sleep(10) } }.apply { start() }
+        try {
+            return block()
+        } finally {
+            running.set(false)
+            ticker.join()
+        }
+    }
 
     private fun attached(modem: FakeModem): IridiumSpp {
         val spp = IridiumSpp(clock = { now + (System.currentTimeMillis() - baseline) })
@@ -134,6 +152,35 @@ class IridiumSppOverPipeTest {
         assertTrue(modem.commands.contains("AT+SBDMTA=1"))
         assertEquals("300434067943980", spp.modemInfo.value.imei)
         assertEquals(4, spp.signal.value)
+    }
+
+    @Test
+    fun `a modem still powering up is asked again until it answers, then probed`() {
+        val modem = FakeModem().apply { silentFor = 3 }
+        val spp = fastClock { attached(modem) }
+        assertEquals(listOf("AT&K0", "AT&K0", "AT&K0", "AT&K0"), modem.commands.take(4))
+        assertEquals("300434067943980", spp.modemInfo.value.imei)
+        assertFalse(spp.modemSilent.value)
+    }
+
+    @Test
+    fun `a node without a modem is never reported connected, and detach stops the checks`() {
+        val modem = FakeModem().apply { silentFor = Int.MAX_VALUE }
+        val spp = IridiumSpp(clock = { now + (System.currentTimeMillis() - baseline) })
+        fastClock {
+            spp.attach(modem)
+            val deadline = System.currentTimeMillis() + 10_000
+            while (!spp.modemSilent.value && System.currentTimeMillis() < deadline) Thread.sleep(10)
+        }
+        assertTrue(spp.modemSilent.value)
+        assertEquals(IridiumSpp.State.Connecting, spp.state.value)
+        assertTrue(modem.commands.all { it == "AT&K0" })
+        spp.detach()
+        fastClock { Thread.sleep(100) } // a command already on its way at detach lands now
+        val sent = modem.commands.size
+        fastClock { Thread.sleep(300) }
+        assertEquals(sent, modem.commands.size)
+        assertFalse(spp.modemSilent.value)
     }
 
     @Test
