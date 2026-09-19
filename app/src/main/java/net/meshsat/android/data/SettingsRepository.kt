@@ -193,6 +193,13 @@ class SettingsRepository(private val context: Context) {
         context.dataStore.edit { it.remove(KEY_MESHTASTIC_BLE_ADDR) }
     }
 
+    /** Start the gateway after a phone restart or an app update; off unless the user chooses it (MESHSAT-1249). */
+    val startOnBoot: Flow<Boolean> = context.dataStore.data.map { it[booleanPreferencesKey("start_on_boot")] ?: false }
+
+    suspend fun setStartOnBoot(on: Boolean) {
+        context.dataStore.edit { it[booleanPreferencesKey("start_on_boot")] = on }
+    }
+
     /** Take the node's 9603 while connected to a MeshSat node; off leaves it to the node. */
     val iridiumNodePipeEnabled: Flow<Boolean> = context.dataStore.data.map { it[KEY_IRIDIUM_NODE_PIPE] ?: true }
 

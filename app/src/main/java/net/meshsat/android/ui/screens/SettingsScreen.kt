@@ -2228,6 +2228,29 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
             SectionCard("Background service") {
                 var showRestartDialog by remember { mutableStateOf(false) }
 
+                // Off unless chosen (owner ruling, 19 Sep 2026, MESHSAT-1249).
+                val startOnBoot by settings.startOnBoot.collectAsState(initial = false)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Start after a phone restart", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "The gateway starts by itself after the phone restarts or the app is updated, and reconnects to your node. " +
+                                "Android gives it your position only once you open the app.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MeshSatTextMuted,
+                        )
+                    }
+                    Switch(
+                        checked = startOnBoot,
+                        onCheckedChange = { scope.launch { settings.setStartOnBoot(it) } },
+                        colors = SwitchDefaults.colors(checkedTrackColor = MeshSatTeal),
+                    )
+                }
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
