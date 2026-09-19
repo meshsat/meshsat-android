@@ -7,6 +7,7 @@ import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCallback
 import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothGattDescriptor
+import android.bluetooth.BluetoothGattService
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
 import android.bluetooth.le.ScanCallback
@@ -25,6 +26,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import java.util.UUID
+import kotlin.random.Random
 
 /**
  * Meshtastic BLE connection manager.
@@ -43,8 +45,9 @@ class MeshtasticBle(private val context: Context) {
         val FROM_NUM_UUID: UUID = UUID.fromString("ed9da18c-a800-4f66-a670-aa7547de15e6")
         val CCC_DESCRIPTOR: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
 
-        private const val MAX_MTU = 512
-        private const val WRITE_CHUNK_SIZE = 512
+        // What Meshtastic firmware asks for; Android caps the request at 517.
+        private const val MAX_MTU = 517
+        private const val ATT_HEADER_BYTES = 3
     }
 
     enum class State { Disconnected, Scanning, Connecting, Connected }
@@ -177,8 +180,15 @@ class MeshtasticBle(private val context: Context) {
         }
     }
 
-    private var writeQueue = ArrayDeque<ByteArray>()
-    private var writing = false
+    // One GATT operation at a time, per connection (MESHSAT-1236).
+    @Volatile private var queue: GattOpQueue? = null
+
+    @Volatile private var mtu = 23
+
+    private val _iridiumPipe = MutableStateFlow<IridiumBlePipe?>(null)
+
+    /** The node's Iridium serial pipe, when the connected radio is a MeshSat node. */
+    val iridiumPipe: StateFlow<IridiumBlePipe?> = _iridiumPipe
 
     // --- BLE Scan ---
 
@@ -256,51 +266,88 @@ class MeshtasticBle(private val context: Context) {
         gatt?.disconnect()
         gatt?.close()
         gatt = null
+        teardown()
+    }
+
+    /** Forget everything tied to the connection that just ended. */
+    private fun teardown() {
+        queue?.close()
+        queue = null
+        _iridiumPipe.value?.close()
+        _iridiumPipe.value = null
         toRadioChar = null
         fromRadioChar = null
+        mtu = 23
         _state.value = State.Disconnected
     }
 
     // --- Send to Radio ---
 
+    /**
+     * Send one ToRadio protobuf. Over BLE it is written bare: the 0x94 0xC3 length header
+     * belongs to Meshtastic's serial/TCP stream API, and the firmware decodes each BLE
+     * write as the protobuf itself (MESHSAT-1236).
+     */
     fun sendToRadio(data: ByteArray) {
         // Silent drop if not connected — state, not error (MESHSAT-499)
         if (_state.value != State.Connected) return
+        val g = gatt ?: return
+        val q = queue ?: return
         val char = toRadioChar ?: return
-
-        // Meshtastic BLE protocol: 4-byte header [0x94 0xc3 MSB LSB] + payload
-        val framed = byteArrayOf(
-            0x94.toByte(), 0xc3.toByte(),
-            ((data.size shr 8) and 0xFF).toByte(),
-            (data.size and 0xFF).toByte(),
-        ) + data
-
-        // Chunk if needed
-        val chunks = framed.toList().chunked(WRITE_CHUNK_SIZE).map { it.toByteArray() }
-        synchronized(writeQueue) {
-            chunks.forEach { writeQueue.addLast(it) }
+        q.enqueue("w:${char.uuid}") {
+            GattCompat.write(g, char, data, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)
         }
-        drainWriteQueue()
     }
 
-    private fun drainWriteQueue() {
-        if (writing) return
-        val chunk: ByteArray
-        synchronized(writeQueue) {
-            chunk = writeQueue.removeFirstOrNull() ?: return
-            writing = true
-        }
-        toRadioChar?.let { char ->
-            char.value = chunk
-            char.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
-            gatt?.writeCharacteristic(char)
-        }
+    /** One read of fromRadio; a non-empty answer queues the next, until it runs dry. */
+    private fun readFromRadio() {
+        val g = gatt ?: return
+        val q = queue ?: return
+        val char = fromRadioChar ?: return
+        GattCompat.read(q, g, char)
     }
 
     /** Read remote RSSI. Result arrives via onReadRemoteRssi callback → _rssi StateFlow. */
     fun readRssi() {
         if (_state.value != State.Connected) return  // MESHSAT-499
-        gatt?.readRemoteRssi()
+        val g = gatt ?: return
+        queue?.enqueue("rssi") { g.readRemoteRssi() }
+    }
+
+    /**
+     * After discovery: subscribe to fromNum, ask for the config stream (the firmware sends
+     * nothing to a client that never sent want_config_id), then drain fromRadio. A MeshSat
+     * node also offers its Iridium pipe; it is published here and taken by the 9603 driver.
+     */
+    private fun startSession(g: BluetoothGatt, q: GattOpQueue, service: BluetoothGattService) {
+        service.getCharacteristic(FROM_NUM_UUID)?.let { GattCompat.setNotify(q, g, it, true) }
+        g.getService(IridiumBlePipe.SERVICE_UUID)?.let { pipeService ->
+            val pipe = IridiumBlePipe(g, q, pipeService) { mtu - ATT_HEADER_BYTES }
+            if (pipe.usable) _iridiumPipe.value = pipe
+        }
+        _state.value = State.Connected
+        sendToRadio(MeshtasticProtocol.encodeWantConfig(Random.nextInt(1, Int.MAX_VALUE)))
+        readFromRadio()
+    }
+
+    private fun onNotified(uuid: UUID, value: ByteArray) {
+        when {
+            uuid == FROM_RADIO_UUID -> if (value.isNotEmpty()) scope.launch { _receivedData.emit(value) }
+            uuid == FROM_NUM_UUID -> readFromRadio()
+            IridiumBlePipe.isPipeCharacteristic(uuid) -> _iridiumPipe.value?.onValue(uuid, value)
+        }
+    }
+
+    private fun onRead(uuid: UUID, value: ByteArray, status: Int) {
+        queue?.complete("r:$uuid", status)
+        if (status != BluetoothGatt.GATT_SUCCESS) return
+        when {
+            uuid == FROM_RADIO_UUID -> if (value.isNotEmpty()) {
+                scope.launch { _receivedData.emit(value) }
+                readFromRadio()
+            }
+            IridiumBlePipe.isPipeCharacteristic(uuid) -> _iridiumPipe.value?.onValue(uuid, value)
+        }
     }
 
     // --- GATT Callback ---
@@ -312,13 +359,19 @@ class MeshtasticBle(private val context: Context) {
                     g.requestMtu(MAX_MTU)
                 }
                 BluetoothProfile.STATE_DISCONNECTED -> {
-                    _state.value = State.Disconnected
+                    // Close the client, or every reconnect leaks one registration.
+                    if (gatt === g) {
+                        g.close()
+                        gatt = null
+                    }
+                    teardown()
                     scope.launch { _error.emit("BLE disconnected (status=$status)") }
                 }
             }
         }
 
         override fun onMtuChanged(g: BluetoothGatt, mtu: Int, status: Int) {
+            if (status == BluetoothGatt.GATT_SUCCESS) this@MeshtasticBle.mtu = mtu
             g.discoverServices()
         }
 
@@ -345,56 +398,40 @@ class MeshtasticBle(private val context: Context) {
                 return
             }
 
-            // Enable notifications on fromRadio
-            g.setCharacteristicNotification(fromRadioChar, true)
-            fromRadioChar?.getDescriptor(CCC_DESCRIPTOR)?.let { desc ->
-                desc.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-                g.writeDescriptor(desc)
-            }
-
-            // Also enable notifications on fromNum (notify-on-new-data)
-            service.getCharacteristic(FROM_NUM_UUID)?.let { fromNum ->
-                g.setCharacteristicNotification(fromNum, true)
-                fromNum.getDescriptor(CCC_DESCRIPTOR)?.let { desc ->
-                    desc.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-                    g.writeDescriptor(desc)
-                }
-            }
-
-            _state.value = State.Connected
+            val q = GattOpQueue(scope)
+            queue = q
+            startSession(g, q, service)
         }
 
+        // Android 13+: the value comes with the callback, safe against the next notification.
+        override fun onCharacteristicChanged(
+            g: BluetoothGatt,
+            characteristic: BluetoothGattCharacteristic,
+            value: ByteArray,
+        ) = onNotified(characteristic.uuid, value)
+
+        @Suppress("OVERRIDE_DEPRECATION", "DEPRECATION")
         override fun onCharacteristicChanged(
             g: BluetoothGatt,
             characteristic: BluetoothGattCharacteristic,
         ) {
-            when (characteristic.uuid) {
-                FROM_RADIO_UUID -> {
-                    characteristic.value?.let { data ->
-                        scope.launch { _receivedData.emit(data) }
-                    }
-                }
-                FROM_NUM_UUID -> {
-                    // fromNum changed — read fromRadio to get the data
-                    fromRadioChar?.let { g.readCharacteristic(it) }
-                }
-            }
+            onNotified(characteristic.uuid, characteristic.value ?: return)
         }
 
         override fun onCharacteristicRead(
             g: BluetoothGatt,
             characteristic: BluetoothGattCharacteristic,
+            value: ByteArray,
+            status: Int,
+        ) = onRead(characteristic.uuid, value, status)
+
+        @Suppress("OVERRIDE_DEPRECATION", "DEPRECATION")
+        override fun onCharacteristicRead(
+            g: BluetoothGatt,
+            characteristic: BluetoothGattCharacteristic,
             status: Int,
         ) {
-            if (status == BluetoothGatt.GATT_SUCCESS && characteristic.uuid == FROM_RADIO_UUID) {
-                characteristic.value?.let { data ->
-                    if (data.isNotEmpty()) {
-                        scope.launch { _receivedData.emit(data) }
-                        // Keep reading until empty (drain the radio's buffer)
-                        g.readCharacteristic(characteristic)
-                    }
-                }
-            }
+            onRead(characteristic.uuid, characteristic.value ?: ByteArray(0), status)
         }
 
         override fun onCharacteristicWrite(
@@ -402,15 +439,22 @@ class MeshtasticBle(private val context: Context) {
             characteristic: BluetoothGattCharacteristic,
             status: Int,
         ) {
-            synchronized(writeQueue) { writing = false }
+            queue?.complete("w:${characteristic.uuid}", status)
             if (status != BluetoothGatt.GATT_SUCCESS) {
                 scope.launch { _error.emit("BLE write failed: $status") }
-                return
             }
-            drainWriteQueue()
+        }
+
+        override fun onDescriptorWrite(
+            g: BluetoothGatt,
+            descriptor: BluetoothGattDescriptor,
+            status: Int,
+        ) {
+            queue?.complete("d:${descriptor.characteristic.uuid}", status)
         }
 
         override fun onReadRemoteRssi(g: BluetoothGatt, rssi: Int, status: Int) {
+            queue?.complete("rssi", status)
             if (status == BluetoothGatt.GATT_SUCCESS) {
                 _rssi.value = rssi
             }
