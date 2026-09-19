@@ -25,7 +25,6 @@ import androidx.compose.material.icons.outlined.Map
 import androidx.compose.material.icons.outlined.MonitorHeart
 import androidx.compose.material.icons.outlined.Outbox
 import androidx.compose.material.icons.outlined.Radio
-import androidx.compose.material.icons.outlined.SatelliteAlt
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Sms
 import androidx.compose.material.icons.outlined.Tune
@@ -55,6 +54,9 @@ import net.meshsat.android.ui.theme.MeshSatGreen
 import net.meshsat.android.ui.theme.MeshSatRed
 import net.meshsat.android.ui.theme.MeshSatTextMuted
 import net.meshsat.android.ui.components.collectOrNull
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.vectorResource
+import net.meshsat.android.R
 
 /**
  * The Setup tab (MESHSAT-1249): what used to be More plus one 2,276-line Settings scroll, grouped by
@@ -94,7 +96,7 @@ fun SetupScreen(navigate: (String) -> Unit) {
             onClick = { navigate("setup/node") },
         )
         NavRow(
-            icon = Icons.Outlined.SatelliteAlt,
+            icon = ImageVector.vectorResource(R.drawable.ic_transport_satellite),
             title = "Satellite",
             detail = when (sppState) {
                 IridiumSpp.State.Connected -> "Modem ready, signal $signal of 5"

@@ -14,8 +14,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Cloud
-import androidx.compose.material.icons.outlined.SatelliteAlt
-import androidx.compose.material.icons.outlined.SettingsInputAntenna
 import androidx.compose.material.icons.outlined.Sms
 import androidx.compose.material.icons.outlined.SwapVert
 import androidx.compose.material.icons.outlined.NightsStay
@@ -62,6 +60,8 @@ import net.meshsat.android.ui.theme.ColorMesh
 import net.meshsat.android.ui.theme.MeshSatBorder
 import net.meshsat.android.ui.theme.MeshSatSurface
 import net.meshsat.android.ui.theme.MeshSatTextSecondary
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.vectorResource
 
 /** A pass this high clears most rooftops; the Passes screen has the full list and other masks. */
 private const val HIGH_PASS_DEG = 40.0
@@ -235,7 +235,7 @@ fun HomeLanes(navigate: (String) -> Unit) {
                 .border(1.dp, MeshSatBorder, RoundedCornerShape(8.dp)),
         ) {
             TransportLane(
-                icon = Icons.Outlined.SatelliteAlt,
+                icon = ImageVector.vectorResource(R.drawable.ic_transport_satellite),
                 name = "Satellite",
                 color = ColorIridium,
                 state = satState,
@@ -246,7 +246,7 @@ fun HomeLanes(navigate: (String) -> Unit) {
             )
             HorizontalDivider(color = MeshSatBorder)
             TransportLane(
-                icon = Icons.Outlined.SettingsInputAntenna,
+                icon = ImageVector.vectorResource(R.drawable.ic_transport_mesh),
                 name = "Mesh",
                 color = ColorMesh,
                 state = meshLane,
