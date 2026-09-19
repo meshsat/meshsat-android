@@ -81,8 +81,8 @@ Routing rules (Setup > Advanced > Routing rules) decide what is forwarded betwee
 - **Hub.** MQTT with a client certificate. The phone shows up in the Hub's fleet like a field kit, reports health and positions, and takes remote commands: send a message, flush the queue, update config, rotate keys, reboot. When a field kit cannot be reached directly, the app can reach it through a tunnel via the Hub.
 - **TAK.** Positions from the Hub's TAK feed appear on the map. Receive only.
 - **Reticulum.** The phone runs as a Reticulum transport node and relays between the mesh, both Iridium modems, MQTT and TCP peers.
-- **Safety.** SOS sends three alerts 30 seconds apart: over the mesh, by satellite if the modem is connected at that moment, and by SMS to your kit's number. A check-in timer sends SOS if the phone sees no activity for too long, and zones alert you when someone enters or leaves an area.
-- **Records.** A message queue with everything waiting, sent or given up; an audit log signed as an Ed25519 hash chain; and config export and import in YAML or JSON, in the same format as the Bridge.
+- **Safety.** SOS sends three alerts 30 seconds apart: over the mesh, by satellite if the modem is connected at that moment, and by SMS to your kit's number. A check-in timer sends SOS if the phone sees no activity for too long, and zones record when a mesh node enters or leaves an area.
+- **Records.** A message queue with everything waiting, sent or given up, and config export and import in YAML or JSON, in the same format as the Bridge.
 - **Local API** on 127.0.0.1:6051, for testing and automation.
 
 The gateway runs as a foreground service, so the phone keeps relaying with the screen off.
@@ -93,7 +93,8 @@ The gateway runs as a foreground service, so the phone keeps relaying with the s
 |---|---|
 | Mesh through a MeshSat node over Bluetooth | Verified 19 September 2026 on a Pixel 9a |
 | Satellite messages out through the node, landing at the Hub | Verified 19 September 2026, three messages |
-| A satellite message in, picked up after a ring alert | Verified 19 September 2026 |
+| A satellite message in, picked up by the app | Verified 19 September 2026 |
+| A message that arrives while the app is sending by satellite | **Can be lost in 2.11.1**: two were, on 19 September 2026. Fixed for the next release |
 | Reconnecting to the node and taking its modem back after an app restart | Verified 19 September 2026 |
 | Pass prediction with no internet | Verified 19 September 2026 |
 | The phone connected to the Hub as a bridge | Verified 19 September 2026 |
@@ -158,7 +159,7 @@ All releases use the same key, so a new version installs over the old one. The o
 
 **A message shows a clock.** It is queued and goes out by itself when it can. A tick means sent, red means it failed.
 
-**The map is blank.** Online tiles need internet. For offline use, import an MBTiles file under Setup > Maps.
+**The map is blank.** Map tiles come from the internet. In 2.11.1 the offline map setting is saved but not used yet.
 
 **"App not installed".** Usually a signature mismatch with a copy that is already installed, or the old `com.cubeos.meshsat` app from before 2.9. Uninstall it first.
 
