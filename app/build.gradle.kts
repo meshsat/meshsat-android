@@ -14,8 +14,8 @@ android {
         applicationId = "net.meshsat.android"
         minSdk = 26
         targetSdk = 35
-        versionCode = 62
-        versionName = "2.9.9"
+        versionCode = 63
+        versionName = "2.9.10"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
