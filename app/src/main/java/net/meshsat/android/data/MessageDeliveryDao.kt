@@ -90,7 +90,7 @@ interface MessageDeliveryDao {
         WHERE status IN ('queued', 'retry')
           AND ((max_retries > 0 AND retries >= max_retries) OR (max_retries = 0 AND retries >= :safetyLimit))
     """)
-    suspend fun cancelRunaway(safetyLimit: Int = 15, now: Long = System.currentTimeMillis()): Int
+    suspend fun cancelRunaway(safetyLimit: Int = RUNAWAY_SAFETY_LIMIT, now: Long = System.currentTimeMillis()): Int
 
     /** Make every waiting retry of [channel] due now: the interface has just come online. */
     @Query("UPDATE message_deliveries SET next_retry = :now, updated_at = :now WHERE channel = :channel AND status = 'retry'")
@@ -195,6 +195,17 @@ interface MessageDeliveryDao {
     /** Average delivery latency in ms for a channel since a timestamp. */
     @Query("SELECT COALESCE(AVG(updated_at - created_at), 0) FROM message_deliveries WHERE channel = :channel AND status IN ('sent', 'delivered') AND created_at >= :since")
     suspend fun avgLatencyMsSince(channel: String, since: Long): Long
+
+    companion object {
+        /**
+         * How many tries a delivery with no retry cap of its own (a message the user wrote) may
+         * have before the guard at start-up calls it a runaway. A satellite retry that found no
+         * network comes every 3 minutes (Dispatcher.satelliteRetryAt), so this is about six hours
+         * of trying. It was 15, which became 45 minutes once the retry stopped stretching to 30
+         * (MESHSAT-1249), and a message the user wrote is meant to keep trying.
+         */
+        const val RUNAWAY_SAFETY_LIMIT = 120
+    }
 }
 
 data class DeliveryStatRow(

@@ -4,6 +4,7 @@ import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -27,13 +28,17 @@ import java.io.OutputStream
  *
  * What costs money is decided here, once, for every caller: each AT+SBDIX that reaches the
  * gateway is billed, even with an empty MO buffer. After status 32 or 36 no SBDIX is sent
- * for [SBDIX_HOLD_MS]; after a successful MO the buffer is cleared, so a later mailbox
- * check does not send it again. An unsolicited "SBDRING" line (a waiting MT message) is
- * reported on [ringAlerts]; checking the mailbox is the caller's decision, never a timer's.
+ * for [SBDIX_HOLD_MS]. The MO buffer is cleared after every session, sent or not, as the
+ * Bridge does (internal/transport/direct_sat.go): the delivery queue keeps the message for its
+ * retry, and a message left in the modem went out with the next mailbox check without the queue
+ * knowing, so the retry sent it twice (19 Sep, MOMSN 228). An unsolicited "SBDRING" line (a
+ * waiting MT message) is reported on [ringAlerts]; checking the mailbox is the caller's
+ * decision, never a timer's.
  *
  * Key AT commands:
  * - AT&K0     → flow control off (3-wire link; not every RockBLOCK stores it)
- * - AT+CSQ    → +CSQ:N (signal strength 0-5), free
+ * - AT+CSQF   → +CSQF:N, the modem's last signal reading (0-5), at once; free
+ * - AT+CSQ    → +CSQ:N, a fresh reading, up to 50 s while the modem acquires; free
  * - AT+SBDWB  → write binary to MO buffer (340 bytes max)
  * - AT+SBDIX  → SBD session (send MO, receive MT), 11-90 s, billed
  * - AT+SBDSX  → status check, free
@@ -44,7 +49,10 @@ class IridiumSpp(private val clock: () -> Long = System::currentTimeMillis) {
 
     companion object {
         private const val AT_TIMEOUT_MS = 5_000L
-        private const val CSQ_TIMEOUT_MS = 12_000L
+        /** A fresh AT+CSQ can take up to 50 s while the modem acquires the network (the Bridge waits 60). */
+        private const val CSQ_TIMEOUT_MS = 60_000L
+        /** AT+CSQF answers from the modem's last reading, in about 100 ms. */
+        private const val CSQF_TIMEOUT_MS = 5_000L
         private const val SBDIX_TIMEOUT_MS = 95_000L
         const val SBDIX_HOLD_MS = 180_000L
         const val MO_MAX_SIZE = 340
@@ -103,6 +111,11 @@ class IridiumSpp(private val clock: () -> Long = System::currentTimeMillis) {
 
     private val _signal = MutableStateFlow(0)
     val signal: StateFlow<Int> = _signal
+
+    private val _signalReadings = MutableSharedFlow<Int>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+
+    /** Every reading, repeated values included: a good one is the queue's cue to send now. */
+    val signalReadings: SharedFlow<Int> = _signalReadings
 
     private val _error = MutableSharedFlow<String>(extraBufferCapacity = 8)
     val error: SharedFlow<String> = _error
@@ -269,14 +282,20 @@ class IridiumSpp(private val clock: () -> Long = System::currentTimeMillis) {
 
     private fun isWireReady(): Boolean = _state.value == State.Connected
 
-    /** Poll signal strength (AT+CSQ, free). Returns 0-5. */
-    suspend fun pollSignal(): Int {
+    /**
+     * Read the signal strength, 0-5, free. The regular polls use AT+CSQF, the modem's last reading,
+     * which answers at once, as the Bridge does. [fresh] asks for a new reading with AT+CSQ, for a
+     * person who pressed a button: that can take up to 50 s while the modem acquires, and the old
+     * 12 s wait gave up early, showed 0 bars and let the late answer spill into the next command.
+     */
+    suspend fun pollSignal(fresh: Boolean = false): Int {
         if (link == null) return 0
         return try {
-            val resp = sendAT("AT+CSQ", CSQ_TIMEOUT_MS)
+            val resp = if (fresh) sendAT("AT+CSQ", CSQ_TIMEOUT_MS) else sendAT("AT+CSQF", CSQF_TIMEOUT_MS)
             val match = Regex("[+]CS(?:Q|QF):\\s*(\\d)").find(resp)
             val sig = match?.groupValues?.get(1)?.toIntOrNull() ?: 0
             _signal.value = sig
+            _signalReadings.tryEmit(sig)
             sig
         } catch (e: Exception) {
             _error.emit("Signal poll failed: ${e.message}")
@@ -342,10 +361,10 @@ class IridiumSpp(private val clock: () -> Long = System::currentTimeMillis) {
     fun sbdixHoldRemainingMs(): Long = (sbdixHeldUntil - clock()).coerceAtLeast(0)
 
     /**
-     * SBD session (AT+SBDIX), billed. Refused while held after status 32/36. On success the
-     * MO buffer is cleared.
+     * SBD session (AT+SBDIX), billed. Refused while held after status 32/36. The MO buffer is
+     * cleared afterwards whatever the outcome: the caller's queue keeps the message for a retry.
      */
-    suspend fun sbdix(deliverMt: Boolean = true): SbdixResult? {
+    suspend fun sbdix(deliverMt: Boolean = true, answeringRing: Boolean = false): SbdixResult? {
         if (!isWireReady()) return null
         val hold = sbdixHoldRemainingMs()
         if (hold > 0) {
@@ -353,7 +372,8 @@ class IridiumSpp(private val clock: () -> Long = System::currentTimeMillis) {
             return null
         }
         return try {
-            val resp = sendAT("AT+SBDIX", SBDIX_TIMEOUT_MS)
+            // +SBDIXA marks a session that answers a ring alert (MAN0009, +SBDIX[A]).
+            val resp = sendAT(if (answeringRing) "AT+SBDIXA" else "AT+SBDIX", SBDIX_TIMEOUT_MS)
             val match = Regex("[+]SBDIX:\\s*(\\d+),\\s*(\\d+),\\s*(\\d+),\\s*(\\d+),\\s*(\\d+),\\s*(\\d+)")
                 .find(resp)
             if (match == null) {
@@ -377,10 +397,8 @@ class IridiumSpp(private val clock: () -> Long = System::currentTimeMillis) {
                 "SBDIX: MO status ${result.moStatus} (${moStatusText(result.moStatus)}), MOMSN ${result.moMsn}, " +
                     "MT status ${result.mtStatus}, ${result.mtQueued} waiting",
             )
-            when {
-                result.moStatus == 32 || result.moStatus == 36 -> sbdixHeldUntil = clock() + SBDIX_HOLD_MS
-                result.moSuccess -> clearMoBuffer()
-            }
+            if (result.moStatus == 32 || result.moStatus == 36) sbdixHeldUntil = clock() + SBDIX_HOLD_MS
+            clearMoBuffer()
             // A message came in with this session: read it now, before another session overwrites it.
             val mt = if (result.mtAvailable) readMtBinary()?.takeIf { it.isNotEmpty() } else null
             if (mt != null) {
@@ -487,18 +505,16 @@ class IridiumSpp(private val clock: () -> Long = System::currentTimeMillis) {
 
         object NoAnswer : MailboxResult()
 
-        /**
-         * The session ran. [received] messages were handed over, [stillQueued] more wait at
-         * the gateway, and [sentOutgoing] says a waiting MO left in the same session.
-         */
-        data class Checked(val received: Int, val stillQueued: Int, val sentOutgoing: Boolean) : MailboxResult()
+        /** The session ran. [received] messages were handed over, [stillQueued] more wait at the gateway. */
+        data class Checked(val received: Int, val stillQueued: Int) : MailboxResult()
     }
 
     /**
      * Check the satellite mailbox on request. This is billed: one SBDIX, at least one credit
-     * even when nothing waits. A message already in the MT buffer is read first, for free,
-     * and an MO waiting in the MO buffer goes out in the same session. Every MT message is
-     * handed to [onMessage].
+     * even when nothing waits. A message already in the MT buffer is read first, for free. The
+     * MO buffer is emptied first: outgoing messages belong to the delivery queue, which records
+     * what it sent, and one sent from here went out again on the queue's retry. Every MT message
+     * is handed to [onMessage].
      */
     suspend fun checkMailbox(onMessage: suspend (ByteArray) -> Unit): MailboxResult {
         if (!isWireReady()) return MailboxResult.NotConnected
@@ -509,11 +525,12 @@ class IridiumSpp(private val clock: () -> Long = System::currentTimeMillis) {
         if (status?.mtFlag == true) {
             readMtBinary()?.takeIf { it.isNotEmpty() }?.let { onMessage(it); received++ }
         }
+        if (status?.moFlag == true && !clearMoBuffer()) return MailboxResult.NoAnswer
         // The session's message is handed over here, not through mtSink, so it is stored once.
         val result = sbdix(deliverMt = false) ?: return MailboxResult.NoAnswer
         result.mt?.let { onMessage(it); received++ }
         if (!result.moSuccess) return MailboxResult.SessionFailed(result.moStatus)
-        return MailboxResult.Checked(received, result.mtQueued, sentOutgoing = status?.moFlag == true)
+        return MailboxResult.Checked(received, result.mtQueued)
     }
 
     /**

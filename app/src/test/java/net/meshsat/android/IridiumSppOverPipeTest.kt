@@ -30,6 +30,7 @@ class IridiumSppOverPipeTest {
         val commands: MutableList<String> = Collections.synchronizedList(mutableListOf<String>())
         var echo = true
         var sbdixReply = "+SBDIX: 0, 219, 0, 0, 0, 0"
+        var csqf = 2
         var sbdsxReply = "+SBDSX: 0, 218, 0, -1, 0, 0"
         var mt: ByteArray = ByteArray(0)
         /** Commands to ignore first, as a modem still powering up does. */
@@ -94,13 +95,14 @@ class IridiumSppOverPipeTest {
                 command == "AT+CGMM" -> reply(command, "\r\nIRIDIUM 9600 Family SBD Transceiver\r\n\r\nOK\r\n")
                 command == "AT+CGSN" -> reply(command, "\r\n300434067943980\r\n\r\nOK\r\n")
                 command == "AT+CSQ" -> reply(command, "\r\n+CSQ:4\r\n\r\nOK\r\n")
+                command == "AT+CSQF" -> reply(command, "\r\n+CSQF:$csqf\r\n\r\nOK\r\n")
                 command == "AT+SBDSX" -> reply(command, "\r\n$sbdsxReply\r\n\r\nOK\r\n")
                 command.startsWith("AT+SBDWB=") -> {
                     binaryLeft = command.removePrefix("AT+SBDWB=").toInt() + 2
                     binary.reset()
                     reply(command, "READY\r\n")
                 }
-                command == "AT+SBDIX" -> reply(command, "\r\n$sbdixReply\r\n\r\nOK\r\n")
+                command == "AT+SBDIX" || command == "AT+SBDIXA" -> reply(command, "\r\n$sbdixReply\r\n\r\nOK\r\n")
                 command == "AT+SBDD0" -> reply(command, "\r\n0\r\n\r\nOK\r\n")
                 command == "AT+SBDD2" -> { moWritten = null; mt = ByteArray(0); reply(command, "\r\n0\r\n\r\nOK\r\n") }
                 command == "AT+SBDTC" -> {
@@ -151,7 +153,9 @@ class IridiumSppOverPipeTest {
         assertTrue(modem.commands.indexOf("ATE0") < modem.commands.indexOf("AT+CGSN"))
         assertTrue(modem.commands.contains("AT+SBDMTA=1"))
         assertEquals("300434067943980", spp.modemInfo.value.imei)
-        assertEquals(4, spp.signal.value)
+        // The probe reads the modem's last signal reading (AT+CSQF), which answers at once.
+        assertTrue(modem.commands.contains("AT+CSQF"))
+        assertEquals(modem.csqf, spp.signal.value)
     }
 
     @Test
@@ -221,12 +225,54 @@ class IridiumSppOverPipeTest {
     }
 
     @Test
-    fun `a successful SBDIX clears the MO buffer`() = runBlocking {
+    fun `every SBDIX clears the MO buffer, sent or not`() = runBlocking {
         val modem = FakeModem()
         val spp = attached(modem)
         val result = spp.sbdix()
         assertTrue(result!!.moSuccess)
         assertEquals("AT+SBDD0", modem.commands.last())
+
+        // Left in the modem after a failed session, the message went out with the next mailbox
+        // check and again on the queue's retry (19 Sep, MOMSN 228 and 229).
+        now += IridiumSpp.SBDIX_HOLD_MS
+        modem.sbdixReply = "+SBDIX: 32, 229, 2, 0, 0, 0"
+        assertEquals(32, spp.sbdix()!!.moStatus)
+        assertEquals("AT+SBDD0", modem.commands.last())
+    }
+
+    @Test
+    fun `a session that answers a ring alert is an SBDIXA`() = runBlocking {
+        val modem = FakeModem()
+        val spp = attached(modem)
+        assertTrue(spp.sbdix(answeringRing = true)!!.moSuccess)
+        assertTrue(modem.commands.contains("AT+SBDIXA"))
+        assertFalse(modem.commands.contains("AT+SBDIX"))
+    }
+
+    @Test
+    fun `the regular signal read is AT+CSQF, a fresh one AT+CSQ, and every reading is reported`() = runBlocking {
+        val modem = FakeModem()
+        val spp = attached(modem)
+        val readings = mutableListOf<Int>()
+        val collector = CoroutineScope(Dispatchers.IO).launch { spp.signalReadings.collect { readings.add(it) } }
+        Thread.sleep(50)
+        modem.commands.clear()
+
+        fun awaitReadings(n: Int) {
+            val deadline = System.currentTimeMillis() + 2_000
+            while (readings.size < n && System.currentTimeMillis() < deadline) Thread.sleep(10)
+        }
+        // A repeated value is reported again: a StateFlow would swallow it, and with it the cue to send.
+        assertEquals(2, spp.pollSignal())
+        awaitReadings(1)
+        assertEquals(2, spp.pollSignal())
+        awaitReadings(2)
+        assertEquals(listOf("AT+CSQF", "AT+CSQF"), modem.commands.toList())
+        assertEquals(4, spp.pollSignal(fresh = true))
+        assertEquals("AT+CSQ", modem.commands.last())
+        awaitReadings(3)
+        collector.cancel()
+        assertEquals(listOf(2, 2, 4), readings)
     }
 
     @Test
@@ -279,7 +325,7 @@ class IridiumSppOverPipeTest {
         val spp = attached(modem)
         val got = mutableListOf<ByteArray>()
         val result = spp.checkMailbox { got.add(it) }
-        assertEquals(IridiumSpp.MailboxResult.Checked(received = 0, stillQueued = 0, sentOutgoing = false), result)
+        assertEquals(IridiumSpp.MailboxResult.Checked(received = 0, stillQueued = 0), result)
         assertEquals(1, modem.commands.count { it == "AT+SBDIX" })
         assertTrue(got.isEmpty())
     }
@@ -292,21 +338,23 @@ class IridiumSppOverPipeTest {
         modem.mt = "hello".toByteArray()
         val got = mutableListOf<String>()
         val result = spp.checkMailbox { got.add(String(it)) }
-        assertEquals(IridiumSpp.MailboxResult.Checked(received = 1, stillQueued = 2, sentOutgoing = false), result)
+        assertEquals(IridiumSpp.MailboxResult.Checked(received = 1, stillQueued = 2), result)
         assertEquals(listOf("hello"), got)
     }
 
     @Test
-    fun `an MT already in the buffer is read for free, and a waiting MO goes out in the session`() = runBlocking {
+    fun `an MT already in the buffer is read for free, and a left-over MO is cleared, never sent`() = runBlocking {
         val modem = FakeModem()
         val spp = attached(modem)
         modem.sbdsxReply = "+SBDSX: 1, 218, 1, 6, 0, 0"
         modem.mt = "earlier".toByteArray()
         val got = mutableListOf<String>()
         val result = spp.checkMailbox { got.add(String(it)) }
-        assertEquals(IridiumSpp.MailboxResult.Checked(received = 1, stillQueued = 0, sentOutgoing = true), result)
+        assertEquals(IridiumSpp.MailboxResult.Checked(received = 1, stillQueued = 0), result)
         assertEquals(listOf("earlier"), got)
         assertTrue(modem.commands.indexOf("AT+SBDRB") < modem.commands.indexOf("AT+SBDIX"))
+        // Outgoing messages are the delivery queue's: the check empties the MO buffer first.
+        assertTrue(modem.commands.indexOf("AT+SBDD0") in 0 until modem.commands.indexOf("AT+SBDIX"))
     }
 
     @Test

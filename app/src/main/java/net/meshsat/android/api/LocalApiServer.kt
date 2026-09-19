@@ -432,7 +432,6 @@ class LocalApiServer(
                 is net.meshsat.android.bt.IridiumSpp.MailboxResult.Checked -> {
                     put("received", result.received)
                     put("still_queued", result.stillQueued)
-                    put("sent_outgoing", result.sentOutgoing)
                 }
                 is net.meshsat.android.bt.IridiumSpp.MailboxResult.SessionFailed -> put("mo_status", result.moStatus)
                 is net.meshsat.android.bt.IridiumSpp.MailboxResult.Held -> put("held_s", result.seconds)

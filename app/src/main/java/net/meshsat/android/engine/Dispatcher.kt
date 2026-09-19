@@ -49,13 +49,6 @@ class Dispatcher(
     private val scope: CoroutineScope,
     private val sequenceTracker: SequenceTracker = SequenceTracker(),
 ) {
-    /**
-     * When the next pass window above the obstacle mask opens for a satellite channel, as
-     * epoch ms, if that is after [afterMs]; null when a window is open or none is known.
-     * Retries of a satellite delivery wait for it (MESHSAT-1243).
-     */
-    @Volatile var nextWindowStart: ((channelId: String, afterMs: Long) -> Long?)? = null
-
     /** Called after a delivery went out, e.g. to mark the chat message sent. */
     @Volatile var onSent: (suspend (MessageDeliveryEntity) -> Unit)? = null
 
@@ -506,12 +499,23 @@ class Dispatcher(
         }
 
         // Schedule retry with backoff
-        val nextRetry = calculateNextRetry(channelId, newRetries, del.priority)
+        val nextRetry = calculateNextRetry(channelId, newRetries, del.priority, moStatusOf(error))
         deliveryDao.scheduleRetry(del.id, newRetries, nextRetry, error)
         Log.w(TAG, "Delivery ${del.id} retry $newRetries scheduled for $channelId: $error")
     }
 
-    private fun calculateNextRetry(channelId: String, retries: Int, priority: Int = 1): Long {
+    /**
+     * Make every waiting retry of [channelId] due now, whatever its backoff said: the channel has
+     * just shown it can carry them (the Bridge's opportunistic drain when the modem sees a
+     * satellite, internal/gateway/iridium.go drainDLQ). Returns the deliveries woken.
+     */
+    suspend fun drainNow(channelId: String, reason: String): Int {
+        val due = deliveryDao.retryNowForChannel(channelId)
+        if (due > 0) Log.i(TAG, "$due deliveries for $channelId are due now: $reason")
+        return due
+    }
+
+    private fun calculateNextRetry(channelId: String, retries: Int, priority: Int = 1, moStatus: Int? = null): Long {
         val channelType = channelId.substringBeforeLast('_')
         val desc = registry.get(channelType)
         val config = desc?.retryConfig
@@ -521,11 +525,8 @@ class Dispatcher(
         val backoffFunc = config?.backoffFunc ?: "linear"
 
         if (backoffFunc == "isu") {
-            val now = System.currentTimeMillis()
-            // An SOS (priority 0) tries again as soon as the modem allows, pass window or not: a
-            // session that finds no satellite costs nothing, and a gap in the sky mask is still a chance.
-            if (priority == 0) return satelliteRetryAt(now, 1, initialWait, maxWait, null)
-            return satelliteRetryAt(now, retries, initialWait, maxWait, nextWindowStart?.invoke(channelId, now))
+            // An SOS (priority 0) never backs off beyond the first step.
+            return satelliteRetryAt(System.currentTimeMillis(), if (priority == 0) 1 else retries, moStatus, initialWait, maxWait)
         }
 
         var wait = when (backoffFunc) {
@@ -589,15 +590,32 @@ class Dispatcher(
         private const val TAG = "Dispatcher"
 
         /**
-         * When to retry a satellite delivery: at least 3 minutes after a failed session (the
-         * ISU needs that after status 32/36), [maxWait] once the first five retries failed,
-         * and never before the next pass window above the obstacle mask, when one is known.
+         * When to retry a satellite delivery, by the modem's +SBDIX MO status, as the Bridge's
+         * dlqBackoff does (internal/gateway/iridium.go). 32 (no network service) and 36 (wait 3
+         * minutes since the last registration): 3 minutes, every time. The ISU allows one
+         * registration every 3 minutes and every SBDIX registers (ISU AT Command Reference
+         * MAN0009, +SBDREG and +SBDIX), and a satellite crosses the sky in under 10 minutes
+         * (RockBLOCK 9603 Developer Guide), so a longer wait only skips satellites. 35 (busy):
+         * 30 s. 17 (the gateway did not answer): 1 minute. Anything else backs off from
+         * [initialWait], doubling per retry up to [maxWait].
+         *
+         * It used to stretch to 30 minutes after five failures, or to the next predicted pass;
+         * on 19 Sep a message sat through a return of the signal until someone pressed Check
+         * mailbox. When the modem sees a satellite, [drainNow] sends at once instead.
          */
-        fun satelliteRetryAt(nowMs: Long, retries: Int, initialWait: Duration, maxWait: Duration, windowStartMs: Long?): Long {
-            val wait = if (retries <= 5) maxOf(initialWait, 3.minutes) else maxOf(maxWait, 3.minutes)
-            val earliest = nowMs + wait.inWholeMilliseconds
-            return if (windowStartMs != null && windowStartMs > earliest) windowStartMs else earliest
+        fun satelliteRetryAt(nowMs: Long, retries: Int, moStatus: Int?, initialWait: Duration, maxWait: Duration): Long {
+            val wait = when (moStatus) {
+                32, 36 -> 3.minutes
+                35 -> 30.seconds
+                17 -> 1.minutes
+                else -> minOf(initialWait * (1 shl retries.coerceIn(0, 10)), maxWait)
+            }
+            return nowMs + wait.inWholeMilliseconds
         }
+
+        /** The +SBDIX MO status in a satellite delivery's error ("Not sent: status 32, ..."), or null. */
+        fun moStatusOf(error: String): Int? =
+            Regex("\\bstatus (\\d{1,3})\\b").find(error)?.groupValues?.get(1)?.toIntOrNull()
 
         private const val DEFAULT_MAX_HOPS = 8
         private const val DEFAULT_MAX_QUEUE_DEPTH = 500
