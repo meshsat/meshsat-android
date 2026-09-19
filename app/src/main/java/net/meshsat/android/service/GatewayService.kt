@@ -117,6 +117,8 @@ class GatewayService : Service() {
         const val IRIDIUM_UNCONFIRMED = "iridium:unconfirmed"
         /** The Hub confirmed it has the satellite message: the second tick (MESHSAT-1246). */
         const val IRIDIUM_DELIVERED = "iridium:delivered"
+        /** A signal reading this strong sends what waits for the satellite at once (the Bridge's min_signal_bars). */
+        const val IRIDIUM_MIN_SIGNAL_BARS = 1
         /** How often the node is asked again for its modem while the phone does not hold it. */
         private const val PIPE_CLAIM_RETRY_MS = 15_000L
         private const val PIPE_CLAIM_FIRST_RETRY_MS = 3_000L
@@ -1121,7 +1123,6 @@ class GatewayService : Service() {
                     val elapsedMs = System.currentTimeMillis() - startMs
                     Log.i("MeshSat", "Pass prediction: ${parsed.size} TLEs (${tleSet.source}, ${tleSet.ageSec() / 3600}h old), ${sorted.size} passes, ${elapsedMs}ms")
                     cachedPasses = sorted
-                    latestPasses = sorted
                     _passes.value = sorted
                     cacheTimestampMs = nowMs
                     sorted
@@ -2157,9 +2158,6 @@ class GatewayService : Service() {
                         del.msgRef.removePrefix("msg:").toLongOrNull()?.let { db.messageDao().setForwardedTo(it, IRIDIUM_UNCONFIRMED) }
                     }
                 }
-                disp.nextWindowStart = { channelId, afterMs ->
-                    if (channelId.startsWith("iridium")) nextIridiumWindowStart(afterMs) else null
-                }
                 disp.start(interfaces)
                 dispatcher = disp
 
@@ -2560,20 +2558,6 @@ class GatewayService : Service() {
         }
     }
 
-    /** The last pass predictions, for timing Iridium retries (MESHSAT-1243). */
-    @Volatile private var latestPasses: List<net.meshsat.android.satellite.PassPrediction> = emptyList()
-
-    /**
-     * The start of the next predicted pass window after [afterMs], in epoch ms; null while a
-     * window is open at [afterMs] or nothing is predicted, so the retry is not delayed.
-     */
-    private fun nextIridiumWindowStart(afterMs: Long): Long? {
-        val passes = latestPasses
-        if (passes.isEmpty()) return null
-        if (passes.any { it.aosUnix * 1000 <= afterMs && afterMs <= it.losUnix * 1000 }) return null
-        return passes.map { it.aosUnix * 1000 }.filter { it > afterMs }.minOrNull()
-    }
-
     /** Lets InterfaceManager release the node's modem without changing the saved setting. */
     private val iridiumWanted = MutableStateFlow(true)
 
@@ -2936,6 +2920,16 @@ class GatewayService : Service() {
         }
         iridiumSpp?.let { spp ->
             scope.launch { spp.error.collect { err -> Log.w("MeshSat", "SPP: $err") } }
+            // The modem sees a satellite: send what waits now instead of at its next retry, as the
+            // Bridge drains its queue on a signal of at least one bar (MESHSAT-1249). Not during the
+            // 3 minutes after a session that found no network: the modem gets them to reacquire.
+            scope.launch {
+                spp.signalReadings.collect { bars ->
+                    if (bars >= IRIDIUM_MIN_SIGNAL_BARS && spp.sbdixHoldRemainingMs() == 0L) {
+                        dispatcher?.drainNow("iridium_0", "the modem sees a satellite ($bars/5)")
+                    }
+                }
+            }
         }
         iridium9704Spp?.let { spp ->
             scope.launch { spp.error.collect { err -> Log.w("MeshSat", "9704: $err") } }
@@ -2952,8 +2946,9 @@ class GatewayService : Service() {
 
         if (status.mtFlag) receiveIridiumMt(spp)
         if (ringAlert || status.raFlag || status.msgWaiting > 0) {
-            // The session's message, if any, is stored by the modem's mtSink.
-            spp.sbdix()
+            // The session's message, if any, is stored by the modem's mtSink. +SBDIXA when it
+            // answers a ring alert, as the ISU AT Command Reference asks.
+            spp.sbdix(answeringRing = ringAlert || status.raFlag)
         }
     }
 

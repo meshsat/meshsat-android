@@ -100,6 +100,5 @@ fun describeMailboxResult(result: MailboxResult): String = when (result) {
             }
         )
         if (result.stillQueued > 0) append(" ${result.stillQueued} more waiting.")
-        if (result.sentOutgoing) append(" The waiting outgoing message was sent too.")
     }
 }

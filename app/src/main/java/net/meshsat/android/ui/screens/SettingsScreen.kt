@@ -575,7 +575,8 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
                     Button(
                         onClick = {
                             scope.launch {
-                                val sig = GatewayService.iridiumSpp?.pollSignal()
+                                // A fresh reading (AT+CSQ) can take up to a minute: off the main thread.
+                                val sig = withContext(Dispatchers.IO) { GatewayService.iridiumSpp?.pollSignal(fresh = true) }
                                 Toast.makeText(context, "Signal: $sig/5", Toast.LENGTH_SHORT).show()
                             }
                         },
