@@ -30,6 +30,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.HelpOutline
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.ContentCopy
@@ -673,10 +674,11 @@ private fun sendMessage(
 
 /** The delivery badge of a forwarded message: an Iridium send shows where it is in the queue. */
 private fun deliveryLabel(forwardedTo: String): String = when (forwardedTo) {
-    GatewayService.IRIDIUM_QUEUED -> "QUEUED"
-    "iridium:sbd" -> "SENT"
-    "iridium:failed" -> "FAILED"
-    else -> "FWD"
+    GatewayService.IRIDIUM_QUEUED -> "Queued"
+    GatewayService.IRIDIUM_UNCONFIRMED -> "May have been sent"
+    "iridium:sbd" -> "Sent"
+    "iridium:failed" -> "Failed"
+    else -> "Forwarded"
 }
 
 /**
@@ -689,6 +691,8 @@ private fun deliveryLabel(forwardedTo: String): String = when (forwardedTo) {
 private fun DeliveryMark(forwardedTo: String) {
     val (icon, tint, label) = when (forwardedTo) {
         GatewayService.IRIDIUM_QUEUED -> Triple(Icons.Default.Schedule, MeshSatTextMuted, "Queued")
+        // The link dropped after the upload: it may have arrived, and it is being sent again.
+        GatewayService.IRIDIUM_UNCONFIRMED -> Triple(Icons.AutoMirrored.Filled.HelpOutline, MeshSatAmber, "May have been sent")
         "iridium:failed" -> Triple(Icons.Default.ErrorOutline, MeshSatRed, "Failed")
         else -> Triple(Icons.Default.Done, MeshSatTeal, "Sent")
     }
@@ -779,7 +783,7 @@ private fun ChatBubble(msg: Message, activeKey: String?) {
                     }
                     if (msg.forwarded && !isSelf) {
                         Text(
-                            text = "FWD",
+                            text = "Forwarded",
                             style = MaterialTheme.typography.labelSmall,
                             color = MeshSatTextMuted,
                         )
