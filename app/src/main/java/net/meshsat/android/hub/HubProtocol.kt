@@ -61,6 +61,11 @@ object HubTopics {
     fun devicePosition(deviceID: String) = "meshsat/$deviceID/position"
     fun deviceTelemetry(deviceID: String) = "meshsat/$deviceID/telemetry"
     fun deviceSOS(deviceID: String) = "meshsat/$deviceID/sos"
+    fun deviceMODecoded(deviceID: String) = "meshsat/$deviceID/mo/decoded"
+
+    /** A topic segment as the Hub writes it: + # / % percent-encoded (meshsat-hub hubmqtt.EncodeSegment). */
+    fun segment(id: String): String =
+        id.replace("%", "%25").replace("+", "%2B").replace("#", "%23").replace("/", "%2F")
 }
 
 // --- Shared types ---

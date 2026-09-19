@@ -96,6 +96,8 @@ class GatewayService : Service() {
         const val EXTRA_ADDRESS = "address"
         const val EXTRA_TEXT = "text"
         const val EXTRA_RECIPIENT = "recipient"
+        /** With [ACTION_SOS_ACTIVATE]: a test of the alarm routes, which raises no alarm (MESHSAT-1249). */
+        const val EXTRA_SOS_TEST = "sos_test"
 
         // Multi-instance transport registry (MESHSAT-388)
         val registry = TransportRegistry()
@@ -140,11 +142,10 @@ class GatewayService : Service() {
         fun checkIridiumMailbox(): Boolean = service?.startMailboxCheck() ?: false
         val rulesEngine = RulesEngine()
 
-        // SOS state
+        // SOS state: a real SOS is on (MESHSAT-1249; the run itself is SosController.run)
         private val _sosActive = MutableStateFlow(false)
         val sosActive: StateFlow<Boolean> = _sosActive
-        private val _sosSends = MutableStateFlow(0)
-        val sosSends: StateFlow<Int> = _sosSends
+        fun noteSosActive(active: Boolean) { _sosActive.value = active }
 
         // Phone GPS location (updated continuously)
         private val _phoneLocation = MutableStateFlow<Location?>(null)
@@ -246,7 +247,7 @@ class GatewayService : Service() {
     private val scope = CoroutineScope(kotlinx.coroutines.Dispatchers.IO + SupervisorJob())
     private lateinit var settings: SettingsRepository
     private lateinit var db: AppDatabase
-    private var sosJob: kotlinx.coroutines.Job? = null
+    private var sosController: net.meshsat.android.sos.SosController? = null
     private var msvqscEncoder: MsvqscEncoder? = null
 
     // Phase A: core infrastructure (dedup + transform)
@@ -299,6 +300,7 @@ class GatewayService : Service() {
             deduplicator.startPruner(scope)
             initInterfaceManager()
             initTelemetry()
+            initSos()
             initDispatcher()
             initFieldIntelligence()
             initSigningAndApi()
@@ -344,8 +346,11 @@ class GatewayService : Service() {
                 scope.launch { settings.clearMeshtasticBleAddress() }
             }
             ACTION_DISCONNECT_IRIDIUM9704 -> iridium9704Spp?.disconnect()
-            ACTION_SOS_ACTIVATE -> activateSos()
-            ACTION_SOS_CANCEL -> cancelSos()
+            ACTION_SOS_ACTIVATE -> {
+                val test = intent.getBooleanExtra(EXTRA_SOS_TEST, false)
+                scope.launch { sosController?.start(test = test, trigger = "button") }
+            }
+            ACTION_SOS_CANCEL -> scope.launch { sosController?.cancel() }
             ACTION_SEND_MESH -> {
                 val text = intent.getStringExtra(EXTRA_TEXT) ?: return START_STICKY
                 // A reply to a node goes to that node, not to the whole channel (MESHSAT-1249).
@@ -401,7 +406,8 @@ class GatewayService : Service() {
         channelReg = null
         accessEvaluator = null
         accessEval = null
-        sosJob?.cancel()
+        sosController?.stop()
+        sosController = null
         rnsTransportNode?.stop()
         rnsTransportNode = null
         hubRelayTransport?.shutdown()
@@ -438,7 +444,7 @@ class GatewayService : Service() {
                 // Emit dead man CoT event to ATAK + Hub (MESHSAT-191)
                 val elapsed = (System.currentTimeMillis() / 1000) - lastSeen
                 takIntegration?.sendDeadman(lat, lon, elapsed.toInt())
-                activateSos()
+                scope.launch { sosController?.start(test = false, trigger = "checkin") }
             }
             deadManSwitch = dms
 
@@ -2087,8 +2093,8 @@ class GatewayService : Service() {
                 val failover = FailoverResolver(db.failoverGroupDao(), statusProvider)
 
                 // Delivery callback: routes to the correct transport
-                val callback = Dispatcher.DeliveryCallback { interfaceId, payload, textPreview ->
-                    deliverToTransport(interfaceId, payload, textPreview)
+                val callback = Dispatcher.DeliveryCallback { interfaceId, payload, textPreview, recipient ->
+                    deliverToTransport(interfaceId, payload, textPreview, recipient)
                 }
 
                 // Create and start dispatcher (Phase C: with sequence tracker)
@@ -2118,7 +2124,14 @@ class GatewayService : Service() {
                 )
                 // Iridium sends (MESHSAT-1243): mark the chat message sent, or record a
                 // rule-forwarded one; retries wait for the next pass window when one is known.
+                disp.mayDeliver = { del -> sosController?.mayDeliver(del) ?: true }
+                // The audit log had no writer at all (MESHSAT-1249); signing starts after this, so
+                // the service is read when an event happens.
+                disp.onAudit = { event, iface, deliveryId, ruleId, detail ->
+                    signingService?.auditEvent(event, iface, "egress", deliveryId, ruleId, detail)
+                }
                 disp.onSent = { del ->
+                    sosController?.onSent(del)
                     if (del.channel == "iridium_0") {
                         val msgId = del.msgRef.removePrefix("msg:").toLongOrNull()
                         if (del.msgRef.startsWith("msg:") && msgId != null) {
@@ -2127,6 +2140,7 @@ class GatewayService : Service() {
                             db.messageDao().insert(
                                 Message(
                                     transport = "iridium", direction = "tx", sender = "self",
+                                    recipient = net.meshsat.android.ui.Peers.SATELLITE,
                                     text = del.textPreview, forwarded = true, forwardedTo = "iridium:sbd",
                                 )
                             )
@@ -2162,7 +2176,7 @@ class GatewayService : Service() {
      * Delivery callback: sends a message payload to the named interface.
      * Returns null on success, error message on failure.
      */
-    private suspend fun deliverToTransport(interfaceId: String, payload: ByteArray, textPreview: String): String? {
+    private suspend fun deliverToTransport(interfaceId: String, payload: ByteArray, textPreview: String, recipient: String = ""): String? {
         return try {
             when {
                 interfaceId.startsWith("mesh") -> {
@@ -2175,6 +2189,7 @@ class GatewayService : Service() {
                     db.messageDao().insert(
                         Message(
                             transport = "mesh", direction = "tx", sender = "self",
+                            recipient = net.meshsat.android.ui.Peers.MESH_ALL,
                             text = textPreview, forwarded = true, forwardedTo = "mesh:broadcast",
                             timestamp = System.currentTimeMillis(),
                         )
@@ -2229,9 +2244,12 @@ class GatewayService : Service() {
                     null // success
                 }
                 interfaceId.startsWith("sms") -> {
-                    val phone = settings.meshsatPiPhone.first()
+                    // A delivery that names its recipient (an SOS emergency contact) goes there;
+                    // anything else to the kit's number, as before (MESHSAT-1249).
+                    val phone = recipient.ifBlank { settings.meshsatPiPhone.first() }
                     if (phone.isBlank()) return "no SMS destination configured"
-                    SmsSender.send(context = this, to = phone, text = textPreview)
+                    // Wait for the phone to say the SMS left, so "no service" is retried, not lost.
+                    SmsSender.sendAndWait(context = this, to = phone, text = textPreview)?.let { return it }
                     db.messageDao().insert(
                         Message(
                             transport = "sms", direction = "tx", sender = "self",
@@ -3284,83 +3302,35 @@ class GatewayService : Service() {
         } catch (_: SecurityException) {}
     }
 
-    // --- SOS ---
+    // --- SOS (MESHSAT-1249) ---
 
-    private fun activateSos() {
-        if (_sosActive.value) return
-        _sosActive.value = true
-        _sosSends.value = 0
-
-        sosJob = scope.launch {
-            val location = getLastKnownLocation()
-            val locStr = if (location != null) {
-                "%.6f,%.6f alt=%dm".format(location.latitude, location.longitude, location.altitude.toInt())
-            } else {
-                "position unknown"
+    private fun initSos() {
+        val service = this
+        val controller = net.meshsat.android.sos.SosController(
+            context = this, scope = scope, db = db, settings = settings,
+            env = object : net.meshsat.android.sos.SosController.Env {
+                override val dispatcher: Dispatcher? get() = service.dispatcher
+                override val hubReporter: net.meshsat.android.hub.HubReporter? get() = GatewayService.hubReporter
+                override suspend fun modemImei(): String =
+                    iridiumSpp?.modemInfo?.value?.imei.orEmpty().ifBlank { settings.lastModemImei.first() }
+                override suspend fun meshPaired(): Boolean = settings.meshtasticBleAddress.first().isNotBlank()
+                override fun location(): Location? = getLastKnownLocation()
+                override fun tak(lat: Double, lon: Double, alt: Double, reason: String) {
+                    takIntegration?.sendSOS(lat = lat, lon = lon, alt = alt, reason = reason)
+                }
+                override suspend fun audit(event: String, detail: String) {
+                    signingService?.auditEvent(eventType = event, detail = detail)
+                }
+            },
+        )
+        sosController = controller
+        controller.restore()
+        // An SOS uses the satellite whenever this phone has had a modem, connected right now or not.
+        scope.launch {
+            iridiumSpp?.modemInfo?.collect { info ->
+                if (info.imei.isNotBlank() && info.imei != settings.lastModemImei.first()) settings.setLastModemImei(info.imei)
             }
-
-            val sosText = "SOS EMERGENCY - MeshSat - $locStr"
-
-            // Emit SOS CoT event to ATAK + Hub (MESHSAT-191)
-            takIntegration?.sendSOS(
-                lat = location?.latitude ?: 0.0,
-                lon = location?.longitude ?: 0.0,
-                alt = location?.altitude ?: 0.0,
-                reason = sosText,
-            )
-
-            repeat(3) { i ->
-                if (!_sosActive.value) return@launch
-                _sosSends.value = i + 1
-                Log.w("MeshSat", "SOS send ${i + 1}/3: $sosText")
-
-                // Send via mesh (broadcast)
-                val ble = meshtasticBle
-                if (ble != null && ble.state.value == MeshtasticBle.State.Connected) {
-                    val proto = MeshtasticProtocol.encodeTextMessage(sosText)
-                    ble.sendToRadio(proto)
-                }
-
-                // Send via Iridium
-                val spp = iridiumSpp
-                if (spp != null && spp.state.value == IridiumSpp.State.Connected) {
-                    val data = sosText.toByteArray(Charsets.UTF_8)
-                    if (data.size <= 340) {
-                        val written = spp.writeMoBuffer(data)
-                        if (written) spp.sbdix()
-                    }
-                }
-
-                // Send via SMS to Pi
-                val phone = settings.meshsatPiPhone.first()
-                if (phone.isNotBlank()) {
-                    SmsSender.send(this@GatewayService, phone, sosText)
-                }
-
-                // Store in DB
-                db.messageDao().insert(
-                    Message(
-                        transport = "sos",
-                        direction = "tx",
-                        sender = "self",
-                        text = sosText,
-                        timestamp = System.currentTimeMillis(),
-                    )
-                )
-
-                if (i < 2) delay(30_000) // 30s between sends
-            }
-
-            _sosActive.value = false
         }
-    }
-
-    private fun cancelSos() {
-        _sosActive.value = false
-        sosJob?.cancel()
-        sosJob = null
-        _sosSends.value = 0
-        Log.w("MeshSat", "SOS cancelled")
     }
 
     @Suppress("MissingPermission")

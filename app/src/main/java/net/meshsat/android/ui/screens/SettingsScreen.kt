@@ -947,6 +947,11 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
             }
         }
 
+        // --- SOS: emergency contacts, name, test (MESHSAT-1249) ---
+        if (section.shows(SetupSection.Safety)) {
+            SosSettingsCard()
+        }
+
         // --- Dead Man's Switch ---
         if (section.shows(SetupSection.Safety)) {
             SectionCard("Check-in timer (dead man's switch)") {

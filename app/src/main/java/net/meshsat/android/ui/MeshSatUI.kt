@@ -6,6 +6,7 @@ import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.consumeWindowInsets
@@ -39,6 +40,7 @@ import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -68,6 +70,8 @@ import net.meshsat.android.service.GatewayService
 import net.meshsat.android.ui.components.MapFocus
 import net.meshsat.android.ui.components.SubScreen
 import net.meshsat.android.ui.screens.AboutScreen
+import net.meshsat.android.ui.screens.SosBanner
+import net.meshsat.android.ui.screens.SosScreen
 import net.meshsat.android.ui.screens.AdvancedScreen
 import net.meshsat.android.ui.screens.AuditScreen
 import net.meshsat.android.ui.screens.ConversationChatView
@@ -126,7 +130,7 @@ private fun tabOf(route: String?): Tab = when {
 }
 
 @Composable
-fun MeshSatUI() {
+fun MeshSatUI(openRoute: String? = null, onRouteOpened: () -> Unit = {}) {
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
@@ -137,9 +141,22 @@ fun MeshSatUI() {
     val navigate: (String) -> Unit = { route -> navController.navigate(route) }
     val back: () -> Unit = { navController.popBackStack() }
 
+    // A notification asked for a screen, e.g. the SOS result screen (MESHSAT-1249).
+    LaunchedEffect(openRoute) {
+        if (openRoute != null) {
+            navController.navigate(openRoute) { launchSingleTop = true }
+            onRouteOpened()
+        }
+    }
+
     Scaffold(
         containerColor = MeshSatBg,
-        topBar = { StatusStrip() },
+        topBar = {
+            Column {
+                StatusStrip()
+                if (currentRoute != "sos") SosBanner(onOpen = { navigate("sos") })
+            }
+        },
         bottomBar = {
             NavigationBar(containerColor = MeshSatSurface) {
                 Tab.entries.forEach { tab ->
@@ -241,6 +258,7 @@ fun MeshSatUI() {
                 composable("credentials") { SubScreen("Certificates and keys", back) { CredentialsScreen() } }
                 composable("decrypt") { SubScreen("Encrypt or decrypt text", back) { DecryptScreen() } }
                 composable("about") { SubScreen("About", back) { AboutScreen() } }
+                composable("sos") { SubScreen("SOS", back) { SosScreen(navigate) } }
             }
         }
     }

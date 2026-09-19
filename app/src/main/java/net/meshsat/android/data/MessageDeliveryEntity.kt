@@ -40,6 +40,10 @@ data class MessageDeliveryEntity(
     @ColumnInfo(name = "custody_status") val custodyStatus: String? = null,  // null, "offered", "accepted", "transferred"
     @ColumnInfo(name = "custodian_hash") val custodianHash: String? = null,  // hex of custody-accepting node
     @ColumnInfo(name = "bundle_id") val bundleId: String? = null,            // DTN bundle ID for fragmentation
+    // Who this delivery is for on its channel, when the channel has more than one destination: the
+    // phone number of an SOS emergency contact on "sms_0" (MESHSAT-1249). Empty means the channel's
+    // own default destination.
+    @ColumnInfo(name = "recipient", defaultValue = "''") val recipient: String = "",
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
