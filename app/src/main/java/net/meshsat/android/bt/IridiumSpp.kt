@@ -53,6 +53,14 @@ class IridiumSpp(private val clock: () -> Long = System::currentTimeMillis) {
         private const val CSQ_TIMEOUT_MS = 60_000L
         /** AT+CSQF answers from the modem's last reading, in about 100 ms. */
         private const val CSQF_TIMEOUT_MS = 5_000L
+        /**
+         * A fresh reading asked for because the last one was 0. Usually answered within two
+         * seconds, up to ten while the modem acquires or hands over (MAN0009 5.95); longer than
+         * that means it is not registered, and waiting is not worth holding up a send.
+         */
+        private const val CSQ_CONFIRM_TIMEOUT_MS = 15_000L
+        /** At most one such confirmation a minute, so the 5-second poll during a pass cannot chain them. */
+        private const val CSQ_CONFIRM_INTERVAL_MS = 60_000L
         private const val SBDIX_TIMEOUT_MS = 95_000L
         const val SBDIX_HOLD_MS = 180_000L
         const val MO_MAX_SIZE = 340
@@ -105,6 +113,9 @@ class IridiumSpp(private val clock: () -> Long = System::currentTimeMillis) {
 
     /** No SBDIX before this time: set after status 32/36. */
     @Volatile private var sbdixHeldUntil = 0L
+
+    /** When a 0 from AT+CSQF was last confirmed with a fresh AT+CSQ. */
+    @Volatile private var csqConfirmedAt = 0L
 
     private val _state = MutableStateFlow(State.Disconnected)
     val state: StateFlow<State> = _state
@@ -283,17 +294,24 @@ class IridiumSpp(private val clock: () -> Long = System::currentTimeMillis) {
     private fun isWireReady(): Boolean = _state.value == State.Connected
 
     /**
-     * Read the signal strength, 0-5, free. The regular polls use AT+CSQF, the modem's last reading,
-     * which answers at once, as the Bridge does. [fresh] asks for a new reading with AT+CSQ, for a
-     * person who pressed a button: that can take up to 50 s while the modem acquires, and the old
-     * 12 s wait gave up early, showed 0 bars and let the late answer spill into the next command.
+     * Read the signal strength, 0-5, free. A regular poll asks AT+CSQF for the modem's last
+     * reading, which answers at once, as the Bridge does. That reading comes from the last ring
+     * channel the modem heard, and on the v0 node it is 0 most of the time while a fresh reading
+     * says 5, so a 0 is confirmed with AT+CSQ, at most once a minute: 0 bars in front of someone
+     * whose modem can transmit is wrong, and it would keep the queue from sending on a good signal.
+     *
+     * [fresh] always asks for a new reading and waits the full minute for it, for a person who
+     * pressed a button. The old poll asked for a fresh reading and gave up after 12 s, which showed
+     * 0 while the modem was acquiring and let the late answer spill into the next command.
      */
     suspend fun pollSignal(fresh: Boolean = false): Int {
         if (link == null) return 0
         return try {
-            val resp = if (fresh) sendAT("AT+CSQ", CSQ_TIMEOUT_MS) else sendAT("AT+CSQF", CSQF_TIMEOUT_MS)
-            val match = Regex("[+]CS(?:Q|QF):\\s*(\\d)").find(resp)
-            val sig = match?.groupValues?.get(1)?.toIntOrNull() ?: 0
+            var sig = readSignal(if (fresh) "AT+CSQ" else "AT+CSQF", if (fresh) CSQ_TIMEOUT_MS else CSQF_TIMEOUT_MS)
+            if (!fresh && sig == 0 && clock() - csqConfirmedAt >= CSQ_CONFIRM_INTERVAL_MS) {
+                csqConfirmedAt = clock()
+                sig = readSignal("AT+CSQ", CSQ_CONFIRM_TIMEOUT_MS)
+            }
             _signal.value = sig
             _signalReadings.tryEmit(sig)
             sig
@@ -301,6 +319,12 @@ class IridiumSpp(private val clock: () -> Long = System::currentTimeMillis) {
             _error.emit("Signal poll failed: ${e.message}")
             0
         }
+    }
+
+    /** One signal command; 0 when the answer carries no reading. */
+    private fun readSignal(command: String, timeoutMs: Long): Int {
+        val resp = sendAT(command, timeoutMs)
+        return Regex("[+]CS(?:QF|Q):\\s*(\\d)").find(resp)?.groupValues?.get(1)?.toIntOrNull() ?: 0
     }
 
     /** Check SBD status (AT+SBDSX) — free, no RF needed. */
