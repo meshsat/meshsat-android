@@ -241,6 +241,30 @@ class IridiumSppOverPipeTest {
     }
 
     @Test
+    fun `a zero from CSQF is confirmed with a fresh CSQ, at most once a minute`() = runBlocking {
+        val modem = FakeModem()
+        modem.csqf = 0
+        val spp = attached(modem)
+        // The probe's own reading used this minute's confirmation.
+        now += 60_000
+        modem.commands.clear()
+
+        // The modem's last reading is a miss while a fresh one says 4: what the phone shows, and
+        // what tells the queue to send, must be the fresh one (seen on the v0 node, 19 Sep).
+        assertEquals(4, spp.pollSignal())
+        assertEquals(listOf("AT+CSQF", "AT+CSQ"), modem.commands.toList())
+
+        modem.commands.clear()
+        assertEquals(0, spp.pollSignal())
+        assertEquals(listOf("AT+CSQF"), modem.commands.toList())
+
+        now += 60_000
+        modem.commands.clear()
+        assertEquals(4, spp.pollSignal())
+        assertEquals(listOf("AT+CSQF", "AT+CSQ"), modem.commands.toList())
+    }
+
+    @Test
     fun `a session that answers a ring alert is an SBDIXA`() = runBlocking {
         val modem = FakeModem()
         val spp = attached(modem)
