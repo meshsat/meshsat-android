@@ -200,6 +200,9 @@ class SettingsRepository(private val context: Context) {
         context.dataStore.edit { it[KEY_IRIDIUM_NODE_PIPE] = enabled }
     }
 
+    /** The HC-05 of a RockBLOCK 9704 this phone has connected to; empty when none ever was. */
+    val iridium9704BtAddress: Flow<String> = context.dataStore.data.map { it[KEY_IRIDIUM9704_BT_ADDR] ?: "" }
+
     suspend fun setIridium9704BtAddress(address: String) {
         context.dataStore.edit { it[KEY_IRIDIUM9704_BT_ADDR] = address }
     }

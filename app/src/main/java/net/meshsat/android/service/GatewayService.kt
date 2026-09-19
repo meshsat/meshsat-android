@@ -919,14 +919,10 @@ class GatewayService : Service() {
                     }
                     "flush_burst" -> {
                         val (payload, count) = burstQueue?.flush() ?: (null to 0)
+                        // Through the delivery queue, never straight to the modem: a direct write
+                        // overwrites whatever message the queue has in the MO buffer (MESHSAT-1249).
                         if (payload != null && count > 0) {
-                            // Route the flushed burst to iridium
-                            iridiumSpp?.let { spp ->
-                                if (spp.state.value == net.meshsat.android.bt.IridiumSpp.State.Connected) {
-                                    spp.writeMoBuffer(payload)
-                                    spp.sbdix()
-                                }
-                            }
+                            dispatcher?.enqueueDirect("iridium_0", payload, "Batch of $count messages", "burst:${System.currentTimeMillis()}")
                         }
                         hubReporter?.publishCommandResponse(
                             net.meshsat.android.hub.CommandResponse(
@@ -1133,12 +1129,14 @@ class GatewayService : Service() {
                 }
             },
             burstFlusher = {
-                // Same gate — nothing to flush to if modem is absent.
+                // Same gate: nothing to flush to if the modem is absent. Through the delivery queue,
+                // never straight to the modem (MESHSAT-1249).
                 if (iridium.state.value == IridiumSpp.State.Connected) {
                     burstQueue?.flush()?.let { (payload, count) ->
                         if (payload != null && count > 0) {
-                            iridium.writeMoBuffer(payload)
-                            iridium.sbdix()
+                            scope.launch {
+                                dispatcher?.enqueueDirect("iridium_0", payload, "Batch of $count messages", "burst:${System.currentTimeMillis()}")
+                            }
                         }
                     }
                 }
@@ -2969,6 +2967,7 @@ class GatewayService : Service() {
             )
         )
 
+        Log.i("MeshSat", "Iridium MT stored: ${mtText.length} chars")
         postMessageNotification("Iridium: $imei", mtText)
         interfaceManager?.recordActivity("iridium_0")
         evaluateAndForward(ForwardingRule.Transport.IRIDIUM, mtText, imei)

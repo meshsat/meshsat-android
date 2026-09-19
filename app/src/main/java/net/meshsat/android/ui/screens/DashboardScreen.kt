@@ -69,7 +69,6 @@ import net.meshsat.android.data.AppDatabase
 import net.meshsat.android.data.DeliveryStatRow
 import net.meshsat.android.data.Message
 import net.meshsat.android.data.SignalRecord
-import net.meshsat.android.engine.BurstQueue
 import net.meshsat.android.service.GatewayService
 import net.meshsat.android.ui.theme.ColorCellular
 import net.meshsat.android.ui.theme.ColorIridium
@@ -81,6 +80,8 @@ import net.meshsat.android.ui.theme.MeshSatRed
 import net.meshsat.android.ui.theme.MeshSatSurface
 import net.meshsat.android.ui.theme.MeshSatTeal
 import net.meshsat.android.ui.theme.MeshSatTextMuted
+import net.meshsat.android.ui.theme.MeshSatTextSecondary
+import net.meshsat.android.ui.theme.OffWhite
 import net.meshsat.android.ui.theme.SignalExcellent
 import net.meshsat.android.ui.theme.SignalFair
 import net.meshsat.android.ui.theme.SignalGood
@@ -152,19 +153,6 @@ fun DashboardScreen(navigate: (String) -> Unit = {}) {
         }
     }
 
-    // --- Burst queue (polled every 5s) ---
-    var burstPending by remember { mutableIntStateOf(0) }
-    var burstShouldFlush by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            GatewayService.burstQueue?.let { bq ->
-                burstPending = bq.pending()
-                burstShouldFlush = bq.shouldFlush()
-            }
-            delay(5_000)
-        }
-    }
-
     // --- Fix age tracking ---
     var fixAgeText by remember { mutableStateOf("--") }
     var lastFixMs by remember { mutableLongStateOf(0L) }
@@ -178,8 +166,8 @@ fun DashboardScreen(navigate: (String) -> Unit = {}) {
             val ageS = (System.currentTimeMillis() - lastFixMs) / 1000
             fixAgeText = when {
                 ageS < 5 -> "just now"
-                ageS < 60 -> "${ageS}s ago"
-                else -> "${ageS / 60}m ago"
+                ageS < 60 -> "$ageS s ago"
+                else -> "${ageS / 60} min ago"
             }
             delay(5_000)
         }
@@ -233,7 +221,7 @@ fun DashboardScreen(navigate: (String) -> Unit = {}) {
                 // ====== Iridium mailbox, on request only: each check is billed (MESHSAT-400) ======
                 if (iridiumConnected) {
                     item {
-                        DashboardCard(title = "Iridium Mailbox") {
+                        DashboardCard(title = "Satellite mailbox") {
                             net.meshsat.android.ui.components.CheckMailboxButton()
                         }
                     }
@@ -244,12 +232,12 @@ fun DashboardScreen(navigate: (String) -> Unit = {}) {
                 if (iridiumHistory.isNotEmpty()) {
                     item {
                         SignalChart(
-                            title = "Iridium Signal (6h)",
+                            title = "Satellite signal, last 6 hours",
                             records = iridiumHistory,
                             maxValue = 5f,
                             minValue = 0f,
                             color = ColorIridium,
-                            formatValue = { "${it.toInt()}/5" },
+                            formatValue = { "${it.toInt()} of 5" },
                         )
                     }
                 }
@@ -257,12 +245,12 @@ fun DashboardScreen(navigate: (String) -> Unit = {}) {
                 if (meshHistory.isNotEmpty()) {
                     item {
                         SignalChart(
-                            title = "Mesh RSSI (6h)",
+                            title = "Mesh signal strength, last 6 hours",
                             records = meshHistory,
                             maxValue = -30f,
                             minValue = -100f,
                             color = ColorMesh,
-                            formatValue = { "${it.toInt()}dBm" },
+                            formatValue = { "${it.toInt()} dBm" },
                         )
                     }
                 }
@@ -270,12 +258,12 @@ fun DashboardScreen(navigate: (String) -> Unit = {}) {
                 if (cellularHistory.isNotEmpty()) {
                     item {
                         SignalChart(
-                            title = "Cellular Signal (6h)",
+                            title = "Mobile signal, last 6 hours",
                             records = cellularHistory,
                             maxValue = -50f,
                             minValue = -120f,
                             color = ColorCellular,
-                            formatValue = { "${it.toInt()}dBm" },
+                            formatValue = { "${it.toInt()} dBm" },
                         )
                     }
                 }
@@ -363,47 +351,39 @@ fun DashboardScreen(navigate: (String) -> Unit = {}) {
                 }
                 }
                 "location" -> {
-                // ====== 4. Location Card ======
+                // Plain words, and a decimal point whatever the phone's language: the card showed
+                // "52,162067, 4,509740" on a Dutch phone (MESHSAT-1249).
                 item {
-                    DashboardCard(title = "Location") {
+                    DashboardCard(title = "Your position") {
                         val loc = phoneLocation
                         if (loc != null) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                            ) {
+                            Text(
+                                text = String.format(Locale.ROOT, "%.5f, %.5f", loc.latitude, loc.longitude),
+                                style = MaterialTheme.typography.titleMedium,
+                            )
+                            val within = if (loc.hasAccuracy()) "within ${loc.accuracy.toInt()} m, " else ""
+                            Text(
+                                text = "$within$fixAgeText",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MeshSatTextSecondary,
+                            )
+                            val extra = buildList {
+                                if (loc.hasAltitude()) add("Height ${loc.altitude.toInt()} m")
+                                if (loc.hasSpeed() && loc.speed >= 0.5f) {
+                                    add(String.format(Locale.ROOT, "moving %.1f km/h", loc.speed * 3.6f) +
+                                        if (loc.hasBearing()) ", heading ${loc.bearing.toInt()}\u00B0" else "")
+                                }
+                            }
+                            if (extra.isNotEmpty()) {
                                 Text(
-                                    text = "%.6f, %.6f".format(loc.latitude, loc.longitude),
-                                    style = MaterialTheme.typography.bodyMedium,
-                                )
-                                Text(
-                                    text = fixAgeText,
+                                    text = extra.joinToString(". ") + ".",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MeshSatTextMuted,
                                 )
                             }
-
-                            Spacer(modifier = Modifier.height(4.dp))
-
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(16.dp),
-                            ) {
-                                InfoPair("Alt", "${loc.altitude.toInt()}m")
-                                InfoPair("Acc", "${loc.accuracy.toInt()}m")
-                                if (loc.hasSpeed()) InfoPair("Spd", "%.1f m/s".format(loc.speed))
-                                if (loc.hasBearing()) InfoPair("Hdg", "${loc.bearing.toInt()}\u00B0")
-                            }
-
-                            Text(
-                                text = "Source: ${loc.provider ?: "unknown"}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MeshSatTextMuted,
-                                modifier = Modifier.padding(top = 2.dp),
-                            )
                         } else {
                             Text(
-                                text = "Waiting for GPS fix...",
+                                text = "Waiting for a position. Location must be allowed, and the phone needs a view of the sky.",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MeshSatTextMuted,
                             )
@@ -412,12 +392,11 @@ fun DashboardScreen(navigate: (String) -> Unit = {}) {
                 }
                 }
                 "queue" -> {
-                // ====== 5. Message Queue Card ======
+                // The same words as the queue screen (Words.deliveryState), and a way to it.
                 item {
-                    DashboardCard(title = "Message Queue") {
-                        // Per-interface queue bars
+                    DashboardCard(title = "Message queue") {
+                        QueueBar("Satellite", iridiumQueueDepth, ColorIridium)
                         QueueBar("Mesh", meshQueueDepth, ColorMesh)
-                        QueueBar("Iridium", iridiumQueueDepth, ColorIridium)
                         QueueBar("SMS", smsQueueDepth, ColorCellular)
 
                         Spacer(modifier = Modifier.height(8.dp))
@@ -426,83 +405,13 @@ fun DashboardScreen(navigate: (String) -> Unit = {}) {
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceEvenly,
                         ) {
-                            StatBadge("Queued", queuedCount, MeshSatTeal)
-                            StatBadge("Pending", pendingCount, MeshSatAmber)
+                            StatBadge("Waiting", queuedCount, MeshSatAmber)
+                            StatBadge("Sending", pendingCount, MeshSatAmber)
                             StatBadge("Failed", failedCount, MeshSatRed)
-                            StatBadge("Dead", deadCount, MeshSatTextMuted)
+                            StatBadge("Gave up", deadCount, MeshSatTextMuted)
                         }
-                    }
-                }
-                }
-                "burst" -> {
-                // ====== 6. Burst Queue Card ======
-                item {
-                    DashboardCard(title = "Burst Queue") {
-                        val mtu = BurstQueue.IRIDIUM_MTU
-                        // Estimate bytes: header + per-msg overhead. Rough estimate since we
-                        // can't read the actual pending list from outside the lock.
-                        val estimatedBytes = if (burstPending > 0)
-                            BurstQueue.BURST_HEADER_LEN + burstPending * (BurstQueue.BURST_MSG_HEADER_LEN + 40)
-                        else 0
-                        val progress = (estimatedBytes.toFloat() / mtu).coerceIn(0f, 1f)
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                text = "$burstPending pending",
-                                style = MaterialTheme.typography.bodyMedium,
-                            )
-                            Text(
-                                text = "~${estimatedBytes}B / ${mtu}B MTU",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MeshSatTextMuted,
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.height(4.dp))
-
-                        LinearProgressIndicator(
-                            progress = { progress },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(6.dp)
-                                .clip(RoundedCornerShape(3.dp)),
-                            color = ColorIridium,
-                            trackColor = MeshSatBorder,
-                        )
-
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                text = if (burstShouldFlush) "Ready to flush" else "Accumulating",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = if (burstShouldFlush) MeshSatAmber else MeshSatTextMuted,
-                            )
-
-                            OutlinedButton(
-                                onClick = {
-                                    val bq = GatewayService.burstQueue
-                                    if (bq != null) {
-                                        val (payload, count) = bq.flush()
-                                        Toast.makeText(
-                                            context,
-                                            if (count > 0) "Flushed $count messages" else "Queue empty",
-                                            Toast.LENGTH_SHORT
-                                        ).show()
-                                    }
-                                },
-                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                            ) {
-                                Text("Flush", style = MaterialTheme.typography.bodySmall)
-                            }
+                        TextButton(onClick = { navigate("deliveries") }) {
+                            Text("Open the queue", color = OffWhite)
                         }
                     }
                 }
@@ -511,7 +420,7 @@ fun DashboardScreen(navigate: (String) -> Unit = {}) {
                 // ====== 7. Activity Log ======
                 item {
                     Text(
-                        text = "Activity Log",
+                        text = "Recent messages",
                         style = MaterialTheme.typography.titleMedium,
                         modifier = Modifier.padding(top = 4.dp),
                     )
@@ -520,7 +429,7 @@ fun DashboardScreen(navigate: (String) -> Unit = {}) {
                 if (recentMessages.isEmpty()) {
                     item {
                         Text(
-                            text = "No recent messages",
+                            text = "No messages yet.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MeshSatTextMuted,
                             modifier = Modifier.padding(vertical = 8.dp),
@@ -748,7 +657,7 @@ private fun QueueBar(label: String, depth: Int, color: Color) {
             text = label,
             style = MaterialTheme.typography.bodySmall,
             color = MeshSatTextMuted,
-            modifier = Modifier.width(52.dp),
+            modifier = Modifier.width(64.dp),
         )
         Box(
             modifier = Modifier
@@ -793,26 +702,10 @@ private fun StatBadge(label: String, count: Int, color: Color) {
     }
 }
 
-/** Label: value pair for location details. */
-@Composable
-private fun InfoPair(label: String, value: String) {
-    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(
-            text = "$label:",
-            style = MaterialTheme.typography.bodySmall,
-            color = MeshSatTextMuted,
-        )
-        Text(
-            text = value,
-            style = MaterialTheme.typography.bodySmall,
-        )
-    }
-}
-
 /** Single activity log entry. */
 @Composable
 private fun ActivityLogEntry(msg: Message) {
-    val timeFmt = remember { SimpleDateFormat("HH:mm:ss", Locale.getDefault()) }
+    val timeFmt = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
     val transportColor = when (msg.transport) {
         "mesh" -> ColorMesh
         "iridium" -> ColorIridium
@@ -842,11 +735,11 @@ private fun ActivityLogEntry(msg: Message) {
 
         // Transport badge
         Text(
-            text = msg.transport.uppercase().take(3),
+            text = net.meshsat.android.ui.Words.transport(msg.transport),
             style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Bold,
             color = transportColor,
-            modifier = Modifier.width(28.dp),
+            maxLines = 1,
+            modifier = Modifier.width(64.dp),
         )
 
         // Direction arrow
@@ -873,7 +766,10 @@ private fun ActivityLogEntry(msg: Message) {
 // ============================================================================
 
 /** Home's cards, in their default order, and what Arrange calls them. */
-private val HOME_CARDS = listOf("sos", "queue", "location", "signals", "mailbox", "burst", "activity")
+// No "burst" card (MESHSAT-1249): nothing in the app, the Bridge or the Hub fills a burst queue, the
+// Hub cannot decode its frame, and its Flush dropped whatever it held. A saved order that still names it
+// simply loses it (homeOrder keeps only known cards).
+private val HOME_CARDS = listOf("sos", "queue", "location", "signals", "mailbox", "activity")
 
 private val CARD_LABELS = mapOf(
     "sos" to "SOS",
@@ -881,7 +777,6 @@ private val CARD_LABELS = mapOf(
     "location" to "Location",
     "signals" to "Signal history",
     "mailbox" to "Satellite mailbox",
-    "burst" to "Satellite batch queue",
     "activity" to "Recent messages",
 )
 
