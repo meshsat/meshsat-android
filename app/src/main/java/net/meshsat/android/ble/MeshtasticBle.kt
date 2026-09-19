@@ -56,7 +56,8 @@ class MeshtasticBle(private val context: Context) {
     private val adapter: BluetoothAdapter? =
         (context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter
 
-    private var gatt: BluetoothGatt? = null
+    // Written from the GATT callback thread too; connect() reads it under its lock.
+    @Volatile private var gatt: BluetoothGatt? = null
     private var toRadioChar: BluetoothGattCharacteristic? = null
     private var fromRadioChar: BluetoothGattCharacteristic? = null
 
@@ -243,13 +244,27 @@ class MeshtasticBle(private val context: Context) {
         gatt = device.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
     }
 
+    /**
+     * Connect to [address], at most one GATT client at a time. A reconnect timer firing next
+     * to the user's Connect opened two clients to the node 20 ms apart; the session followed
+     * one and the modem handover went unheard (MESHSAT-1239). Already connecting or connected
+     * to [address] is a no-op; another node is disconnected first.
+     */
+    @Synchronized
     fun connect(address: String) {
+        if (gatt != null && address == lastAddress) return
+        if (gatt != null) disconnect()
         lastAddress = address
         val device = adapter?.getRemoteDevice(address) ?: run {
             scope.launch { _error.emit("Invalid BLE address: $address") }
             return
         }
         connect(device)
+    }
+
+    /** Use [address] for [reconnect] when none is known yet, e.g. the node saved before a restart. */
+    fun rememberNode(address: String) {
+        if (lastAddress == null) lastAddress = address
     }
 
     /** Reconnect to the last-known BLE address. No-op if no address was previously used. */

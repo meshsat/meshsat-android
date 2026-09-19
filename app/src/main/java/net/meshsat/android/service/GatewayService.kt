@@ -64,6 +64,7 @@ import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -110,6 +111,8 @@ class GatewayService : Service() {
         private var service: GatewayService? = null
         private const val IRIDIUM_STATUS_NOTIFICATION_ID = 7603
         const val IRIDIUM_QUEUED = "iridium:queued"
+        /** How often the node is asked again for its modem while the phone does not hold it. */
+        private const val PIPE_CLAIM_RETRY_MS = 15_000L
 
         /** A mailbox check the user asked for (MESHSAT-400): running, or its last outcome. */
         data class MailboxCheck(
@@ -289,6 +292,7 @@ class GatewayService : Service() {
             initFieldIntelligence()
             initSigningAndApi()
             observeTransports()
+            reconnectSavedNode()
             observeIridiumPipe()
             observeIridiumStatusIcon()
             startSignalPolling()
@@ -312,6 +316,8 @@ class GatewayService : Service() {
         when (intent?.action) {
             ACTION_CONNECT_MESH -> {
                 val addr = intent.getStringExtra(EXTRA_ADDRESS) ?: return START_STICKY
+                // Connect re-arms the auto-reconnect that Disconnect switched off (MESHSAT-1239).
+                interfaceManager?.enable("mesh_0")
                 meshtasticBle?.connect(addr)
                 scope.launch { settings.setMeshtasticBleAddress(addr) }
             }
@@ -320,7 +326,12 @@ class GatewayService : Service() {
                 iridium9704Spp?.connect(addr)
                 scope.launch { settings.setIridium9704BtAddress(addr) }
             }
-            ACTION_DISCONNECT_MESH -> meshtasticBle?.disconnect()
+            ACTION_DISCONNECT_MESH -> {
+                // The user's own Disconnect: no auto-reconnect, now or at the next start.
+                interfaceManager?.disable("mesh_0")
+                meshtasticBle?.disconnect()
+                scope.launch { settings.clearMeshtasticBleAddress() }
+            }
             ACTION_DISCONNECT_IRIDIUM9704 -> iridium9704Spp?.disconnect()
             ACTION_SOS_ACTIVATE -> activateSos()
             ACTION_SOS_CANCEL -> cancelSos()
@@ -2509,6 +2520,27 @@ class GatewayService : Service() {
      * which asks the node for the modem, and runs the 9603 driver whenever STATUS says the
      * phone owns it. Otherwise it lets go, so the node's own logic can use the modem.
      */
+    /**
+     * Reconnect to the MeshSat node chosen last (MESHSAT-1239): at service start here, and
+     * after any drop through mesh_0's auto-reconnect, which uses the same address. Only the
+     * user's Disconnect forgets it.
+     */
+    private fun reconnectSavedNode() {
+        val ble = meshtasticBle ?: return
+        scope.launch {
+            val addr = settings.meshtasticBleAddress.first()
+            if (addr.isBlank()) return@launch
+            ble.rememberNode(addr)
+            if (ble.state.value != MeshtasticBle.State.Disconnected) return@launch
+            Log.i("MeshSat", "Reconnecting to the MeshSat node $addr")
+            try {
+                ble.connect(addr)
+            } catch (e: SecurityException) {
+                Log.w("MeshSat", "Cannot reconnect to the node without the Bluetooth permission: ${e.message}")
+            }
+        }
+    }
+
     private fun observeIridiumPipe() {
         val ble = meshtasticBle ?: return
         val spp = iridiumSpp ?: return
@@ -2522,12 +2554,29 @@ class GatewayService : Service() {
                     pipe.release()
                     return@collectLatest
                 }
-                if (!pipe.claim()) Log.i("MeshSat", "Iridium: the node holds its modem, waiting for it")
-                pipe.owner.collect { owner ->
-                    if (owner == IridiumPipeContract.Owner.Phone) {
-                        if (spp.state.value == IridiumSpp.State.Disconnected) spp.attach(pipe.asModemLink())
-                    } else {
-                        spp.detach()
+                coroutineScope {
+                    // Keep at it until the phone holds the modem (MESHSAT-1239): a claim can
+                    // race the link's encryption or the node's config dump and go unanswered,
+                    // and a node busy with its own modem hands it over later. STATUS is read
+                    // again in case its notification was lost.
+                    launch {
+                        while (true) {
+                            when (pipe.owner.value) {
+                                IridiumPipeContract.Owner.Phone -> {}
+                                IridiumPipeContract.Owner.Node -> pipe.refreshStatus()
+                                else -> if (!pipe.claim()) {
+                                    Log.i("MeshSat", "Iridium: no handover from the node yet (owner ${pipe.owner.value}); asking again")
+                                }
+                            }
+                            delay(PIPE_CLAIM_RETRY_MS)
+                        }
+                    }
+                    pipe.owner.collect { owner ->
+                        if (owner == IridiumPipeContract.Owner.Phone) {
+                            if (spp.state.value == IridiumSpp.State.Disconnected) spp.attach(pipe.asModemLink())
+                        } else {
+                            spp.detach()
+                        }
                     }
                 }
             }

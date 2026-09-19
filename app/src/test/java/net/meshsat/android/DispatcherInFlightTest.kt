@@ -14,6 +14,7 @@ import net.meshsat.android.data.MessageDeliveryDao
 import net.meshsat.android.data.MessageDeliveryEntity
 import net.meshsat.android.data.ObjectGroupDao
 import net.meshsat.android.engine.Dispatcher
+import net.meshsat.android.engine.InterfaceState
 import net.meshsat.android.rules.AccessEvaluator
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -24,9 +25,10 @@ import java.util.Collections
 import kotlin.coroutines.Continuation
 
 /**
- * A send that has started finishes and is recorded when its worker is stopped meanwhile. The
- * Iridium interface going offline mid-send used to cancel it and leave the row 'sending' until
- * the app restarted (MESHSAT-1243).
+ * The satellite queue across interface state changes (MESHSAT-1243): a send that has started
+ * finishes and is recorded when its worker is stopped meanwhile (going offline mid-send used to
+ * leave the row 'sending' until the app restarted), and an interface coming online makes what
+ * waited for it due at once.
  */
 class DispatcherInFlightTest {
 
@@ -96,6 +98,35 @@ class DispatcherInFlightTest {
 
             withTimeout(10_000) { while ("sent" !in statuses) delay(10) }
             assertEquals(listOf("sending", "sent"), statuses.filter { it == "sending" || it == "sent" })
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun `an interface coming online makes its waiting retries due now`() = runBlocking {
+        val calls = Collections.synchronizedList(mutableListOf<String>())
+        val dao = fake<MessageDeliveryDao> { name, args ->
+            if (name == "retryNowForChannel") {
+                calls.add(args[0] as String)
+                2
+            } else {
+                NONE
+            }
+        }
+        val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+        val dispatcher = Dispatcher(
+            deliveryDao = dao,
+            accessEvaluator = AccessEvaluator(fake<AccessRuleDao>(), fake<ObjectGroupDao>(), scope),
+            failoverResolver = null,
+            registry = ChannelRegistry(),
+            deliveryCallback = { _, _, _ -> "offline" },
+            scope = scope,
+        )
+        try {
+            dispatcher.onInterfaceStateChange("iridium_0", "iridium", InterfaceState.Connecting, InterfaceState.Online)
+            withTimeout(10_000) { while (calls.isEmpty()) delay(10) }
+            assertEquals(listOf("iridium_0"), calls.toList())
         } finally {
             scope.cancel()
         }

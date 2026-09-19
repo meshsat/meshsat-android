@@ -186,6 +186,13 @@ class SettingsRepository(private val context: Context) {
         context.dataStore.edit { it[KEY_MESHTASTIC_BLE_ADDR] = address }
     }
 
+    /** The MeshSat node to reconnect to at start and after a drop; empty after Disconnect. */
+    val meshtasticBleAddress: Flow<String> = context.dataStore.data.map { it[KEY_MESHTASTIC_BLE_ADDR] ?: "" }
+
+    suspend fun clearMeshtasticBleAddress() {
+        context.dataStore.edit { it.remove(KEY_MESHTASTIC_BLE_ADDR) }
+    }
+
     /** Take the node's 9603 while connected to a MeshSat node; off leaves it to the node. */
     val iridiumNodePipeEnabled: Flow<Boolean> = context.dataStore.data.map { it[KEY_IRIDIUM_NODE_PIPE] ?: true }
 

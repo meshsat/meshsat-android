@@ -189,6 +189,12 @@ class Dispatcher(
         when {
             new == InterfaceState.Online && old != InterfaceState.Online -> {
                 startWorker(interfaceId)
+                // Attempts made while it was down only pushed the backoff out (a satellite
+                // message to 30 min); the link being back is the news they waited for.
+                scope.launch {
+                    val due = deliveryDao.retryNowForChannel(interfaceId)
+                    if (due > 0) Log.i(TAG, "$due deliveries for $interfaceId are due now: it is online")
+                }
             }
             new != InterfaceState.Online && old == InterfaceState.Online -> {
                 stopWorker(interfaceId)
