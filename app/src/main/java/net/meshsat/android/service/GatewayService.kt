@@ -2900,11 +2900,18 @@ class GatewayService : Service() {
             val written = spp.writeMoBuffer(chunk)
             if (!written) {
                 Log.w("MeshSat", "Iridium MO buffer write failed for fragment $i/${chunks.size}")
+                postMessageNotification("Iridium send failed", "The modem did not take the message.")
                 return
             }
             val result = spp.sbdix()
             if (result?.moSuccess != true) {
                 Log.w("MeshSat", "SBDIX failed for fragment $i/${chunks.size}: mo_status=${result?.moStatus}")
+                val why = when (result?.moStatus) {
+                    null -> if (spp.sbdixHoldRemainingMs() > 0) "held after a failed session, try again in ${spp.sbdixHoldRemainingMs() / 1000} s" else "no answer from the modem"
+                    32 -> "no network (status 32)"
+                    else -> "status ${result.moStatus}"
+                }
+                postMessageNotification("Iridium send failed", why)
                 return
             }
         }
