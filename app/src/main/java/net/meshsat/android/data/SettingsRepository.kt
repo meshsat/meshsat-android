@@ -682,6 +682,20 @@ class SettingsRepository(private val context: Context) {
         context.dataStore.edit { it[stringPreferencesKey("dashboard_card_order")] = order }
     }
 
+    /** Night mode: the app in red only, for night vision (MESHSAT-1249). */
+    val nightMode: Flow<Boolean> = context.dataStore.data.map { it[booleanPreferencesKey("night_mode")] ?: false }
+
+    suspend fun setNightMode(on: Boolean) {
+        context.dataStore.edit { it[booleanPreferencesKey("night_mode")] = on }
+    }
+
+    /** Home's "Getting started" list was hidden by the user (MESHSAT-1249). */
+    val checklistDismissed: Flow<Boolean> = context.dataStore.data.map { it[booleanPreferencesKey("checklist_dismissed")] ?: false }
+
+    suspend fun setChecklistDismissed(dismissed: Boolean) {
+        context.dataStore.edit { it[booleanPreferencesKey("checklist_dismissed")] = dismissed }
+    }
+
     // --- Release telemetry (MESHSAT-494) ---
 
     /**

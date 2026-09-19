@@ -14,8 +14,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.core.content.ContextCompat
 import net.meshsat.android.crypto.ProvisionImporter
 import net.meshsat.android.ui.MeshSatUI
+import net.meshsat.android.ui.screens.WelcomeScreen
 import net.meshsat.android.ui.components.ProvisionLinkDialog
 import net.meshsat.android.ui.theme.MeshSatTheme
+import net.meshsat.android.ui.theme.NightModeEffect
 
 class MainActivity : ComponentActivity() {
 
@@ -57,8 +59,9 @@ class MainActivity : ComponentActivity() {
             ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
         }
         if (missing.isNotEmpty()) {
-            // Request permissions first — service starts in the callback
-            permissionLauncher.launch(missing.toTypedArray())
+            // Say what each permission is for before Android asks; the service starts in the
+            // permission callback (MESHSAT-1249).
+            welcome.value = missing
         } else {
             // All permissions already granted — start immediately
             startGatewayService()
@@ -68,6 +71,15 @@ class MainActivity : ComponentActivity() {
         takeRoute(intent)
         setContent {
             MeshSatTheme {
+                NightModeEffect()
+                val ask = welcome.value
+                if (ask != null) {
+                    WelcomeScreen(onContinue = {
+                        welcome.value = null
+                        permissionLauncher.launch(ask.toTypedArray())
+                    })
+                    return@MeshSatTheme
+                }
                 MeshSatUI(openRoute = openRoute.value, onRouteOpened = { openRoute.value = null })
                 provisionLink.value?.let { url ->
                     ProvisionLinkDialog(url = url, onDone = { provisionLink.value = null })
@@ -81,6 +93,9 @@ class MainActivity : ComponentActivity() {
         takeProvisionLink(intent)
         takeRoute(intent)
     }
+
+    /** The permissions still to ask for, while the welcome that explains them shows. */
+    private val welcome = mutableStateOf<List<String>?>(null)
 
     /** A screen a notification asks to open, e.g. the SOS result screen (MESHSAT-1249). */
     private val openRoute = mutableStateOf<String?>(null)
