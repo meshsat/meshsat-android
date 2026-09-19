@@ -42,6 +42,8 @@ val MeshSatTypography = Typography(
     bodyMedium = sans(14, 20),
     bodySmall = sans(12, 16),
     labelLarge = sans(14, 20, FontWeight.Medium),
-    labelMedium = TextStyle(fontFamily = PlexMono, fontWeight = FontWeight.Normal, fontSize = 12.sp, lineHeight = 16.sp),
+    // Material's navigation bar and chips label with labelMedium, so it is Plex Sans; code that
+    // wants figures in Plex Mono says so with fontFamily = PlexMono.
+    labelMedium = sans(12, 16, FontWeight.Medium),
     labelSmall = sans(12, 16, FontWeight.Medium),
 )

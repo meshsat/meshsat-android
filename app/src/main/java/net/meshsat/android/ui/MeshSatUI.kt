@@ -1,29 +1,37 @@
 package net.meshsat.android.ui
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Dashboard
+import androidx.compose.material.icons.filled.ChatBubble
+import androidx.compose.material.icons.filled.Group
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Map
-import androidx.compose.material.icons.automirrored.filled.Message
-import androidx.compose.material.icons.filled.DateRange
-import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.outlined.ChatBubbleOutline
+import androidx.compose.material.icons.outlined.Cloud
+import androidx.compose.material.icons.outlined.Group
+import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.Map
+import androidx.compose.material.icons.outlined.MyLocation
+import androidx.compose.material.icons.outlined.SatelliteAlt
+import androidx.compose.material.icons.outlined.SettingsInputAntenna
+import androidx.compose.material.icons.outlined.Sms
+import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -31,64 +39,89 @@ import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
+import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import kotlinx.coroutines.delay
 import net.meshsat.android.ble.MeshtasticBle
 import net.meshsat.android.bt.IridiumSpp
+import net.meshsat.android.data.AppDatabase
+import net.meshsat.android.hub.HubReporter
 import net.meshsat.android.service.GatewayService
+import net.meshsat.android.ui.components.SubScreen
 import net.meshsat.android.ui.screens.AboutScreen
+import net.meshsat.android.ui.screens.AdvancedScreen
 import net.meshsat.android.ui.screens.AuditScreen
+import net.meshsat.android.ui.screens.ConversationChatView
 import net.meshsat.android.ui.screens.CredentialsScreen
 import net.meshsat.android.ui.screens.DashboardScreen
+import net.meshsat.android.ui.screens.DecryptScreen
 import net.meshsat.android.ui.screens.DeliveryScreen
 import net.meshsat.android.ui.screens.GeofenceScreen
 import net.meshsat.android.ui.screens.InterfacesScreen
 import net.meshsat.android.ui.screens.MapScreen
 import net.meshsat.android.ui.screens.MessagesScreen
-import net.meshsat.android.ui.screens.MoreScreen
-import net.meshsat.android.ui.screens.RulesScreen
-import net.meshsat.android.ui.screens.SettingsScreen
 import net.meshsat.android.ui.screens.PassPredictorScreen
 import net.meshsat.android.ui.screens.PeersScreen
 import net.meshsat.android.ui.screens.RadioConfigScreen
+import net.meshsat.android.ui.screens.RulesScreen
+import net.meshsat.android.ui.screens.SettingsScreen
+import net.meshsat.android.ui.screens.SetupPageLinks
+import net.meshsat.android.ui.screens.SetupScreen
+import net.meshsat.android.ui.screens.SetupSection
 import net.meshsat.android.ui.screens.TopologyScreen
 import net.meshsat.android.ui.theme.ColorCellular
+import net.meshsat.android.ui.theme.ColorHub
 import net.meshsat.android.ui.theme.ColorIridium
 import net.meshsat.android.ui.theme.ColorMesh
+import net.meshsat.android.ui.theme.MeshSatAmber
 import net.meshsat.android.ui.theme.MeshSatBg
 import net.meshsat.android.ui.theme.MeshSatGreen
+import net.meshsat.android.ui.theme.MeshSatRed
 import net.meshsat.android.ui.theme.MeshSatSurface
-import net.meshsat.android.ui.theme.MeshSatTeal
+import net.meshsat.android.ui.theme.MeshSatSurfaceLight
 import net.meshsat.android.ui.theme.MeshSatTextMuted
 import net.meshsat.android.ui.theme.MeshSatTextSecondary
-import kotlinx.coroutines.delay
+import net.meshsat.android.ui.theme.OffWhite
+import net.meshsat.android.ui.theme.PlexMono
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
-import net.meshsat.android.ui.theme.PlexMono
 
-private enum class Tab(val route: String, val label: String, val icon: ImageVector) {
-    Dashboard("dashboard", "Home", Icons.Default.Dashboard),
-    Messages("messages", "Messages", Icons.AutoMirrored.Filled.Message),
-    Map("map", "Map", Icons.Default.Map),
-    Passes("passes", "Passes", Icons.Default.DateRange),
-    More("more", "More", Icons.Default.Menu),
+/** The five tabs (MESHSAT-1249): close to the Bridge's operator shell. */
+private enum class Tab(val route: String, val label: String, val icon: ImageVector, val selectedIcon: ImageVector) {
+    Home("home", "Home", Icons.Outlined.Home, Icons.Filled.Home),
+    Messages("messages", "Messages", Icons.Outlined.ChatBubbleOutline, Icons.Filled.ChatBubble),
+    Map("map", "Map", Icons.Outlined.Map, Icons.Filled.Map),
+    People("people", "People", Icons.Outlined.Group, Icons.Filled.Group),
+    Setup("setup", "Setup", Icons.Outlined.Tune, Icons.Filled.Tune),
+}
+
+/** The tab a screen belongs to, so the tab stays lit on the screens below it. */
+private fun tabOf(route: String?): Tab = when {
+    route == null || route == "home" || route == "passes" -> Tab.Home
+    route == "messages" || route.startsWith("chat/") -> Tab.Messages
+    route == "map" -> Tab.Map
+    route == "people" || route == "topology" -> Tab.People
+    else -> Tab.Setup
 }
 
 @Composable
@@ -96,35 +129,43 @@ fun MeshSatUI() {
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
+    val currentTab = tabOf(currentRoute)
+    val context = LocalContext.current
+    val db = remember { AppDatabase.getInstance(context) }
+
+    val navigate: (String) -> Unit = { route -> navController.navigate(route) }
+    val back: () -> Unit = { navController.popBackStack() }
 
     Scaffold(
         containerColor = MeshSatBg,
-        topBar = { StatusBar() },
+        topBar = { StatusStrip() },
         bottomBar = {
             NavigationBar(containerColor = MeshSatSurface) {
                 Tab.entries.forEach { tab ->
+                    val selected = tab == currentTab
                     NavigationBarItem(
-                        selected = currentRoute == tab.route,
+                        selected = selected,
                         onClick = {
                             navController.navigate(tab.route) {
-                                popUpTo("dashboard") { saveState = true }
+                                popUpTo(navController.graph.findStartDestination().id) { saveState = true }
                                 launchSingleTop = true
                                 restoreState = true
                             }
                         },
-                        icon = { Icon(tab.icon, contentDescription = tab.label) },
+                        icon = { Icon(if (selected) tab.selectedIcon else tab.icon, contentDescription = null) },
                         label = { Text(tab.label) },
+                        // Selection is Off White on a quiet pill: orange is kept for live traffic.
                         colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = MeshSatTeal,
-                            selectedTextColor = MeshSatTeal,
+                            selectedIconColor = OffWhite,
+                            selectedTextColor = OffWhite,
                             unselectedIconColor = MeshSatTextMuted,
                             unselectedTextColor = MeshSatTextMuted,
-                            indicatorColor = MeshSatTeal.copy(alpha = 0.15f),
+                            indicatorColor = MeshSatSurfaceLight,
                         ),
                     )
                 }
             }
-        }
+        },
     ) { padding ->
         // Edge to edge (enableEdgeToEdge), the window is no longer resized for the keyboard, so
         // the content makes room for it itself; consuming the bar padding first keeps the bottom
@@ -135,90 +176,121 @@ fun MeshSatUI() {
                 .consumeWindowInsets(padding)
                 .imePadding(),
         ) {
-            // MapScreen lives OUTSIDE NavHost — always in the view tree, never
-            // destroyed by navigation. Shown/hidden via alpha + input blocking.
-            // This is the only reliable way to keep osmdroid's MapView alive
-            // across tab switches (its tile provider threads die on detach).
+            // MapScreen lives outside the NavHost: always in the view tree, never destroyed by
+            // navigation, shown and hidden by alpha. It is the reliable way to keep osmdroid's
+            // MapView alive across tab switches (its tile threads die on detach).
             Box(
                 modifier = if (currentRoute == "map") {
                     Modifier.fillMaxSize()
                 } else {
-                    Modifier.fillMaxSize()
-                        .alpha(0f)
-                        .pointerInput(Unit) {} // block touch when hidden
+                    Modifier.fillMaxSize().alpha(0f).pointerInput(Unit) {}
                 },
             ) {
                 MapScreen()
             }
 
-            // All other screens via NavHost (map route shows empty placeholder)
-            if (currentRoute != "map") {
-                NavHost(
-                    navController = navController,
-                    startDestination = "dashboard",
-                ) {
-                    composable("dashboard") { DashboardScreen() }
-                    composable("messages") { MessagesScreen() }
-                    composable("map") { /* handled above */ }
-                    composable("rules") { RulesScreen() }
-                    composable("settings") { SettingsScreen(navController) }
-                    composable("more") { MoreScreen(navController) }
-                    composable("about") { AboutScreen() }
-                    composable("topology") { TopologyScreen() }
-                    composable("deliveries") { DeliveryScreen() }
-                    composable("geofence") { GeofenceScreen() }
-                    composable("interfaces") { InterfacesScreen() }
-                    composable("radio-config") { RadioConfigScreen() }
-                    composable("passes") { PassPredictorScreen() }
-                    composable("peers") { PeersScreen() }
-                    composable("audit") { AuditScreen() }
-                    composable("credentials") { CredentialsScreen() }
+            // The NavHost stays composed on the Map tab too (its map route draws nothing), so Back
+            // is handled there instead of leaving the app.
+            NavHost(navController = navController, startDestination = "home") {
+                composable("home") { DashboardScreen(navigate) }
+                composable("messages") { MessagesScreen(openChat = { peer -> navigate("chat/${Uri.encode(peer)}") }) }
+                composable("chat/{peer}") { entry ->
+                    ConversationChatView(
+                        peer = Uri.decode(entry.arguments?.getString("peer").orEmpty()),
+                        db = db,
+                        onBack = back,
+                    )
                 }
+                composable("map") { }
+                composable("people") { PeersScreen(onConnect = { navigate("setup/node") }) }
+                composable("setup") { SetupScreen(navigate) }
+                composable("setup/{section}") { entry ->
+                    val name = entry.arguments?.getString("section")
+                    if (name == "advanced") {
+                        SubScreen("Advanced", back) { AdvancedScreen(navigate) }
+                    } else {
+                        val section = SetupSection.fromRoute(name)
+                        SubScreen(section.title, back) {
+                            SetupPageLinks(section, navigate)
+                            Box(Modifier.weight(1f)) { SettingsScreen(navController, section) }
+                        }
+                    }
+                }
+                composable("passes") { SubScreen("Satellite passes", back) { PassPredictorScreen() } }
+                composable("radio-config") { SubScreen("Mesh radio settings", back) { RadioConfigScreen() } }
+                composable("rules") { SubScreen("Routing rules", back) { RulesScreen() } }
+                composable("interfaces") { SubScreen("Links", back) { InterfacesScreen() } }
+                composable("deliveries") { SubScreen("Message queue", back) { DeliveryScreen() } }
+                composable("topology") { SubScreen("Mesh topology", back) { TopologyScreen() } }
+                composable("geofence") { SubScreen("Zones", back) { GeofenceScreen() } }
+                composable("audit") { SubScreen("Audit log", back) { AuditScreen() } }
+                composable("credentials") { SubScreen("Certificates and keys", back) { CredentialsScreen() } }
+                composable("decrypt") { SubScreen("Encrypt or decrypt text", back) { DecryptScreen() } }
+                composable("about") { SubScreen("About", back) { AboutScreen() } }
             }
         }
     }
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// Live Status Bar — compact top bar mirroring the Pi dashboard status
+// Status strip: the Bridge header's strip, one icon per way out
 // ═══════════════════════════════════════════════════════════════════════
 
+/**
+ * A slim strip above every screen: satellite bars, mesh nodes, SMS, Hub and GPS, each an icon in its
+ * transport colour when working, amber while trying, grey when off, red when failed, and the UTC time
+ * that Iridium passes are given in. It used to show 10 sp codes ("IRD", "CELL") and claimed SMS was
+ * always up (MESHSAT-1249).
+ */
 @Composable
-private fun StatusBar() {
-    // Iridium state
-    val irdState = GatewayService.iridiumSpp?.state?.collectAsState()
-    val irdSignal = GatewayService.iridiumSpp?.signal?.collectAsState()
-    val irdConnected = irdState?.value == IridiumSpp.State.Connected
-    val irdBars = irdSignal?.value ?: 0
-
-    // Mesh state
-    val meshState = GatewayService.meshtasticBle?.state?.collectAsState()
-    val meshNodes = GatewayService.meshtasticBle?.nodes?.collectAsState()
-    val meshRssi = GatewayService.meshtasticBle?.rssi?.collectAsState()
-    val meshConnected = meshState?.value == MeshtasticBle.State.Connected
-    val nodeCount = meshNodes?.value?.size ?: 0
-    val rssi = meshRssi?.value ?: 0
-
-    // GPS state
-    val gpsLocation = GatewayService.phoneLocation.collectAsState()
-    val hasGps = gpsLocation.value != null
-
-    // Clock — updates every second
-    var utcTime by remember { mutableStateOf("") }
-    val utcFmt = remember {
-        SimpleDateFormat("HH:mm:ss", Locale.US).apply {
-            timeZone = TimeZone.getTimeZone("UTC")
-        }
-    }
-    LaunchedEffect(Unit) {
+private fun StatusStrip() {
+    val context = LocalContext.current
+    // The transports can appear after this strip is composed, so their state is read on a tick.
+    val now by produceState(System.currentTimeMillis()) {
         while (true) {
-            utcTime = utcFmt.format(Date()) + "Z"
-            delay(1000)
+            delay(1_000)
+            value = System.currentTimeMillis()
         }
     }
+    val utcFmt = remember { SimpleDateFormat("HH:mm", Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") } }
+
+    val spp = GatewayService.iridiumSpp
+    val ble = GatewayService.meshtasticBle
+    val hub = GatewayService.hubReporter
+
+    val satState = spp?.state?.value
+    val satColor = when (satState) {
+        IridiumSpp.State.Connected -> ColorIridium
+        IridiumSpp.State.Connecting -> if (spp?.modemSilent?.value == true) MeshSatRed else MeshSatAmber
+        else -> MeshSatTextMuted
+    }
+    val bars = spp?.signal?.value ?: 0
+
+    val meshState = ble?.state?.value
+    val meshColor = when (meshState) {
+        MeshtasticBle.State.Connected -> ColorMesh
+        MeshtasticBle.State.Connecting, MeshtasticBle.State.Scanning -> MeshSatAmber
+        else -> MeshSatTextMuted
+    }
+    val myNum = ble?.myInfo?.value?.myNodeNum ?: 0L
+    val nodeCount = ble?.nodes?.value.orEmpty().count { it.nodeNum != myNum }
+
+    val canText = context.packageManager.hasSystemFeature(PackageManager.FEATURE_TELEPHONY_MESSAGING)
+    val smsColor = if (canText && ContextCompat.checkSelfPermission(context, Manifest.permission.SEND_SMS) == PackageManager.PERMISSION_GRANTED) {
+        ColorCellular
+    } else {
+        MeshSatTextMuted
+    }
+    val hubColor = when (hub?.state?.value) {
+        HubReporter.State.Connected -> ColorHub
+        HubReporter.State.Connecting, HubReporter.State.Disconnected -> MeshSatAmber
+        HubReporter.State.Error -> MeshSatRed
+        null -> MeshSatTextMuted
+    }
+    val gpsColor = if (GatewayService.phoneLocation.value != null) MeshSatGreen else MeshSatTextMuted
 
     // Drawn edge to edge: the background runs behind Android's status bar, the content sits below
-    // it. Without the inset the strip was painted under the system clock and icons (MESHSAT-1249).
+    // it. Without the inset the strip was painted under the system clock and icons.
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -227,91 +299,18 @@ private fun StatusBar() {
             .height(36.dp)
             .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        // IRD section: signal bars + dot
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(3.dp),
-        ) {
-            Text(
-                text = "IRD",
-                fontSize = 12.sp,
-                fontFamily = PlexMono,
-                color = ColorIridium,
-            )
-            Text(
-                text = signalBars(irdBars),
-                fontSize = 12.sp,
-                fontFamily = PlexMono,
-                color = if (irdConnected) ColorIridium else MeshSatTextMuted,
-            )
-            StatusDot(if (irdConnected) ColorIridium else MeshSatTextMuted)
-        }
-
-        // MESH section: dot + RSSI/SNR + node count
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(3.dp),
-        ) {
-            Text(
-                text = "MESH",
-                fontSize = 12.sp,
-                fontFamily = PlexMono,
-                color = ColorMesh,
-            )
-            StatusDot(if (meshConnected) ColorMesh else MeshSatTextMuted)
-            if (meshConnected) {
-                val rssiText = if (rssi != 0) "${rssi}dB" else "---"
-                Text(
-                    text = "$rssiText $nodeCount",
-                    fontSize = 12.sp,
-                    fontFamily = PlexMono,
-                    color = MeshSatTextSecondary,
-                )
-            } else {
-                Text(
-                    text = "---",
-                    fontSize = 12.sp,
-                    fontFamily = PlexMono,
-                    color = MeshSatTextMuted,
-                )
-            }
-        }
-
-        // CELL section: always available on Android
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(3.dp),
-        ) {
-            Text(
-                text = "CELL",
-                fontSize = 12.sp,
-                fontFamily = PlexMono,
-                color = ColorCellular,
-            )
-            StatusDot(ColorCellular)
-        }
-
-        // GPS section
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(3.dp),
-        ) {
-            Text(
-                text = "GPS",
-                fontSize = 12.sp,
-                fontFamily = PlexMono,
-                color = if (hasGps) MeshSatGreen else MeshSatTextMuted,
-            )
-            StatusDot(if (hasGps) MeshSatGreen else MeshSatTextMuted)
-        }
-
-        Spacer(modifier = Modifier.weight(1f))
-
-        // UTC clock
+        StripItem(Icons.Outlined.SatelliteAlt, satColor, if (satState == IridiumSpp.State.Connected) "$bars/5" else null,
+            "Satellite " + if (satState == IridiumSpp.State.Connected) "signal $bars of 5" else "not connected")
+        StripItem(Icons.Outlined.SettingsInputAntenna, meshColor, if (meshState == MeshtasticBle.State.Connected) "$nodeCount" else null,
+            "Mesh " + if (meshState == MeshtasticBle.State.Connected) "$nodeCount nodes" else "not connected")
+        StripItem(Icons.Outlined.Sms, smsColor, null, "SMS")
+        StripItem(Icons.Outlined.Cloud, hubColor, null, "Hub")
+        StripItem(Icons.Outlined.MyLocation, gpsColor, null, "Location")
+        Spacer(Modifier.weight(1f))
         Text(
-            text = utcTime,
+            text = utcFmt.format(Date(now)) + " UTC",
             fontSize = 12.sp,
             fontFamily = PlexMono,
             color = MeshSatTextSecondary,
@@ -320,16 +319,15 @@ private fun StatusBar() {
 }
 
 @Composable
-private fun StatusDot(color: Color) {
-    Box(
-        modifier = Modifier
-            .size(6.dp)
-            .background(color, CircleShape),
-    )
-}
-
-private fun signalBars(level: Int): String {
-    val filled = level.coerceIn(0, 5)
-    val empty = 5 - filled
-    return "\u25A0".repeat(filled) + "\u25A1".repeat(empty)
+private fun StripItem(icon: ImageVector, color: Color, value: String?, described: String) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        modifier = Modifier.semantics(mergeDescendants = true) { contentDescription = described },
+    ) {
+        Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(16.dp))
+        if (value != null) {
+            Text(text = value, fontSize = 12.sp, fontFamily = PlexMono, color = color)
+        }
+    }
 }

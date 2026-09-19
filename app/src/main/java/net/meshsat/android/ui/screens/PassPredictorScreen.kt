@@ -212,10 +212,6 @@ fun PassPredictorScreen() {
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    text = "Pass Predictor",
-                    style = MaterialTheme.typography.headlineMedium,
-                )
                 Column(horizontalAlignment = Alignment.End) {
                     Text(
                         text = "TLE: ${formatTleSource(tleSource, cacheAgeSec)}",

@@ -162,11 +162,6 @@ fun RulesScreen() {
                 .padding(16.dp),
         ) {
             Text(
-                text = "Bridge",
-                style = MaterialTheme.typography.headlineMedium,
-                modifier = Modifier.padding(bottom = 4.dp),
-            )
-            Text(
                 text = "Manage message routing rules between transports",
                 style = MaterialTheme.typography.bodySmall,
                 color = MeshSatTextMuted,

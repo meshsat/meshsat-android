@@ -95,14 +95,17 @@ import java.util.Date
 import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
+/**
+ * The Messages tab. A conversation opens as its own screen (route chat/{peer}), so Back returns here
+ * instead of leaving Messages (MESHSAT-1249).
+ */
 @Composable
-fun MessagesScreen() {
+fun MessagesScreen(openChat: (String) -> Unit = {}) {
     val context = LocalContext.current
     val db = AppDatabase.getInstance(context)
     val convKeyRepo = remember { ConversationKeyRepository(db.conversationKeyDao(), net.meshsat.android.crypto.SecureKeyStore.getInstance(context)) }
 
     var viewMode by remember { mutableStateOf("conversations") } // default to conversations
-    var selectedSender by remember { mutableStateOf<String?>(null) }
     var searchQuery by remember { mutableStateOf("") }
     var selectedTab by remember { mutableStateOf("all") }
 
@@ -124,15 +127,6 @@ fun MessagesScreen() {
         }
     }
 
-    // When a conversation is selected, show chat view
-    if (selectedSender != null) {
-        ConversationChatView(
-            peer = selectedSender!!,
-            db = db,
-            onBack = { selectedSender = null },
-        )
-        return
-    }
 
     val allMessages by (if (searchQuery.isBlank()) {
         db.messageDao().getRecent(100)
@@ -218,7 +212,7 @@ fun MessagesScreen() {
             modifier = Modifier.padding(bottom = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            listOf("all" to "All", "mesh" to "Mesh", "iridium" to "SBD", "sms" to "SMS").forEach { (key, label) ->
+            listOf("all" to "All", "mesh" to "Mesh", "iridium" to "Satellite", "sms" to "SMS").forEach { (key, label) ->
                 FilterChip(
                     selected = selectedTab == key,
                     onClick = { selectedTab = key },
@@ -291,7 +285,7 @@ fun MessagesScreen() {
             // A message the app itself sends (satellite or mesh), even from an empty inbox.
             FilterChip(
                 selected = false,
-                onClick = { selectedSender = "self" },
+                onClick = { openChat("self") },
                 label = { Text("New message", style = MaterialTheme.typography.bodySmall) },
                 colors = FilterChipDefaults.filterChipColors(
                     selectedContainerColor = MeshSatTeal.copy(alpha = 0.2f),
@@ -362,7 +356,7 @@ fun MessagesScreen() {
                     items(conversations, key = { it.sender }) { conv ->
                         ConversationCard(
                             conv = conv,
-                            onClick = { selectedSender = conv.sender },
+                            onClick = { openChat(conv.sender) },
                         )
                     }
                 }
@@ -443,7 +437,7 @@ private fun ConversationCard(conv: ConversationSummary, onClick: () -> Unit) {
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ConversationChatView(
+fun ConversationChatView(
     peer: String,
     db: AppDatabase,
     onBack: () -> Unit,

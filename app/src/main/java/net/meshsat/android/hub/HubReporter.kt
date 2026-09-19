@@ -47,6 +47,9 @@ class HubReporter(
     private val scope: CoroutineScope,
     private val config: HubReporterConfig,
 ) {
+    /** The name this phone reports to the Hub as, for status lines in the app. */
+    val bridgeId: String get() = config.bridgeId
+
     companion object {
         private const val TAG = "HubReporter"
         private const val QOS_FIRE_AND_FORGET = 0

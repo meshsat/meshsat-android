@@ -92,8 +92,32 @@ import androidx.compose.ui.graphics.Color
 import androidx.navigation.NavController
 import kotlinx.coroutines.launch
 
+/**
+ * The pages of Setup (MESHSAT-1249). Settings used to be one scroll of 18 cards; each page now shows
+ * only its own cards from the same code, so nothing a card does has changed.
+ */
+enum class SetupSection(val title: String) {
+    Node("Your MeshSat node"),
+    Satellite("Satellite"),
+    Hub("Hub"),
+    Sms("SMS"),
+    Safety("Safety"),
+    Messaging("Messaging"),
+    Maps("Maps"),
+    Integrations("Ham radio, TAK and Reticulum"),
+    Diagnostics("Diagnostics"),
+    All("All settings"),
+    ;
+
+    fun shows(card: SetupSection): Boolean = this == All || this == card
+
+    companion object {
+        fun fromRoute(name: String?): SetupSection = entries.firstOrNull { it.name.equals(name, ignoreCase = true) } ?: All
+    }
+}
+
 @Composable
-fun SettingsScreen(navController: NavController? = null) {
+fun SettingsScreen(navController: NavController? = null, section: SetupSection = SetupSection.All) {
     val context = LocalContext.current
     val settings = remember { SettingsRepository(context) }
     val scope = rememberCoroutineScope()
@@ -327,1002 +351,988 @@ fun SettingsScreen(navController: NavController? = null) {
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Text(
-            text = "Settings",
-            style = MaterialTheme.typography.headlineMedium,
-        )
 
         // --- Meshtastic BLE Section ---
-        SectionCard("Meshtastic BLE") {
-            val state = meshState?.value ?: MeshtasticBle.State.Disconnected
-            ConnectionStatusRow(
-                label = "Status",
-                connected = state == MeshtasticBle.State.Connected,
-                statusText = when (state) {
-                    MeshtasticBle.State.Connected -> "Connected"
-                    MeshtasticBle.State.Connecting -> "Connecting..."
-                    MeshtasticBle.State.Scanning -> "Scanning..."
-                    MeshtasticBle.State.Disconnected -> "Disconnected"
-                },
-                color = ColorMesh,
-            )
+        if (section.shows(SetupSection.Node)) {
+            SectionCard("Bluetooth connection") {
+                val state = meshState?.value ?: MeshtasticBle.State.Disconnected
+                ConnectionStatusRow(
+                    label = "Status",
+                    connected = state == MeshtasticBle.State.Connected,
+                    statusText = when (state) {
+                        MeshtasticBle.State.Connected -> "Connected"
+                        MeshtasticBle.State.Connecting -> "Connecting..."
+                        MeshtasticBle.State.Scanning -> "Scanning..."
+                        MeshtasticBle.State.Disconnected -> "Disconnected"
+                    },
+                    color = ColorMesh,
+                )
 
-            if (state == MeshtasticBle.State.Connected) {
-                // Show device info when connected
-                val myInfo = GatewayService.meshtasticBle?.myInfo?.collectAsState()
-                val meshNodes = GatewayService.meshtasticBle?.nodes?.collectAsState()
+                if (state == MeshtasticBle.State.Connected) {
+                    // Show device info when connected
+                    val myInfo = GatewayService.meshtasticBle?.myInfo?.collectAsState()
+                    val meshNodes = GatewayService.meshtasticBle?.nodes?.collectAsState()
 
-                myInfo?.value?.let { info ->
-                    if (info.firmwareVersion.isNotBlank()) {
-                        InfoRow("Firmware", info.firmwareVersion)
+                    myInfo?.value?.let { info ->
+                        if (info.firmwareVersion.isNotBlank()) {
+                            InfoRow("Firmware", info.firmwareVersion)
+                        }
+                        InfoRow("Node ID", "!%08x".format(info.myNodeNum))
+                        if (info.rebootCount > 0) {
+                            InfoRow("Reboots", info.rebootCount.toString())
+                        }
                     }
-                    InfoRow("Node ID", "!%08x".format(info.myNodeNum))
-                    if (info.rebootCount > 0) {
-                        InfoRow("Reboots", info.rebootCount.toString())
-                    }
-                }
 
-                meshNodes?.value?.let { nodes ->
-                    if (nodes.isNotEmpty()) {
-                        Text(
-                            text = "Mesh Nodes (${nodes.size})",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MeshSatTextMuted,
-                            modifier = Modifier.padding(top = 4.dp),
-                        )
-                        nodes.forEach { node ->
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .background(MeshSatSurface, RoundedCornerShape(4.dp))
-                                    .padding(6.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                            ) {
-                                Text(
-                                    text = node.longName.ifBlank { "!%08x".format(node.nodeNum) },
-                                    style = MaterialTheme.typography.bodySmall,
-                                )
-                                Text(
-                                    text = node.shortName.ifBlank { "" },
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = ColorMesh,
-                                )
+                    meshNodes?.value?.let { nodes ->
+                        if (nodes.isNotEmpty()) {
+                            Text(
+                                text = "Mesh Nodes (${nodes.size})",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MeshSatTextMuted,
+                                modifier = Modifier.padding(top = 4.dp),
+                            )
+                            nodes.forEach { node ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(MeshSatSurface, RoundedCornerShape(4.dp))
+                                        .padding(6.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                ) {
+                                    Text(
+                                        text = node.longName.ifBlank { "!%08x".format(node.nodeNum) },
+                                        style = MaterialTheme.typography.bodySmall,
+                                    )
+                                    Text(
+                                        text = node.shortName.ifBlank { "" },
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = ColorMesh,
+                                    )
+                                }
                             }
                         }
                     }
-                }
 
-                Button(
-                    onClick = {
-                        context.startService(
-                            Intent(context, GatewayService::class.java)
-                                .setAction(GatewayService.ACTION_DISCONNECT_MESH)
-                        )
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = MeshSatRed),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text("Disconnect", style = MaterialTheme.typography.bodySmall)
-                }
-            } else if (state == MeshtasticBle.State.Disconnected) {
-                Button(
-                    onClick = {
-                        // Check BLE permissions before scanning (required on Android 12+)
-                        val blePerms = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                            arrayOf(
-                                Manifest.permission.BLUETOOTH_SCAN,
-                                Manifest.permission.BLUETOOTH_CONNECT,
-                                Manifest.permission.ACCESS_FINE_LOCATION,
+                    Button(
+                        onClick = {
+                            context.startService(
+                                Intent(context, GatewayService::class.java)
+                                    .setAction(GatewayService.ACTION_DISCONNECT_MESH)
                             )
-                        } else {
-                            arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
-                        }
-                        val missing = blePerms.filter {
-                            ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED
-                        }
-                        if (missing.isNotEmpty()) {
-                            blePermissionLauncher.launch(missing.toTypedArray())
-                        } else {
-                            scanning = true
-                            scanResults.clear()
-                            GatewayService.meshtasticBle?.let { ble ->
-                                scope.launch {
-                                    ble.scanResults.collect { device ->
-                                        if (scanResults.none { it.address == device.address }) {
-                                            scanResults.add(device)
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = MeshSatRed),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("Disconnect", style = MaterialTheme.typography.bodySmall)
+                    }
+                } else if (state == MeshtasticBle.State.Disconnected) {
+                    Button(
+                        onClick = {
+                            // Check BLE permissions before scanning (required on Android 12+)
+                            val blePerms = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                arrayOf(
+                                    Manifest.permission.BLUETOOTH_SCAN,
+                                    Manifest.permission.BLUETOOTH_CONNECT,
+                                    Manifest.permission.ACCESS_FINE_LOCATION,
+                                )
+                            } else {
+                                arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
+                            }
+                            val missing = blePerms.filter {
+                                ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED
+                            }
+                            if (missing.isNotEmpty()) {
+                                blePermissionLauncher.launch(missing.toTypedArray())
+                            } else {
+                                scanning = true
+                                scanResults.clear()
+                                GatewayService.meshtasticBle?.let { ble ->
+                                    scope.launch {
+                                        ble.scanResults.collect { device ->
+                                            if (scanResults.none { it.address == device.address }) {
+                                                scanResults.add(device)
+                                            }
                                         }
                                     }
+                                    ble.startScan()
                                 }
-                                ble.startScan()
                             }
-                        }
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = MeshSatTeal),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text("Scan for Meshtastic devices", style = MaterialTheme.typography.bodySmall)
-                }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = MeshSatTeal),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("Scan for Meshtastic devices", style = MaterialTheme.typography.bodySmall)
+                    }
 
-                if (scanResults.isNotEmpty()) {
-                    Text(
-                        text = "Found devices:",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MeshSatTextMuted,
-                    )
-                    scanResults.forEach { device ->
-                        @Suppress("MissingPermission")
-                        DeviceRow(
-                            name = device.name ?: "Unknown",
-                            address = device.address,
-                            onClick = {
-                                scanning = false
-                                GatewayService.meshtasticBle?.stopScan()
-                                context.startService(
-                                    Intent(context, GatewayService::class.java)
-                                        .setAction(GatewayService.ACTION_CONNECT_MESH)
-                                        .putExtra(GatewayService.EXTRA_ADDRESS, device.address)
-                                )
-                            },
+                    if (scanResults.isNotEmpty()) {
+                        Text(
+                            text = "Found devices:",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MeshSatTextMuted,
                         )
+                        scanResults.forEach { device ->
+                            @Suppress("MissingPermission")
+                            DeviceRow(
+                                name = device.name ?: "Unknown",
+                                address = device.address,
+                                onClick = {
+                                    scanning = false
+                                    GatewayService.meshtasticBle?.stopScan()
+                                    context.startService(
+                                        Intent(context, GatewayService::class.java)
+                                            .setAction(GatewayService.ACTION_CONNECT_MESH)
+                                            .putExtra(GatewayService.EXTRA_ADDRESS, device.address)
+                                    )
+                                },
+                            )
+                        }
                     }
                 }
             }
         }
 
         // --- Iridium 9603 on the MeshSat node (MESHSAT-1236) ---
-        SectionCard("Iridium 9603 (MeshSat node)") {
-            val state = iridiumState?.value ?: IridiumSpp.State.Disconnected
-            ConnectionStatusRow(
-                label = "Status",
-                connected = state == IridiumSpp.State.Connected,
-                statusText = when {
-                    state == IridiumSpp.State.Connected -> "Connected (Signal: ${iridiumSignal?.value ?: 0}/5)"
-                    state == IridiumSpp.State.Connecting && iridiumSilent?.value == true ->
-                        "The node's modem does not answer (still trying)"
-                    state == IridiumSpp.State.Connecting -> "Checking the modem..."
-                    !nodePipeEnabled -> "Off: the node keeps its modem"
-                    iridiumPipe == null -> "No MeshSat node connected"
-                    pipeOwner == IridiumPipeContract.Owner.Node -> "The node is using its modem"
-                    else -> "Waiting for the node"
-                },
-                color = ColorIridium,
-            )
-
-            SettingRow("Use the node's modem") {
-                Switch(
-                    checked = nodePipeEnabled,
-                    onCheckedChange = { scope.launch { settings.setIridiumNodePipeEnabled(it) } },
-                    colors = SwitchDefaults.colors(checkedTrackColor = MeshSatTeal),
-                )
-            }
-
-            if (state == IridiumSpp.State.Connected) {
-                modemInfo?.value?.let { info ->
-                    if (info.manufacturer.isNotBlank()) {
-                        InfoRow("Manufacturer", info.manufacturer)
-                    }
-                    if (info.model.isNotBlank()) {
-                        InfoRow("Model", info.model)
-                    }
-                    if (info.imei.isNotBlank()) {
-                        InfoRow("IMEI", info.imei)
-                    }
-                }
-
-                Button(
-                    onClick = {
-                        scope.launch {
-                            val sig = GatewayService.iridiumSpp?.pollSignal()
-                            Toast.makeText(context, "Signal: $sig/5", Toast.LENGTH_SHORT).show()
-                        }
+        if (section.shows(SetupSection.Satellite)) {
+            SectionCard("Satellite modem on the node") {
+                val state = iridiumState?.value ?: IridiumSpp.State.Disconnected
+                ConnectionStatusRow(
+                    label = "Status",
+                    connected = state == IridiumSpp.State.Connected,
+                    statusText = when {
+                        state == IridiumSpp.State.Connected -> "Connected (Signal: ${iridiumSignal?.value ?: 0}/5)"
+                        state == IridiumSpp.State.Connecting && iridiumSilent?.value == true ->
+                            "The node's modem does not answer (still trying)"
+                        state == IridiumSpp.State.Connecting -> "Checking the modem..."
+                        !nodePipeEnabled -> "Off: the node keeps its modem"
+                        iridiumPipe == null -> "No MeshSat node connected"
+                        pipeOwner == IridiumPipeContract.Owner.Node -> "The node is using its modem"
+                        else -> "Waiting for the node"
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = MeshSatTeal),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text("Poll Signal", style = MaterialTheme.typography.bodySmall)
-                }
-                Spacer(modifier = Modifier.height(8.dp))
-                net.meshsat.android.ui.components.CheckMailboxButton()
-            } else if (iridiumPipe == null) {
-                Text(
-                    text = "The RockBLOCK 9603 is reached through a MeshSat node. Connect the node under Meshtastic; its modem appears here.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MeshSatTextMuted,
+                    color = ColorIridium,
                 )
+
+                SettingRow("Use the node's modem") {
+                    Switch(
+                        checked = nodePipeEnabled,
+                        onCheckedChange = { scope.launch { settings.setIridiumNodePipeEnabled(it) } },
+                        colors = SwitchDefaults.colors(checkedTrackColor = MeshSatTeal),
+                    )
+                }
+
+                if (state == IridiumSpp.State.Connected) {
+                    modemInfo?.value?.let { info ->
+                        if (info.manufacturer.isNotBlank()) {
+                            InfoRow("Manufacturer", info.manufacturer)
+                        }
+                        if (info.model.isNotBlank()) {
+                            InfoRow("Model", info.model)
+                        }
+                        if (info.imei.isNotBlank()) {
+                            InfoRow("IMEI", info.imei)
+                        }
+                    }
+
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                val sig = GatewayService.iridiumSpp?.pollSignal()
+                                Toast.makeText(context, "Signal: $sig/5", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = MeshSatTeal),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("Poll Signal", style = MaterialTheme.typography.bodySmall)
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    net.meshsat.android.ui.components.CheckMailboxButton()
+                } else if (iridiumPipe == null) {
+                    Text(
+                        text = "The RockBLOCK 9603 is reached through your MeshSat node. Connect the node under Your MeshSat node; its modem appears here.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MeshSatTextMuted,
+                    )
+                }
             }
         }
 
         // --- Iridium RockBLOCK 9704 (JSPR/IMT) Section ---
-        SectionCard("Iridium RockBLOCK 9704 (IMT)") {
-            val state9704 = iridium9704State?.value ?: net.meshsat.android.bt.Iridium9704Spp.State.Disconnected
-            ConnectionStatusRow(
-                label = "Status",
-                connected = state9704 == net.meshsat.android.bt.Iridium9704Spp.State.Ready,
-                statusText = when (state9704) {
-                    net.meshsat.android.bt.Iridium9704Spp.State.Ready -> {
-                        val sig = iridium9704Signal?.value ?: 0
-                        "Ready (Signal: $sig/5)"
-                    }
-                    net.meshsat.android.bt.Iridium9704Spp.State.Initializing -> "Initializing JSPR..."
-                    net.meshsat.android.bt.Iridium9704Spp.State.Connected -> "Connected (init pending)"
-                    net.meshsat.android.bt.Iridium9704Spp.State.Connecting -> "Connecting..."
-                    net.meshsat.android.bt.Iridium9704Spp.State.Disconnected -> "Disconnected"
-                },
-                color = ColorIridium,
-            )
+        if (section.shows(SetupSection.Satellite)) {
+            SectionCard("RockBLOCK 9704 (separate modem)") {
+                val state9704 = iridium9704State?.value ?: net.meshsat.android.bt.Iridium9704Spp.State.Disconnected
+                ConnectionStatusRow(
+                    label = "Status",
+                    connected = state9704 == net.meshsat.android.bt.Iridium9704Spp.State.Ready,
+                    statusText = when (state9704) {
+                        net.meshsat.android.bt.Iridium9704Spp.State.Ready -> {
+                            val sig = iridium9704Signal?.value ?: 0
+                            "Ready (Signal: $sig/5)"
+                        }
+                        net.meshsat.android.bt.Iridium9704Spp.State.Initializing -> "Initializing JSPR..."
+                        net.meshsat.android.bt.Iridium9704Spp.State.Connected -> "Connected (init pending)"
+                        net.meshsat.android.bt.Iridium9704Spp.State.Connecting -> "Connecting..."
+                        net.meshsat.android.bt.Iridium9704Spp.State.Disconnected -> "Disconnected"
+                    },
+                    color = ColorIridium,
+                )
 
-            if (state9704 == net.meshsat.android.bt.Iridium9704Spp.State.Ready) {
-                iridium9704ModemInfo?.value?.let { info ->
-                    if (info.imei.isNotBlank()) InfoRow("IMEI", info.imei)
-                    if (info.serial.isNotBlank()) InfoRow("Serial", info.serial)
-                    if (info.firmwareVersion.isNotBlank()) InfoRow("Firmware", info.firmwareVersion)
+                if (state9704 == net.meshsat.android.bt.Iridium9704Spp.State.Ready) {
+                    iridium9704ModemInfo?.value?.let { info ->
+                        if (info.imei.isNotBlank()) InfoRow("IMEI", info.imei)
+                        if (info.serial.isNotBlank()) InfoRow("Serial", info.serial)
+                        if (info.firmwareVersion.isNotBlank()) InfoRow("Firmware", info.firmwareVersion)
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Button(
+                            onClick = {
+                                scope.launch {
+                                    val sig = GatewayService.iridium9704Spp?.pollSignal()
+                                    Toast.makeText(context, "9704 Signal: $sig/5", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = MeshSatTeal),
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text("Poll Signal", style = MaterialTheme.typography.bodySmall)
+                        }
+                        Button(
+                            onClick = {
+                                context.startService(
+                                    Intent(context, GatewayService::class.java)
+                                        .setAction(GatewayService.ACTION_DISCONNECT_IRIDIUM9704)
+                                )
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = MeshSatRed),
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text("Disconnect", style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
                 }
+
+                if (state9704 == net.meshsat.android.bt.Iridium9704Spp.State.Disconnected) {
+                    val paired9704 = remember {
+                        GatewayService.iridium9704Spp?.getPairedDevices() ?: emptyList()
+                    }
+                    if (paired9704.isNotEmpty()) {
+                        Text(
+                            text = "Paired HC-05/06 devices (9704):",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MeshSatTextMuted,
+                        )
+                        paired9704.forEach { device ->
+                            @Suppress("MissingPermission")
+                            DeviceRow(
+                                name = device.name ?: "HC-05",
+                                address = device.address,
+                                onClick = {
+                                    context.startService(
+                                        Intent(context, GatewayService::class.java)
+                                            .setAction(GatewayService.ACTION_CONNECT_IRIDIUM9704)
+                                            .putExtra(GatewayService.EXTRA_ADDRESS, device.address)
+                                    )
+                                },
+                            )
+                        }
+                    } else {
+                        Text(
+                            text = "No paired HC-05/06 modules found for 9704.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MeshSatTextMuted,
+                        )
+                    }
+                }
+            }
+        }
+
+        // --- Encryption Section ---
+        if (section.shows(SetupSection.Messaging)) {
+            SectionCard("Encryption") {
+                SettingRow("Encryption enabled") {
+                    Switch(
+                        checked = encryptionEnabled,
+                        onCheckedChange = { scope.launch { settings.setEncryptionEnabled(it) } },
+                        colors = SwitchDefaults.colors(checkedTrackColor = MeshSatTeal),
+                    )
+                }
+
+                SettingRow("Auto-decrypt incoming SMS") {
+                    Switch(
+                        checked = autoDecrypt,
+                        onCheckedChange = { scope.launch { settings.setAutoDecryptSms(it) } },
+                        colors = SwitchDefaults.colors(checkedTrackColor = MeshSatTeal),
+                    )
+                }
+
+                OutlinedTextField(
+                    value = keyInput,
+                    onValueChange = { keyInput = it },
+                    label = { Text("AES-256-GCM Key (hex)", style = MaterialTheme.typography.bodySmall) },
+                    visualTransformation = if (showKey) VisualTransformation.None else PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    textStyle = MaterialTheme.typography.labelMedium,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = MeshSatTeal,
+                        unfocusedBorderColor = MeshSatBorder,
+                    ),
+                )
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     Button(
+                        onClick = { showKey = !showKey },
+                        colors = ButtonDefaults.buttonColors(containerColor = MeshSatSurface),
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text(if (showKey) "Hide" else "Show", style = MaterialTheme.typography.bodySmall)
+                    }
+
+                    Button(
                         onClick = {
-                            scope.launch {
-                                val sig = GatewayService.iridium9704Spp?.pollSignal()
-                                Toast.makeText(context, "9704 Signal: $sig/5", Toast.LENGTH_SHORT).show()
-                            }
+                            keyInput = AesGcmCrypto.generateKey()
+                            scope.launch { settings.setEncryptionKey(keyInput) }
+                            Toast.makeText(context, "Key generated", Toast.LENGTH_SHORT).show()
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = MeshSatAmber),
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text("Generate", style = MaterialTheme.typography.bodySmall)
+                    }
+
+                    Button(
+                        onClick = {
+                            scope.launch { settings.setEncryptionKey(keyInput) }
+                            Toast.makeText(context, "Key saved", Toast.LENGTH_SHORT).show()
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = MeshSatTeal),
                         modifier = Modifier.weight(1f),
                     ) {
-                        Text("Poll Signal", style = MaterialTheme.typography.bodySmall)
+                        Text("Save", style = MaterialTheme.typography.bodySmall)
                     }
+                }
+
+                // Share / Import / QR
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
                     Button(
                         onClick = {
-                            context.startService(
-                                Intent(context, GatewayService::class.java)
-                                    .setAction(GatewayService.ACTION_DISCONNECT_IRIDIUM9704)
-                            )
+                            if (keyInput.isNotBlank()) {
+                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                clipboard.setPrimaryClip(ClipData.newPlainText("MeshSat Key", keyInput))
+                                Toast.makeText(context, "Key copied to clipboard", Toast.LENGTH_SHORT).show()
+                            }
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = MeshSatRed),
+                        colors = ButtonDefaults.buttonColors(containerColor = MeshSatSurface),
                         modifier = Modifier.weight(1f),
                     ) {
-                        Text("Disconnect", style = MaterialTheme.typography.bodySmall)
+                        Text("Copy", style = MaterialTheme.typography.bodySmall)
+                    }
+
+                    Button(
+                        onClick = {
+                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                            val clip = clipboard.primaryClip?.getItemAt(0)?.text?.toString() ?: ""
+                            if (clip.length == 64 && clip.all { it in "0123456789abcdefABCDEF" }) {
+                                keyInput = clip
+                                scope.launch { settings.setEncryptionKey(clip) }
+                                Toast.makeText(context, "Key imported from clipboard", Toast.LENGTH_SHORT).show()
+                            } else {
+                                Toast.makeText(context, "Clipboard doesn't contain a valid 64-char hex key", Toast.LENGTH_LONG).show()
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = MeshSatSurface),
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text("Paste", style = MaterialTheme.typography.bodySmall)
+                    }
+
+                    Button(
+                        onClick = {
+                            if (keyInput.isNotBlank()) {
+                                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                    type = "text/plain"
+                                    putExtra(Intent.EXTRA_TEXT, keyInput)
+                                    putExtra(Intent.EXTRA_SUBJECT, "MeshSat Encryption Key")
+                                }
+                                context.startActivity(Intent.createChooser(shareIntent, "Share encryption key"))
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = MeshSatSurface),
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text("Share", style = MaterialTheme.typography.bodySmall)
                     }
                 }
-            }
 
-            if (state9704 == net.meshsat.android.bt.Iridium9704Spp.State.Disconnected) {
-                val paired9704 = remember {
-                    GatewayService.iridium9704Spp?.getPairedDevices() ?: emptyList()
-                }
-                if (paired9704.isNotEmpty()) {
-                    Text(
-                        text = "Paired HC-05/06 devices (9704):",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MeshSatTextMuted,
-                    )
-                    paired9704.forEach { device ->
-                        @Suppress("MissingPermission")
-                        DeviceRow(
-                            name = device.name ?: "HC-05",
-                            address = device.address,
-                            onClick = {
-                                context.startService(
-                                    Intent(context, GatewayService::class.java)
-                                        .setAction(GatewayService.ACTION_CONNECT_IRIDIUM9704)
-                                        .putExtra(GatewayService.EXTRA_ADDRESS, device.address)
-                                )
-                            },
-                        )
-                    }
-                } else {
-                    Text(
-                        text = "No paired HC-05/06 modules found for 9704.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MeshSatTextMuted,
-                    )
-                }
-            }
-        }
-
-        // --- Encryption Section ---
-        SectionCard("Encryption") {
-            SettingRow("Encryption enabled") {
-                Switch(
-                    checked = encryptionEnabled,
-                    onCheckedChange = { scope.launch { settings.setEncryptionEnabled(it) } },
-                    colors = SwitchDefaults.colors(checkedTrackColor = MeshSatTeal),
-                )
-            }
-
-            SettingRow("Auto-decrypt incoming SMS") {
-                Switch(
-                    checked = autoDecrypt,
-                    onCheckedChange = { scope.launch { settings.setAutoDecryptSms(it) } },
-                    colors = SwitchDefaults.colors(checkedTrackColor = MeshSatTeal),
-                )
-            }
-
-            OutlinedTextField(
-                value = keyInput,
-                onValueChange = { keyInput = it },
-                label = { Text("AES-256-GCM Key (hex)", style = MaterialTheme.typography.bodySmall) },
-                visualTransformation = if (showKey) VisualTransformation.None else PasswordVisualTransformation(),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-                textStyle = MaterialTheme.typography.labelMedium,
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = MeshSatTeal,
-                    unfocusedBorderColor = MeshSatBorder,
-                ),
-            )
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Button(
-                    onClick = { showKey = !showKey },
-                    colors = ButtonDefaults.buttonColors(containerColor = MeshSatSurface),
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Text(if (showKey) "Hide" else "Show", style = MaterialTheme.typography.bodySmall)
-                }
-
+                // QR code scan for Hub key sync (MESHSAT-205)
                 Button(
                     onClick = {
-                        keyInput = AesGcmCrypto.generateKey()
-                        scope.launch { settings.setEncryptionKey(keyInput) }
-                        Toast.makeText(context, "Key generated", Toast.LENGTH_SHORT).show()
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = MeshSatAmber),
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Text("Generate", style = MaterialTheme.typography.bodySmall)
-                }
-
-                Button(
-                    onClick = {
-                        scope.launch { settings.setEncryptionKey(keyInput) }
-                        Toast.makeText(context, "Key saved", Toast.LENGTH_SHORT).show()
+                        try {
+                            val scanIntent = com.journeyapps.barcodescanner.ScanContract().createIntent(
+                                context,
+                                com.journeyapps.barcodescanner.ScanOptions().apply {
+                                    setDesiredBarcodeFormats(com.journeyapps.barcodescanner.ScanOptions.QR_CODE)
+                                    setPrompt("Scan Hub encryption key QR code")
+                                    setBeepEnabled(false)
+                                    setOrientationLocked(true)
+                                },
+                            )
+                            qrScanLauncher.launch(scanIntent)
+                        } catch (e: Exception) {
+                            Toast.makeText(context, "QR scanner not available: ${e.message}", Toast.LENGTH_LONG).show()
+                        }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = MeshSatTeal),
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Text("Save", style = MaterialTheme.typography.bodySmall)
+                    Text("Scan QR Code (Hub Key Sync)", style = MaterialTheme.typography.bodySmall)
                 }
+
+                Text(
+                    text = "Fallback key — used when no per-conversation key is set. " +
+                            "To sync with Hub: go to Hub dashboard > Devices > select device > Generate Key, " +
+                            "then scan the QR code or paste the 64-char hex key.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MeshSatTextMuted,
+                )
             }
-
-            // Share / Import / QR
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Button(
-                    onClick = {
-                        if (keyInput.isNotBlank()) {
-                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                            clipboard.setPrimaryClip(ClipData.newPlainText("MeshSat Key", keyInput))
-                            Toast.makeText(context, "Key copied to clipboard", Toast.LENGTH_SHORT).show()
-                        }
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = MeshSatSurface),
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Text("Copy", style = MaterialTheme.typography.bodySmall)
-                }
-
-                Button(
-                    onClick = {
-                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                        val clip = clipboard.primaryClip?.getItemAt(0)?.text?.toString() ?: ""
-                        if (clip.length == 64 && clip.all { it in "0123456789abcdefABCDEF" }) {
-                            keyInput = clip
-                            scope.launch { settings.setEncryptionKey(clip) }
-                            Toast.makeText(context, "Key imported from clipboard", Toast.LENGTH_SHORT).show()
-                        } else {
-                            Toast.makeText(context, "Clipboard doesn't contain a valid 64-char hex key", Toast.LENGTH_LONG).show()
-                        }
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = MeshSatSurface),
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Text("Paste", style = MaterialTheme.typography.bodySmall)
-                }
-
-                Button(
-                    onClick = {
-                        if (keyInput.isNotBlank()) {
-                            val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                                type = "text/plain"
-                                putExtra(Intent.EXTRA_TEXT, keyInput)
-                                putExtra(Intent.EXTRA_SUBJECT, "MeshSat Encryption Key")
-                            }
-                            context.startActivity(Intent.createChooser(shareIntent, "Share encryption key"))
-                        }
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = MeshSatSurface),
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Text("Share", style = MaterialTheme.typography.bodySmall)
-                }
-            }
-
-            // QR code scan for Hub key sync (MESHSAT-205)
-            Button(
-                onClick = {
-                    try {
-                        val scanIntent = com.journeyapps.barcodescanner.ScanContract().createIntent(
-                            context,
-                            com.journeyapps.barcodescanner.ScanOptions().apply {
-                                setDesiredBarcodeFormats(com.journeyapps.barcodescanner.ScanOptions.QR_CODE)
-                                setPrompt("Scan Hub encryption key QR code")
-                                setBeepEnabled(false)
-                                setOrientationLocked(true)
-                            },
-                        )
-                        qrScanLauncher.launch(scanIntent)
-                    } catch (e: Exception) {
-                        Toast.makeText(context, "QR scanner not available: ${e.message}", Toast.LENGTH_LONG).show()
-                    }
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = MeshSatTeal),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text("Scan QR Code (Hub Key Sync)", style = MaterialTheme.typography.bodySmall)
-            }
-
-            Text(
-                text = "Fallback key — used when no per-conversation key is set. " +
-                        "To sync with Hub: go to Hub dashboard > Devices > select device > Generate Key, " +
-                        "then scan the QR code or paste the 64-char hex key.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MeshSatTextMuted,
-            )
         }
 
         // --- Per-Channel Compression Section (MESHSAT-203) ---
-        SectionCard("Compression") {
-            Text(
-                text = "Per-channel compression mode. MSVQ-SC is lossy semantic compression. " +
-                        "Incoming compressed messages are always auto-detected regardless of these settings.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MeshSatTextMuted,
-            )
+        if (section.shows(SetupSection.Messaging)) {
+            SectionCard("Message compression") {
+                Text(
+                    text = "Per-channel compression mode. MSVQ-SC is lossy semantic compression. " +
+                            "Incoming compressed messages are always auto-detected regardless of these settings.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MeshSatTextMuted,
+                )
 
-            Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(8.dp))
 
-            val channels = listOf(
-                "sms" to "SMS" to compressSms,
-                "mesh" to "Mesh (LoRa)" to compressMesh,
-                "iridium" to "Iridium SBD" to compressIridium,
-                "mqtt" to "MQTT (Hub)" to compressMqtt,
-            )
+                val channels = listOf(
+                    "sms" to "SMS" to compressSms,
+                    "mesh" to "Mesh (LoRa)" to compressMesh,
+                    "iridium" to "Iridium SBD" to compressIridium,
+                    "mqtt" to "MQTT (Hub)" to compressMqtt,
+                )
 
-            channels.forEach { (channelPair, currentMode) ->
-                val (channelKey, channelLabel) = channelPair
-                val modes = listOf("off" to "Off", "msvqsc" to "MSVQ-SC")
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 4.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(text = channelLabel, style = MaterialTheme.typography.bodyMedium)
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        modes.forEach { (modeKey, modeLabel) ->
-                            val selected = currentMode == modeKey
+                channels.forEach { (channelPair, currentMode) ->
+                    val (channelKey, channelLabel) = channelPair
+                    val modes = listOf("off" to "Off", "msvqsc" to "MSVQ-SC")
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(text = channelLabel, style = MaterialTheme.typography.bodyMedium)
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            modes.forEach { (modeKey, modeLabel) ->
+                                val selected = currentMode == modeKey
+                                Text(
+                                    text = modeLabel,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (selected) MeshSatTeal else MeshSatTextMuted,
+                                    modifier = Modifier
+                                        .background(
+                                            if (selected) MeshSatTeal.copy(alpha = 0.15f)
+                                            else MeshSatSurface,
+                                            RoundedCornerShape(4.dp),
+                                        )
+                                        .clickable {
+                                            scope.launch { settings.setCompressMode(channelKey, modeKey) }
+                                        }
+                                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // MSVQ-SC stages (global, applies to all channels using MSVQ-SC)
+                val anyMsvqsc = compressSms == "msvqsc" || compressMesh == "msvqsc" || compressIridium == "msvqsc"
+                if (anyMsvqsc) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = "MSVQ-SC stages (fewer = smaller, lower fidelity)",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MeshSatTextMuted,
+                    )
+
+                    val stageOptions = listOf("2" to "2 (5B)", "3" to "3 (7B)", "4" to "4 (9B)", "6" to "6 (13B)", "8" to "8 (17B)")
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        stageOptions.forEach { (value, label) ->
                             Text(
-                                text = modeLabel,
+                                text = label,
                                 style = MaterialTheme.typography.bodySmall,
-                                color = if (selected) MeshSatTeal else MeshSatTextMuted,
+                                color = if (msvqscStages == value) MeshSatTeal else MeshSatTextMuted,
                                 modifier = Modifier
                                     .background(
-                                        if (selected) MeshSatTeal.copy(alpha = 0.15f)
+                                        if (msvqscStages == value) MeshSatTeal.copy(alpha = 0.15f)
                                         else MeshSatSurface,
                                         RoundedCornerShape(4.dp),
                                     )
-                                    .clickable {
-                                        scope.launch { settings.setCompressMode(channelKey, modeKey) }
-                                    }
+                                    .clickable { scope.launch { settings.setMsvqscStages(value) } }
                                     .padding(horizontal = 8.dp, vertical = 4.dp),
                             )
                         }
                     }
                 }
             }
-
-            // MSVQ-SC stages (global, applies to all channels using MSVQ-SC)
-            val anyMsvqsc = compressSms == "msvqsc" || compressMesh == "msvqsc" || compressIridium == "msvqsc"
-            if (anyMsvqsc) {
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    text = "MSVQ-SC stages (fewer = smaller, lower fidelity)",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MeshSatTextMuted,
-                )
-
-                val stageOptions = listOf("2" to "2 (5B)", "3" to "3 (7B)", "4" to "4 (9B)", "6" to "6 (13B)", "8" to "8 (17B)")
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    stageOptions.forEach { (value, label) ->
-                        Text(
-                            text = label,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (msvqscStages == value) MeshSatTeal else MeshSatTextMuted,
-                            modifier = Modifier
-                                .background(
-                                    if (msvqscStages == value) MeshSatTeal.copy(alpha = 0.15f)
-                                    else MeshSatSurface,
-                                    RoundedCornerShape(4.dp),
-                                )
-                                .clickable { scope.launch { settings.setMsvqscStages(value) } }
-                                .padding(horizontal = 8.dp, vertical = 4.dp),
-                        )
-                    }
-                }
-            }
         }
 
         // --- Dead Man's Switch ---
-        SectionCard("Dead Man's Switch") {
-            SettingRow("Enabled") {
-                Switch(
-                    checked = deadmanEnabled,
-                    onCheckedChange = {
-                        scope.launch {
-                            settings.setDeadmanEnabled(it)
-                            GatewayService.deadManSwitch?.setEnabled(it)
-                        }
-                    },
-                    colors = SwitchDefaults.colors(checkedTrackColor = MeshSatTeal),
-                )
-            }
-
-            if (deadmanEnabled) {
-                val timeoutOptions = listOf("30" to "30 min", "60" to "1 hour", "120" to "2 hours", "240" to "4 hours", "480" to "8 hours")
-                Text(
-                    text = "Timeout (triggers SOS if no activity)",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MeshSatTextMuted,
-                )
-                timeoutOptions.forEach { (value, label) ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(
-                                if (deadmanTimeoutMin == value) MeshSatTeal.copy(alpha = 0.15f)
-                                else MeshSatSurface,
-                                RoundedCornerShape(4.dp),
-                            )
-                            .clickable {
-                                scope.launch {
-                                    settings.setDeadmanTimeoutMin(value)
-                                    val mins = value.toLongOrNull() ?: 120
-                                    GatewayService.deadManSwitch?.setTimeout(
-                                        kotlin.time.Duration.parse("${mins}m")
-                                    )
-                                }
-                            }
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(text = label, style = MaterialTheme.typography.bodySmall)
-                        if (deadmanTimeoutMin == value) {
-                            Text(
-                                text = "selected",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MeshSatTeal,
-                            )
-                        }
-                    }
-                }
-
-                // Show triggered state
-                val dms = GatewayService.deadManSwitch
-                if (dms != null && dms.isTriggered()) {
-                    Text(
-                        text = "TRIGGERED — SOS was sent. Tap to reset.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MeshSatRed,
-                        modifier = Modifier
-                            .clickable { dms.touch() }
-                            .padding(vertical = 4.dp),
-                    )
-                }
-            }
-
-            Text(
-                text = "Automatically sends SOS if no user activity (message send, button press) within the timeout period.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MeshSatTextMuted,
-            )
-        }
-
-        // --- Channel Health ---
-        SectionCard("Channel Health") {
-            val healthScorer = GatewayService.healthScorer
-            if (healthScorer == null) {
-                Text(
-                    text = "Health scorer not available. Connect a transport first.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MeshSatTextMuted,
-                )
-            } else {
-                val interfaceStates = GatewayService.meshtasticBle?.let { "mesh_0" } ?: ""
-                val channels = listOf("mesh_0", "iridium_0", "sms_0")
-
-                // Compute live health scores
-                var healthScores by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
-                LaunchedEffect(Unit) {
-                    try {
-                        val scores = healthScorer.scoreAll()
-                        healthScores = scores.associate { it.interfaceId to it.score }
-                    } catch (_: Exception) {}
-                }
-
-                channels.forEach { ch ->
-                    val score = healthScores[ch]
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(MeshSatSurface, RoundedCornerShape(4.dp))
-                            .padding(8.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = ch,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = when {
-                                ch.startsWith("mesh") -> ColorMesh
-                                ch.startsWith("iridium") -> ColorIridium
-                                ch.startsWith("sms") -> ColorCellular
-                                else -> MeshSatTextSecondary
-                            },
-                        )
-                        Text(
-                            text = if (score != null) "score: $score/100" else "score: --",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = when {
-                                score == null -> MeshSatTextMuted
-                                score >= 70 -> MeshSatGreen
-                                score >= 40 -> MeshSatAmber
-                                else -> MeshSatRed
-                            },
-                        )
-                    }
-                }
-
-                Text(
-                    text = "Health = Signal(0.3) + SuccessRate(0.3) + Latency(0.2) + Cost(0.2). Scores update in real-time based on 24h delivery history.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MeshSatTextMuted,
-                )
-            }
-        }
-
-        // --- Burst Queue Status ---
-        SectionCard("Burst Queue (Iridium)") {
-            val bq = GatewayService.burstQueue
-            if (bq == null) {
-                Text(
-                    text = "Burst queue not initialized.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MeshSatTextMuted,
-                )
-            } else {
-                val pending = bq.pending()
-                InfoRow("Pending messages", pending.toString())
-                InfoRow("Max size", "${bq.maxSize} msgs")
-                InfoRow("Max age", bq.maxAge.toString())
-                InfoRow("Should flush", if (bq.shouldFlush()) "Yes" else "No")
-
-                if (pending > 0) {
-                    Button(
-                        onClick = {
-                            val (payload, count) = bq.flush()
-                            Toast.makeText(
-                                context,
-                                if (count > 0) "Flushed $count messages (${payload?.size ?: 0} bytes)"
-                                else "Queue empty",
-                                Toast.LENGTH_SHORT,
-                            ).show()
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = MeshSatTeal),
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text("Flush Now", style = MaterialTheme.typography.bodySmall)
-                    }
-                }
-            }
-
-            Text(
-                text = "TLV-framed message queue for efficient satellite pass transmission. Messages are priority-sorted and packed into a single SBD payload (max 340 bytes).",
-                style = MaterialTheme.typography.bodySmall,
-                color = MeshSatTextMuted,
-            )
-        }
-
-        // --- Canned Messages ---
-        SectionCard("Canned Messages") {
-            val entries = CannedCodebook.DEFAULT_ENTRIES
-            Text(
-                text = "${entries.size} brevity codes loaded",
-                style = MaterialTheme.typography.bodySmall,
-                color = MeshSatTextMuted,
-            )
-
-            entries.entries.take(10).forEach { (id, text) ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 2.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    Text(
-                        text = text,
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Text(
-                        text = "#$id",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MeshSatTextMuted,
-                    )
-                }
-            }
-
-            if (entries.size > 10) {
-                Text(
-                    text = "... and ${entries.size - 10} more",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MeshSatTextMuted,
-                )
-            }
-
-            Text(
-                text = "Wire format: 2 bytes (0xCA + message ID). Auto-detected on receive.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MeshSatTextMuted,
-            )
-        }
-
-        // --- MeshSat Pi Section ---
-        SectionCard("APRS") {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("Enable APRS", style = MaterialTheme.typography.bodyMedium)
-                Switch(
-                    checked = aprsEnabled,
-                    onCheckedChange = { scope.launch { settings.setAprsEnabled(it) } },
-                    colors = SwitchDefaults.colors(checkedTrackColor = MeshSatTeal),
-                )
-            }
-
-            // Mode selector: KISS TNC or APRS-IS direct
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                FilterChip(
-                    selected = aprsMode == "kiss",
-                    onClick = { scope.launch { settings.setAprsMode("kiss") } },
-                    label = { Text("KISS TNC", style = MaterialTheme.typography.bodySmall) },
-                    colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = MeshSatTeal.copy(alpha = 0.2f),
-                    ),
-                )
-                FilterChip(
-                    selected = aprsMode == "is",
-                    onClick = { scope.launch { settings.setAprsMode("is") } },
-                    label = { Text("APRS-IS Direct", style = MaterialTheme.typography.bodySmall) },
-                    colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = MeshSatTeal.copy(alpha = 0.2f),
-                    ),
-                )
-            }
-
-            // Connection status (mode-aware)
-            if (aprsMode == "kiss") {
-                aprsKissState?.let { state ->
-                    val statusText = when (state.value) {
-                        net.meshsat.android.aprs.KissClient.State.Connected -> "Connected"
-                        net.meshsat.android.aprs.KissClient.State.Connecting -> "Connecting..."
-                        net.meshsat.android.aprs.KissClient.State.Error -> "Error"
-                        net.meshsat.android.aprs.KissClient.State.Disconnected -> "Disconnected"
-                    }
-                    val isOnline = state.value == net.meshsat.android.aprs.KissClient.State.Connected
-                    ConnectionStatusRow("KISS TNC", isOnline, statusText, MeshSatTeal)
-                }
-            } else {
-                aprsIsState?.let { state ->
-                    val statusText = when (state.value) {
-                        net.meshsat.android.aprs.AprsIsClient.State.Connected -> "Connected"
-                        net.meshsat.android.aprs.AprsIsClient.State.Connecting -> "Connecting..."
-                        net.meshsat.android.aprs.AprsIsClient.State.Error -> "Error"
-                        net.meshsat.android.aprs.AprsIsClient.State.Disconnected -> "Disconnected"
-                    }
-                    val isOnline = state.value == net.meshsat.android.aprs.AprsIsClient.State.Connected
-                    val verified = GatewayService.aprsIsClient?.verified == true
-                    val label = if (isOnline && verified) "APRS-IS (verified)" else "APRS-IS"
-                    ConnectionStatusRow(label, isOnline, statusText, MeshSatTeal)
-                }
-            }
-
-            // Common: callsign + SSID
-            OutlinedTextField(
-                value = aprsCallsignInput,
-                onValueChange = { aprsCallsignInput = it.uppercase().take(6) },
-                label = { Text("Callsign", style = MaterialTheme.typography.bodySmall) },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-                textStyle = MaterialTheme.typography.bodyMedium,
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = MeshSatTeal,
-                    unfocusedBorderColor = MeshSatBorder,
-                ),
-            )
-
-            OutlinedTextField(
-                value = aprsSsidInput,
-                onValueChange = { aprsSsidInput = it.filter { c -> c.isDigit() }.take(2) },
-                label = { Text("SSID (0-15)", style = MaterialTheme.typography.bodySmall) },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                modifier = Modifier.fillMaxWidth(),
-                textStyle = MaterialTheme.typography.bodyMedium,
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = MeshSatTeal,
-                    unfocusedBorderColor = MeshSatBorder,
-                ),
-            )
-
-            // KISS TNC settings
-            if (aprsMode == "kiss") {
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
-                        value = aprsHostInput,
-                        onValueChange = { aprsHostInput = it },
-                        label = { Text("KISS Host", style = MaterialTheme.typography.bodySmall) },
-                        singleLine = true,
-                        modifier = Modifier.weight(2f),
-                        textStyle = MaterialTheme.typography.bodyMedium,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = MeshSatTeal,
-                            unfocusedBorderColor = MeshSatBorder,
-                        ),
-                    )
-                    OutlinedTextField(
-                        value = aprsPortInput,
-                        onValueChange = { aprsPortInput = it.filter { c -> c.isDigit() }.take(5) },
-                        label = { Text("Port", style = MaterialTheme.typography.bodySmall) },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.weight(1f),
-                        textStyle = MaterialTheme.typography.bodyMedium,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = MeshSatTeal,
-                            unfocusedBorderColor = MeshSatBorder,
-                        ),
-                    )
-                }
-
-                OutlinedTextField(
-                    value = aprsFreqInput,
-                    onValueChange = { aprsFreqInput = it },
-                    label = { Text("Frequency (MHz)", style = MaterialTheme.typography.bodySmall) },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    modifier = Modifier.fillMaxWidth(),
-                    textStyle = MaterialTheme.typography.bodyMedium,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = MeshSatTeal,
-                        unfocusedBorderColor = MeshSatBorder,
-                    ),
-                )
-            }
-
-            // APRS-IS Direct settings (MESHSAT-230)
-            if (aprsMode == "is") {
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
-                        value = aprsIsServerInput,
-                        onValueChange = { aprsIsServerInput = it },
-                        label = { Text("APRS-IS Server", style = MaterialTheme.typography.bodySmall) },
-                        singleLine = true,
-                        modifier = Modifier.weight(2f),
-                        textStyle = MaterialTheme.typography.bodyMedium,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = MeshSatTeal,
-                            unfocusedBorderColor = MeshSatBorder,
-                        ),
-                    )
-                    OutlinedTextField(
-                        value = aprsIsPortInput,
-                        onValueChange = { aprsIsPortInput = it.filter { c -> c.isDigit() }.take(5) },
-                        label = { Text("Port", style = MaterialTheme.typography.bodySmall) },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.weight(1f),
-                        textStyle = MaterialTheme.typography.bodyMedium,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = MeshSatTeal,
-                            unfocusedBorderColor = MeshSatBorder,
-                        ),
-                    )
-                }
-
-                // Passcode with auto-calculate button
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    OutlinedTextField(
-                        value = aprsIsPasscodeInput,
-                        onValueChange = { aprsIsPasscodeInput = it.filter { c -> c.isDigit() || c == '-' }.take(6) },
-                        label = { Text("Passcode", style = MaterialTheme.typography.bodySmall) },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.weight(1f),
-                        textStyle = MaterialTheme.typography.bodyMedium,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = MeshSatTeal,
-                            unfocusedBorderColor = MeshSatBorder,
-                        ),
-                    )
-                    OutlinedButton(
-                        onClick = {
-                            if (aprsCallsignInput.isNotBlank()) {
-                                aprsIsPasscodeInput = net.meshsat.android.aprs.AprsIsPasscode.calculate(aprsCallsignInput)
-                            }
-                        },
-                        border = BorderStroke(1.dp, MeshSatTeal),
-                    ) {
-                        Text("Auto", style = MaterialTheme.typography.bodySmall)
-                    }
-                }
-
-                OutlinedTextField(
-                    value = aprsIsFilterRangeInput,
-                    onValueChange = { aprsIsFilterRangeInput = it.filter { c -> c.isDigit() }.take(4) },
-                    label = { Text("Filter radius (km)", style = MaterialTheme.typography.bodySmall) },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    modifier = Modifier.fillMaxWidth(),
-                    textStyle = MaterialTheme.typography.bodyMedium,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = MeshSatTeal,
-                        unfocusedBorderColor = MeshSatBorder,
-                    ),
-                )
-
-                // Position beaconing
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text("Position beacon", style = MaterialTheme.typography.bodyMedium)
+        if (section.shows(SetupSection.Safety)) {
+            SectionCard("Check-in timer (dead man's switch)") {
+                SettingRow("Enabled") {
                     Switch(
-                        checked = aprsIsBeaconEnabled,
-                        onCheckedChange = { scope.launch { settings.setAprsIsBeaconEnabled(it) } },
+                        checked = deadmanEnabled,
+                        onCheckedChange = {
+                            scope.launch {
+                                settings.setDeadmanEnabled(it)
+                                GatewayService.deadManSwitch?.setEnabled(it)
+                            }
+                        },
                         colors = SwitchDefaults.colors(checkedTrackColor = MeshSatTeal),
                     )
                 }
 
-                if (aprsIsBeaconEnabled) {
+                if (deadmanEnabled) {
+                    val timeoutOptions = listOf("30" to "30 min", "60" to "1 hour", "120" to "2 hours", "240" to "4 hours", "480" to "8 hours")
+                    Text(
+                        text = "Timeout (triggers SOS if no activity)",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MeshSatTextMuted,
+                    )
+                    timeoutOptions.forEach { (value, label) ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(
+                                    if (deadmanTimeoutMin == value) MeshSatTeal.copy(alpha = 0.15f)
+                                    else MeshSatSurface,
+                                    RoundedCornerShape(4.dp),
+                                )
+                                .clickable {
+                                    scope.launch {
+                                        settings.setDeadmanTimeoutMin(value)
+                                        val mins = value.toLongOrNull() ?: 120
+                                        GatewayService.deadManSwitch?.setTimeout(
+                                            kotlin.time.Duration.parse("${mins}m")
+                                        )
+                                    }
+                                }
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(text = label, style = MaterialTheme.typography.bodySmall)
+                            if (deadmanTimeoutMin == value) {
+                                Text(
+                                    text = "selected",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MeshSatTeal,
+                                )
+                            }
+                        }
+                    }
+
+                    // Show triggered state
+                    val dms = GatewayService.deadManSwitch
+                    if (dms != null && dms.isTriggered()) {
+                        Text(
+                            text = "TRIGGERED — SOS was sent. Tap to reset.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MeshSatRed,
+                            modifier = Modifier
+                                .clickable { dms.touch() }
+                                .padding(vertical = 4.dp),
+                        )
+                    }
+                }
+
+                Text(
+                    text = "Automatically sends SOS if no user activity (message send, button press) within the timeout period.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MeshSatTextMuted,
+                )
+            }
+        }
+
+        // --- Channel Health ---
+        if (section.shows(SetupSection.Diagnostics)) {
+            SectionCard("Link health") {
+                val healthScorer = GatewayService.healthScorer
+                if (healthScorer == null) {
+                    Text(
+                        text = "Health scorer not available. Connect a transport first.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MeshSatTextMuted,
+                    )
+                } else {
+                    val interfaceStates = GatewayService.meshtasticBle?.let { "mesh_0" } ?: ""
+                    val channels = listOf("mesh_0", "iridium_0", "sms_0")
+
+                    // Compute live health scores
+                    var healthScores by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
+                    LaunchedEffect(Unit) {
+                        try {
+                            val scores = healthScorer.scoreAll()
+                            healthScores = scores.associate { it.interfaceId to it.score }
+                        } catch (_: Exception) {}
+                    }
+
+                    channels.forEach { ch ->
+                        val score = healthScores[ch]
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(MeshSatSurface, RoundedCornerShape(4.dp))
+                                .padding(8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = ch,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = when {
+                                    ch.startsWith("mesh") -> ColorMesh
+                                    ch.startsWith("iridium") -> ColorIridium
+                                    ch.startsWith("sms") -> ColorCellular
+                                    else -> MeshSatTextSecondary
+                                },
+                            )
+                            Text(
+                                text = if (score != null) "score: $score/100" else "score: --",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = when {
+                                    score == null -> MeshSatTextMuted
+                                    score >= 70 -> MeshSatGreen
+                                    score >= 40 -> MeshSatAmber
+                                    else -> MeshSatRed
+                                },
+                            )
+                        }
+                    }
+
+                    Text(
+                        text = "Health = Signal(0.3) + SuccessRate(0.3) + Latency(0.2) + Cost(0.2). Scores update in real-time based on 24h delivery history.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MeshSatTextMuted,
+                    )
+                }
+            }
+        }
+
+        // --- Burst Queue Status ---
+        if (section.shows(SetupSection.Diagnostics)) {
+            SectionCard("Satellite batch queue") {
+                val bq = GatewayService.burstQueue
+                if (bq == null) {
+                    Text(
+                        text = "Burst queue not initialized.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MeshSatTextMuted,
+                    )
+                } else {
+                    val pending = bq.pending()
+                    InfoRow("Pending messages", pending.toString())
+                    InfoRow("Max size", "${bq.maxSize} msgs")
+                    InfoRow("Max age", bq.maxAge.toString())
+                    InfoRow("Should flush", if (bq.shouldFlush()) "Yes" else "No")
+
+                    if (pending > 0) {
+                        Button(
+                            onClick = {
+                                val (payload, count) = bq.flush()
+                                Toast.makeText(
+                                    context,
+                                    if (count > 0) "Flushed $count messages (${payload?.size ?: 0} bytes)"
+                                    else "Queue empty",
+                                    Toast.LENGTH_SHORT,
+                                ).show()
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = MeshSatTeal),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text("Flush Now", style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+
+                Text(
+                    text = "TLV-framed message queue for efficient satellite pass transmission. Messages are priority-sorted and packed into a single SBD payload (max 340 bytes).",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MeshSatTextMuted,
+                )
+            }
+        }
+
+        // --- Canned Messages ---
+        if (section.shows(SetupSection.Messaging)) {
+            SectionCard("Quick messages") {
+                val entries = CannedCodebook.DEFAULT_ENTRIES
+                Text(
+                    text = "${entries.size} brevity codes loaded",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MeshSatTextMuted,
+                )
+
+                entries.entries.take(10).forEach { (id, text) ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 2.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Text(
+                            text = text,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Text(
+                            text = "#$id",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MeshSatTextMuted,
+                        )
+                    }
+                }
+
+                if (entries.size > 10) {
+                    Text(
+                        text = "... and ${entries.size - 10} more",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MeshSatTextMuted,
+                    )
+                }
+
+                Text(
+                    text = "Wire format: 2 bytes (0xCA + message ID). Auto-detected on receive.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MeshSatTextMuted,
+                )
+            }
+        }
+
+        // --- MeshSat Pi Section ---
+        if (section.shows(SetupSection.Integrations)) {
+            SectionCard("Ham radio (APRS)") {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("Enable APRS", style = MaterialTheme.typography.bodyMedium)
+                    Switch(
+                        checked = aprsEnabled,
+                        onCheckedChange = { scope.launch { settings.setAprsEnabled(it) } },
+                        colors = SwitchDefaults.colors(checkedTrackColor = MeshSatTeal),
+                    )
+                }
+
+                // Mode selector: KISS TNC or APRS-IS direct
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    FilterChip(
+                        selected = aprsMode == "kiss",
+                        onClick = { scope.launch { settings.setAprsMode("kiss") } },
+                        label = { Text("KISS TNC", style = MaterialTheme.typography.bodySmall) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = MeshSatTeal.copy(alpha = 0.2f),
+                        ),
+                    )
+                    FilterChip(
+                        selected = aprsMode == "is",
+                        onClick = { scope.launch { settings.setAprsMode("is") } },
+                        label = { Text("APRS-IS Direct", style = MaterialTheme.typography.bodySmall) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = MeshSatTeal.copy(alpha = 0.2f),
+                        ),
+                    )
+                }
+
+                // Connection status (mode-aware)
+                if (aprsMode == "kiss") {
+                    aprsKissState?.let { state ->
+                        val statusText = when (state.value) {
+                            net.meshsat.android.aprs.KissClient.State.Connected -> "Connected"
+                            net.meshsat.android.aprs.KissClient.State.Connecting -> "Connecting..."
+                            net.meshsat.android.aprs.KissClient.State.Error -> "Error"
+                            net.meshsat.android.aprs.KissClient.State.Disconnected -> "Disconnected"
+                        }
+                        val isOnline = state.value == net.meshsat.android.aprs.KissClient.State.Connected
+                        ConnectionStatusRow("KISS TNC", isOnline, statusText, MeshSatTeal)
+                    }
+                } else {
+                    aprsIsState?.let { state ->
+                        val statusText = when (state.value) {
+                            net.meshsat.android.aprs.AprsIsClient.State.Connected -> "Connected"
+                            net.meshsat.android.aprs.AprsIsClient.State.Connecting -> "Connecting..."
+                            net.meshsat.android.aprs.AprsIsClient.State.Error -> "Error"
+                            net.meshsat.android.aprs.AprsIsClient.State.Disconnected -> "Disconnected"
+                        }
+                        val isOnline = state.value == net.meshsat.android.aprs.AprsIsClient.State.Connected
+                        val verified = GatewayService.aprsIsClient?.verified == true
+                        val label = if (isOnline && verified) "APRS-IS (verified)" else "APRS-IS"
+                        ConnectionStatusRow(label, isOnline, statusText, MeshSatTeal)
+                    }
+                }
+
+                // Common: callsign + SSID
+                OutlinedTextField(
+                    value = aprsCallsignInput,
+                    onValueChange = { aprsCallsignInput = it.uppercase().take(6) },
+                    label = { Text("Callsign", style = MaterialTheme.typography.bodySmall) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    textStyle = MaterialTheme.typography.bodyMedium,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = MeshSatTeal,
+                        unfocusedBorderColor = MeshSatBorder,
+                    ),
+                )
+
+                OutlinedTextField(
+                    value = aprsSsidInput,
+                    onValueChange = { aprsSsidInput = it.filter { c -> c.isDigit() }.take(2) },
+                    label = { Text("SSID (0-15)", style = MaterialTheme.typography.bodySmall) },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth(),
+                    textStyle = MaterialTheme.typography.bodyMedium,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = MeshSatTeal,
+                        unfocusedBorderColor = MeshSatBorder,
+                    ),
+                )
+
+                // KISS TNC settings
+                if (aprsMode == "kiss") {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = aprsHostInput,
+                            onValueChange = { aprsHostInput = it },
+                            label = { Text("KISS Host", style = MaterialTheme.typography.bodySmall) },
+                            singleLine = true,
+                            modifier = Modifier.weight(2f),
+                            textStyle = MaterialTheme.typography.bodyMedium,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = MeshSatTeal,
+                                unfocusedBorderColor = MeshSatBorder,
+                            ),
+                        )
+                        OutlinedTextField(
+                            value = aprsPortInput,
+                            onValueChange = { aprsPortInput = it.filter { c -> c.isDigit() }.take(5) },
+                            label = { Text("Port", style = MaterialTheme.typography.bodySmall) },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.weight(1f),
+                            textStyle = MaterialTheme.typography.bodyMedium,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = MeshSatTeal,
+                                unfocusedBorderColor = MeshSatBorder,
+                            ),
+                        )
+                    }
+
                     OutlinedTextField(
-                        value = aprsIsBeaconIntervalInput,
-                        onValueChange = { aprsIsBeaconIntervalInput = it.filter { c -> c.isDigit() }.take(3) },
-                        label = { Text("Beacon interval (min)", style = MaterialTheme.typography.bodySmall) },
+                        value = aprsFreqInput,
+                        onValueChange = { aprsFreqInput = it },
+                        label = { Text("Frequency (MHz)", style = MaterialTheme.typography.bodySmall) },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        modifier = Modifier.fillMaxWidth(),
+                        textStyle = MaterialTheme.typography.bodyMedium,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = MeshSatTeal,
+                            unfocusedBorderColor = MeshSatBorder,
+                        ),
+                    )
+                }
+
+                // APRS-IS Direct settings (MESHSAT-230)
+                if (aprsMode == "is") {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = aprsIsServerInput,
+                            onValueChange = { aprsIsServerInput = it },
+                            label = { Text("APRS-IS Server", style = MaterialTheme.typography.bodySmall) },
+                            singleLine = true,
+                            modifier = Modifier.weight(2f),
+                            textStyle = MaterialTheme.typography.bodyMedium,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = MeshSatTeal,
+                                unfocusedBorderColor = MeshSatBorder,
+                            ),
+                        )
+                        OutlinedTextField(
+                            value = aprsIsPortInput,
+                            onValueChange = { aprsIsPortInput = it.filter { c -> c.isDigit() }.take(5) },
+                            label = { Text("Port", style = MaterialTheme.typography.bodySmall) },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.weight(1f),
+                            textStyle = MaterialTheme.typography.bodyMedium,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = MeshSatTeal,
+                                unfocusedBorderColor = MeshSatBorder,
+                            ),
+                        )
+                    }
+
+                    // Passcode with auto-calculate button
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        OutlinedTextField(
+                            value = aprsIsPasscodeInput,
+                            onValueChange = { aprsIsPasscodeInput = it.filter { c -> c.isDigit() || c == '-' }.take(6) },
+                            label = { Text("Passcode", style = MaterialTheme.typography.bodySmall) },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.weight(1f),
+                            textStyle = MaterialTheme.typography.bodyMedium,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = MeshSatTeal,
+                                unfocusedBorderColor = MeshSatBorder,
+                            ),
+                        )
+                        OutlinedButton(
+                            onClick = {
+                                if (aprsCallsignInput.isNotBlank()) {
+                                    aprsIsPasscodeInput = net.meshsat.android.aprs.AprsIsPasscode.calculate(aprsCallsignInput)
+                                }
+                            },
+                            border = BorderStroke(1.dp, MeshSatTeal),
+                        ) {
+                            Text("Auto", style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+
+                    OutlinedTextField(
+                        value = aprsIsFilterRangeInput,
+                        onValueChange = { aprsIsFilterRangeInput = it.filter { c -> c.isDigit() }.take(4) },
+                        label = { Text("Filter radius (km)", style = MaterialTheme.typography.bodySmall) },
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         modifier = Modifier.fillMaxWidth(),
@@ -1332,210 +1342,244 @@ fun SettingsScreen(navController: NavController? = null) {
                             unfocusedBorderColor = MeshSatBorder,
                         ),
                     )
-                }
-            }
 
-            Button(
-                onClick = {
-                    scope.launch {
-                        settings.setAprsCallsign(aprsCallsignInput)
-                        settings.setAprsSsid(aprsSsidInput)
-                        if (aprsMode == "kiss") {
-                            settings.setAprsKissHost(aprsHostInput)
-                            settings.setAprsKissPort(aprsPortInput)
-                            settings.setAprsFrequency(aprsFreqInput)
-                        } else {
-                            settings.setAprsIsServer(aprsIsServerInput)
-                            settings.setAprsIsPort(aprsIsPortInput)
-                            settings.setAprsIsPasscode(aprsIsPasscodeInput)
-                            settings.setAprsIsFilterRange(aprsIsFilterRangeInput)
-                            settings.setAprsIsBeaconInterval(aprsIsBeaconIntervalInput)
-                        }
+                    // Position beaconing
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("Position beacon", style = MaterialTheme.typography.bodyMedium)
+                        Switch(
+                            checked = aprsIsBeaconEnabled,
+                            onCheckedChange = { scope.launch { settings.setAprsIsBeaconEnabled(it) } },
+                            colors = SwitchDefaults.colors(checkedTrackColor = MeshSatTeal),
+                        )
                     }
-                    Toast.makeText(context, "APRS settings saved", Toast.LENGTH_SHORT).show()
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = MeshSatTeal),
-            ) {
-                Text("Save", style = MaterialTheme.typography.bodySmall)
-            }
 
-            Text(
-                text = if (aprsMode == "kiss") {
-                    "Connect to APRSDroid's KISS TCP server for local RF APRS via AIOC + handheld radio. " +
-                        "SSID 7 = handheld, 10 = igate. EU: 144.800 MHz, NA: 144.390 MHz."
-                } else {
-                    "Connect directly to APRS-IS (rotate.aprs2.net) over the internet. " +
-                        "No APRSDroid or radio needed. Use passcode -1 for receive-only, or Auto to calculate from callsign. " +
-                        "Position beacon sends GPS location at the configured interval."
-                },
-                style = MaterialTheme.typography.bodySmall,
-                color = MeshSatTextMuted,
-            )
+                    if (aprsIsBeaconEnabled) {
+                        OutlinedTextField(
+                            value = aprsIsBeaconIntervalInput,
+                            onValueChange = { aprsIsBeaconIntervalInput = it.filter { c -> c.isDigit() }.take(3) },
+                            label = { Text("Beacon interval (min)", style = MaterialTheme.typography.bodySmall) },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.fillMaxWidth(),
+                            textStyle = MaterialTheme.typography.bodyMedium,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = MeshSatTeal,
+                                unfocusedBorderColor = MeshSatBorder,
+                            ),
+                        )
+                    }
+                }
+
+                Button(
+                    onClick = {
+                        scope.launch {
+                            settings.setAprsCallsign(aprsCallsignInput)
+                            settings.setAprsSsid(aprsSsidInput)
+                            if (aprsMode == "kiss") {
+                                settings.setAprsKissHost(aprsHostInput)
+                                settings.setAprsKissPort(aprsPortInput)
+                                settings.setAprsFrequency(aprsFreqInput)
+                            } else {
+                                settings.setAprsIsServer(aprsIsServerInput)
+                                settings.setAprsIsPort(aprsIsPortInput)
+                                settings.setAprsIsPasscode(aprsIsPasscodeInput)
+                                settings.setAprsIsFilterRange(aprsIsFilterRangeInput)
+                                settings.setAprsIsBeaconInterval(aprsIsBeaconIntervalInput)
+                            }
+                        }
+                        Toast.makeText(context, "APRS settings saved", Toast.LENGTH_SHORT).show()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MeshSatTeal),
+                ) {
+                    Text("Save", style = MaterialTheme.typography.bodySmall)
+                }
+
+                Text(
+                    text = if (aprsMode == "kiss") {
+                        "Connect to APRSDroid's KISS TCP server for local RF APRS via AIOC + handheld radio. " +
+                            "SSID 7 = handheld, 10 = igate. EU: 144.800 MHz, NA: 144.390 MHz."
+                    } else {
+                        "Connect directly to APRS-IS (rotate.aprs2.net) over the internet. " +
+                            "No APRSDroid or radio needed. Use passcode -1 for receive-only, or Auto to calculate from callsign. " +
+                            "Position beacon sends GPS location at the configured interval."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MeshSatTextMuted,
+                )
+            }
         }
 
         // --- TAK / CoT Section (MESHSAT-451) ---
-        SectionCard("TAK / CoT") {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("Enable TAK", style = MaterialTheme.typography.bodyMedium)
-                Switch(
-                    checked = takEnabled,
-                    onCheckedChange = { scope.launch { settings.setTakEnabled(it) } },
-                    colors = SwitchDefaults.colors(checkedTrackColor = MeshSatTeal),
+        if (section.shows(SetupSection.Integrations)) {
+            SectionCard("TAK") {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("Enable TAK", style = MaterialTheme.typography.bodyMedium)
+                    Switch(
+                        checked = takEnabled,
+                        onCheckedChange = { scope.launch { settings.setTakEnabled(it) } },
+                        colors = SwitchDefaults.colors(checkedTrackColor = MeshSatTeal),
+                    )
+                }
+
+                OutlinedTextField(
+                    value = takCallsignPrefixInput,
+                    onValueChange = { takCallsignPrefixInput = it.uppercase().take(10) },
+                    label = { Text("Callsign Prefix", style = MaterialTheme.typography.bodySmall) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = MeshSatTeal,
+                        unfocusedBorderColor = MeshSatBorder,
+                    ),
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("ATAK Broadcast", style = MaterialTheme.typography.bodySmall)
+                    Switch(
+                        checked = takAtakBroadcast,
+                        onCheckedChange = { scope.launch { settings.setTakAtakBroadcast(it) } },
+                        colors = SwitchDefaults.colors(checkedTrackColor = MeshSatTeal),
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("MQTT Export to Hub", style = MaterialTheme.typography.bodySmall)
+                    Switch(
+                        checked = takMqttExport,
+                        onCheckedChange = { scope.launch { settings.setTakMqttExport(it) } },
+                        colors = SwitchDefaults.colors(checkedTrackColor = MeshSatTeal),
+                    )
+                }
+
+                Button(
+                    onClick = {
+                        scope.launch {
+                            settings.setTakCallsignPrefix(takCallsignPrefixInput)
+                        }
+                        GatewayService.takIntegration?.updateOutputFlags(takAtakBroadcast, takMqttExport)
+                        android.widget.Toast.makeText(context, "TAK settings saved", android.widget.Toast.LENGTH_SHORT).show()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MeshSatTeal),
+                ) {
+                    Text("Save", style = MaterialTheme.typography.bodySmall)
+                }
+
+                Text(
+                    text = "Generates CoT (Cursor on Target) events for positions, SOS, telemetry, and chat. " +
+                        "ATAK Broadcast sends locally to ATAK if installed. MQTT Export sends to Hub for relay to a TAK server. " +
+                        "Callsign format: PREFIX-XXXX (last 4 hex of device ID). Restart service after changing prefix.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MeshSatTextMuted,
                 )
             }
-
-            OutlinedTextField(
-                value = takCallsignPrefixInput,
-                onValueChange = { takCallsignPrefixInput = it.uppercase().take(10) },
-                label = { Text("Callsign Prefix", style = MaterialTheme.typography.bodySmall) },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = MeshSatTeal,
-                    unfocusedBorderColor = MeshSatBorder,
-                ),
-            )
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("ATAK Broadcast", style = MaterialTheme.typography.bodySmall)
-                Switch(
-                    checked = takAtakBroadcast,
-                    onCheckedChange = { scope.launch { settings.setTakAtakBroadcast(it) } },
-                    colors = SwitchDefaults.colors(checkedTrackColor = MeshSatTeal),
-                )
-            }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("MQTT Export to Hub", style = MaterialTheme.typography.bodySmall)
-                Switch(
-                    checked = takMqttExport,
-                    onCheckedChange = { scope.launch { settings.setTakMqttExport(it) } },
-                    colors = SwitchDefaults.colors(checkedTrackColor = MeshSatTeal),
-                )
-            }
-
-            Button(
-                onClick = {
-                    scope.launch {
-                        settings.setTakCallsignPrefix(takCallsignPrefixInput)
-                    }
-                    GatewayService.takIntegration?.updateOutputFlags(takAtakBroadcast, takMqttExport)
-                    android.widget.Toast.makeText(context, "TAK settings saved", android.widget.Toast.LENGTH_SHORT).show()
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = MeshSatTeal),
-            ) {
-                Text("Save", style = MaterialTheme.typography.bodySmall)
-            }
-
-            Text(
-                text = "Generates CoT (Cursor on Target) events for positions, SOS, telemetry, and chat. " +
-                    "ATAK Broadcast sends locally to ATAK if installed. MQTT Export sends to Hub for relay to a TAK server. " +
-                    "Callsign format: PREFIX-XXXX (last 4 hex of device ID). Restart service after changing prefix.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MeshSatTextMuted,
-            )
         }
 
         // --- Reticulum TCP Section (MESHSAT-268) ---
-        SectionCard("Reticulum TCP") {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("Enable RNS TCP", style = MaterialTheme.typography.bodyMedium)
-                Switch(
-                    checked = rnsTcpEnabled,
-                    onCheckedChange = { scope.launch { settings.setRnsTcpEnabled(it) } },
-                    colors = SwitchDefaults.colors(checkedTrackColor = MeshSatTeal),
-                )
-            }
-
-            // Connection status
-            rnsTcpState?.let { state ->
-                val statusText = when (state.value) {
-                    net.meshsat.android.reticulum.RnsTcpInterface.State.Connected -> "Connected"
-                    net.meshsat.android.reticulum.RnsTcpInterface.State.Connecting -> "Connecting..."
-                    net.meshsat.android.reticulum.RnsTcpInterface.State.Error -> "Error"
-                    net.meshsat.android.reticulum.RnsTcpInterface.State.Disconnected -> "Disconnected"
+        if (section.shows(SetupSection.Integrations)) {
+            SectionCard("Reticulum") {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("Enable RNS TCP", style = MaterialTheme.typography.bodyMedium)
+                    Switch(
+                        checked = rnsTcpEnabled,
+                        onCheckedChange = { scope.launch { settings.setRnsTcpEnabled(it) } },
+                        colors = SwitchDefaults.colors(checkedTrackColor = MeshSatTeal),
+                    )
                 }
-                val isOnline = state.value == net.meshsat.android.reticulum.RnsTcpInterface.State.Connected
-                ConnectionStatusRow("RNS TCP", isOnline, statusText, MeshSatTeal)
-            }
 
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    value = rnsTcpHostInput,
-                    onValueChange = { rnsTcpHostInput = it },
-                    label = { Text("Host", style = MaterialTheme.typography.bodySmall) },
-                    singleLine = true,
-                    modifier = Modifier.weight(2f),
-                    textStyle = MaterialTheme.typography.bodyMedium,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = MeshSatTeal,
-                        unfocusedBorderColor = MeshSatBorder,
-                    ),
-                )
-                OutlinedTextField(
-                    value = rnsTcpPortInput,
-                    onValueChange = { rnsTcpPortInput = it.filter { c -> c.isDigit() }.take(5) },
-                    label = { Text("Port", style = MaterialTheme.typography.bodySmall) },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    modifier = Modifier.weight(1f),
-                    textStyle = MaterialTheme.typography.bodyMedium,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = MeshSatTeal,
-                        unfocusedBorderColor = MeshSatBorder,
-                    ),
-                )
-            }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("TLS", style = MaterialTheme.typography.bodyMedium)
-                Switch(
-                    checked = rnsTcpTls,
-                    onCheckedChange = { scope.launch { settings.setRnsTcpTls(it) } },
-                    colors = SwitchDefaults.colors(checkedTrackColor = MeshSatTeal),
-                )
-            }
-
-            Button(
-                onClick = {
-                    scope.launch {
-                        settings.setRnsTcpHost(rnsTcpHostInput)
-                        settings.setRnsTcpPort(rnsTcpPortInput)
+                // Connection status
+                rnsTcpState?.let { state ->
+                    val statusText = when (state.value) {
+                        net.meshsat.android.reticulum.RnsTcpInterface.State.Connected -> "Connected"
+                        net.meshsat.android.reticulum.RnsTcpInterface.State.Connecting -> "Connecting..."
+                        net.meshsat.android.reticulum.RnsTcpInterface.State.Error -> "Error"
+                        net.meshsat.android.reticulum.RnsTcpInterface.State.Disconnected -> "Disconnected"
                     }
-                    Toast.makeText(context, "RNS TCP settings saved", Toast.LENGTH_SHORT).show()
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = MeshSatTeal),
-            ) {
-                Text("Save", style = MaterialTheme.typography.bodySmall)
-            }
+                    val isOnline = state.value == net.meshsat.android.reticulum.RnsTcpInterface.State.Connected
+                    ConnectionStatusRow("RNS TCP", isOnline, statusText, MeshSatTeal)
+                }
 
-            Text(
-                text = "Connect to a stock Reticulum (Python RNS) node over TCP/IP. " +
-                    "Enable TLS for public endpoints (e.g. port 443 via HAProxy/stunnel). " +
-                    "Default port 4242. Uses HDLC framing for wire compatibility.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MeshSatTextMuted,
-            )
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = rnsTcpHostInput,
+                        onValueChange = { rnsTcpHostInput = it },
+                        label = { Text("Host", style = MaterialTheme.typography.bodySmall) },
+                        singleLine = true,
+                        modifier = Modifier.weight(2f),
+                        textStyle = MaterialTheme.typography.bodyMedium,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = MeshSatTeal,
+                            unfocusedBorderColor = MeshSatBorder,
+                        ),
+                    )
+                    OutlinedTextField(
+                        value = rnsTcpPortInput,
+                        onValueChange = { rnsTcpPortInput = it.filter { c -> c.isDigit() }.take(5) },
+                        label = { Text("Port", style = MaterialTheme.typography.bodySmall) },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.weight(1f),
+                        textStyle = MaterialTheme.typography.bodyMedium,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = MeshSatTeal,
+                            unfocusedBorderColor = MeshSatBorder,
+                        ),
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("TLS", style = MaterialTheme.typography.bodyMedium)
+                    Switch(
+                        checked = rnsTcpTls,
+                        onCheckedChange = { scope.launch { settings.setRnsTcpTls(it) } },
+                        colors = SwitchDefaults.colors(checkedTrackColor = MeshSatTeal),
+                    )
+                }
+
+                Button(
+                    onClick = {
+                        scope.launch {
+                            settings.setRnsTcpHost(rnsTcpHostInput)
+                            settings.setRnsTcpPort(rnsTcpPortInput)
+                        }
+                        Toast.makeText(context, "RNS TCP settings saved", Toast.LENGTH_SHORT).show()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MeshSatTeal),
+                ) {
+                    Text("Save", style = MaterialTheme.typography.bodySmall)
+                }
+
+                Text(
+                    text = "Connect to a stock Reticulum (Python RNS) node over TCP/IP. " +
+                        "Enable TLS for public endpoints (e.g. port 443 via HAProxy/stunnel). " +
+                        "Default port 4242. Uses HDLC framing for wire compatibility.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MeshSatTextMuted,
+                )
+            }
         }
 
         // Provision confirmation dialog
@@ -1590,573 +1634,543 @@ fun SettingsScreen(navController: NavController? = null) {
             )
         }
 
-        SectionCard("Hub Reporter") {
-            // --- Health LED + Status ---
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
+        if (section.shows(SetupSection.Hub)) {
+            SectionCard("Hub connection") {
+                // --- Health LED + Status ---
                 Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    val hubState = hubReporterState?.value
-                    val ledColor = when (hubState) {
-                        net.meshsat.android.hub.HubReporter.State.Connected -> MeshSatGreen
-                        net.meshsat.android.hub.HubReporter.State.Connecting -> MeshSatAmber
-                        net.meshsat.android.hub.HubReporter.State.Error -> MeshSatRed
-                        else -> MeshSatTextMuted
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        val hubState = hubReporterState?.value
+                        val ledColor = when (hubState) {
+                            net.meshsat.android.hub.HubReporter.State.Connected -> MeshSatGreen
+                            net.meshsat.android.hub.HubReporter.State.Connecting -> MeshSatAmber
+                            net.meshsat.android.hub.HubReporter.State.Error -> MeshSatRed
+                            else -> MeshSatTextMuted
+                        }
+                        val statusLabel = when (hubState) {
+                            net.meshsat.android.hub.HubReporter.State.Connected -> "Connected"
+                            net.meshsat.android.hub.HubReporter.State.Connecting -> "Connecting..."
+                            net.meshsat.android.hub.HubReporter.State.Error -> "Error"
+                            net.meshsat.android.hub.HubReporter.State.Disconnected -> "Disconnected"
+                            else -> "Disabled"
+                        }
+                        Box(
+                            modifier = Modifier
+                                .size(12.dp)
+                                .background(ledColor, CircleShape),
+                        )
+                        Text(statusLabel, style = MaterialTheme.typography.bodyMedium, color = ledColor)
                     }
-                    val statusLabel = when (hubState) {
-                        net.meshsat.android.hub.HubReporter.State.Connected -> "Connected"
-                        net.meshsat.android.hub.HubReporter.State.Connecting -> "Connecting..."
-                        net.meshsat.android.hub.HubReporter.State.Error -> "Error"
-                        net.meshsat.android.hub.HubReporter.State.Disconnected -> "Disconnected"
-                        else -> "Disabled"
-                    }
-                    Box(
-                        modifier = Modifier
-                            .size(12.dp)
-                            .background(ledColor, CircleShape),
+                    Switch(
+                        checked = hubEnabled,
+                        onCheckedChange = { scope.launch { settings.setHubEnabled(it) } },
+                        colors = SwitchDefaults.colors(checkedTrackColor = MeshSatTeal),
                     )
-                    Text(statusLabel, style = MaterialTheme.typography.bodyMedium, color = ledColor)
                 }
-                Switch(
-                    checked = hubEnabled,
-                    onCheckedChange = { scope.launch { settings.setHubEnabled(it) } },
-                    colors = SwitchDefaults.colors(checkedTrackColor = MeshSatTeal),
-                )
-            }
 
-            // --- Ping Button ---
-            var pingResult by remember { mutableStateOf("") }
-            var pinging by remember { mutableStateOf(false) }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
+                // --- Ping Button ---
+                var pingResult by remember { mutableStateOf("") }
+                var pinging by remember { mutableStateOf(false) }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    OutlinedButton(
+                        onClick = {
+                            val hub = GatewayService.hubReporter
+                            if (hub == null || !hub.isConnected) {
+                                pingResult = "Not connected"
+                                return@OutlinedButton
+                            }
+                            pinging = true
+                            pingResult = "..."
+                            scope.launch {
+                                try {
+                                    val elapsed = withContext(Dispatchers.IO) { hub.ping() }
+                                    pingResult = "${elapsed}ms"
+                                } catch (e: Exception) {
+                                    pingResult = "failed: ${e.message?.take(30)}"
+                                }
+                                pinging = false
+                            }
+                        },
+                        enabled = !pinging,
+                    ) {
+                        Text("Ping Hub")
+                    }
+                    Text(
+                        text = if (pingResult.isNotBlank()) pingResult else "",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = if (pingResult.endsWith("ms")) MeshSatGreen else MeshSatTextMuted,
+                    )
+                }
+
+                // --- Scan Provision QR ---
                 OutlinedButton(
                     onClick = {
-                        val hub = GatewayService.hubReporter
-                        if (hub == null || !hub.isConnected) {
-                            pingResult = "Not connected"
-                            return@OutlinedButton
-                        }
-                        pinging = true
-                        pingResult = "..."
-                        scope.launch {
-                            try {
-                                val elapsed = withContext(Dispatchers.IO) { hub.ping() }
-                                pingResult = "${elapsed}ms"
-                            } catch (e: Exception) {
-                                pingResult = "failed: ${e.message?.take(30)}"
-                            }
-                            pinging = false
-                        }
+                        val scanIntent = com.journeyapps.barcodescanner.ScanContract().createIntent(
+                            context,
+                            com.journeyapps.barcodescanner.ScanOptions().apply {
+                                setDesiredBarcodeFormats(com.journeyapps.barcodescanner.ScanOptions.QR_CODE)
+                                setPrompt("Scan Hub Provision QR code")
+                                setBeepEnabled(false)
+                                setOrientationLocked(true)
+                            },
+                        )
+                        qrScanLauncher.launch(scanIntent)
                     },
-                    enabled = !pinging,
+                    modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Text("Ping Hub")
+                    Text("Scan Hub Provision QR")
                 }
-                Text(
-                    text = if (pingResult.isNotBlank()) pingResult else "",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = if (pingResult.endsWith("ms")) MeshSatGreen else MeshSatTextMuted,
-                )
-            }
 
-            // --- Scan Provision QR ---
-            OutlinedButton(
-                onClick = {
-                    val scanIntent = com.journeyapps.barcodescanner.ScanContract().createIntent(
-                        context,
-                        com.journeyapps.barcodescanner.ScanOptions().apply {
-                            setDesiredBarcodeFormats(com.journeyapps.barcodescanner.ScanOptions.QR_CODE)
-                            setPrompt("Scan Hub Provision QR code")
-                            setBeepEnabled(false)
-                            setOrientationLocked(true)
-                        },
+                // --- Fields ---
+                OutlinedTextField(
+                    value = hubUrlInput,
+                    onValueChange = { hubUrlInput = it },
+                    label = { Text("Hub MQTT URL", style = MaterialTheme.typography.bodySmall) },
+                    placeholder = { Text("wss://mqtt-hub.meshsat.net/mqtt", style = MaterialTheme.typography.bodySmall, color = MeshSatTextMuted) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    textStyle = MaterialTheme.typography.bodyMedium,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = MeshSatTeal,
+                        unfocusedBorderColor = MeshSatBorder,
+                    ),
+                )
+
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = hubBridgeIdInput,
+                        onValueChange = { hubBridgeIdInput = it },
+                        label = { Text("Bridge ID", style = MaterialTheme.typography.bodySmall) },
+                        placeholder = { Text("auto (Android ID)", style = MaterialTheme.typography.bodySmall, color = MeshSatTextMuted) },
+                        singleLine = true, modifier = Modifier.weight(1f),
+                        textStyle = MaterialTheme.typography.bodyMedium,
+                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = MeshSatTeal, unfocusedBorderColor = MeshSatBorder),
                     )
-                    qrScanLauncher.launch(scanIntent)
-                },
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text("Scan Hub Provision QR")
-            }
+                    OutlinedTextField(
+                        value = hubCallsignInput,
+                        onValueChange = { hubCallsignInput = it },
+                        label = { Text("Callsign", style = MaterialTheme.typography.bodySmall) },
+                        placeholder = { Text("TAK callsign", style = MaterialTheme.typography.bodySmall, color = MeshSatTextMuted) },
+                        singleLine = true, modifier = Modifier.weight(1f),
+                        textStyle = MaterialTheme.typography.bodyMedium,
+                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = MeshSatTeal, unfocusedBorderColor = MeshSatBorder),
+                    )
+                }
 
-            // --- Fields ---
-            OutlinedTextField(
-                value = hubUrlInput,
-                onValueChange = { hubUrlInput = it },
-                label = { Text("Hub MQTT URL", style = MaterialTheme.typography.bodySmall) },
-                placeholder = { Text("wss://mqtt-hub.meshsat.net/mqtt", style = MaterialTheme.typography.bodySmall, color = MeshSatTextMuted) },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-                textStyle = MaterialTheme.typography.bodyMedium,
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = MeshSatTeal,
-                    unfocusedBorderColor = MeshSatBorder,
-                ),
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = hubUsernameInput,
+                        onValueChange = { hubUsernameInput = it },
+                        label = { Text("Username", style = MaterialTheme.typography.bodySmall) },
+                        singleLine = true, modifier = Modifier.weight(1f),
+                        textStyle = MaterialTheme.typography.bodyMedium,
+                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = MeshSatTeal, unfocusedBorderColor = MeshSatBorder),
+                    )
+                    OutlinedTextField(
+                        value = hubPasswordInput,
+                        onValueChange = { hubPasswordInput = it },
+                        label = { Text("Password", style = MaterialTheme.typography.bodySmall) },
+                        singleLine = true, modifier = Modifier.weight(1f),
+                        textStyle = MaterialTheme.typography.bodyMedium,
+                        visualTransformation = if (showHubPassword) VisualTransformation.None else PasswordVisualTransformation(),
+                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = MeshSatTeal, unfocusedBorderColor = MeshSatBorder),
+                    )
+                }
+
+                OutlinedTextField(
+                    value = hubHealthIntervalInput,
+                    onValueChange = { hubHealthIntervalInput = it.filter { c -> c.isDigit() }.take(4) },
+                    label = { Text("Health interval (seconds)", style = MaterialTheme.typography.bodySmall) },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth(),
+                    textStyle = MaterialTheme.typography.bodyMedium,
+                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = MeshSatTeal, unfocusedBorderColor = MeshSatBorder),
+                )
+
+                // --- Hub relay client (MESHSAT-1157): fallback tunnel to one kit through the Hub ---
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("Hub relay to a kit (fallback)", style = MaterialTheme.typography.bodyMedium)
+                    Switch(
+                        checked = hubRelayEnabled,
+                        onCheckedChange = { scope.launch { settings.setHubRelayEnabled(it) } },
+                        colors = SwitchDefaults.colors(checkedTrackColor = MeshSatTeal),
+                    )
+                }
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = hubRelayTargetInput,
+                        onValueChange = { hubRelayTargetInput = it },
+                        label = { Text("Relay target bridge ID", style = MaterialTheme.typography.bodySmall) },
+                        placeholder = { Text("kit-a", style = MaterialTheme.typography.bodySmall, color = MeshSatTextMuted) },
+                        singleLine = true, modifier = Modifier.weight(1f),
+                        textStyle = MaterialTheme.typography.bodyMedium,
+                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = MeshSatTeal, unfocusedBorderColor = MeshSatBorder),
+                    )
+                    OutlinedTextField(
+                        value = hubRelayUrlInput,
+                        onValueChange = { hubRelayUrlInput = it },
+                        label = { Text("Hub API URL (optional)", style = MaterialTheme.typography.bodySmall) },
+                        placeholder = { Text("derived from MQTT URL", style = MaterialTheme.typography.bodySmall, color = MeshSatTextMuted) },
+                        singleLine = true, modifier = Modifier.weight(1f),
+                        textStyle = MaterialTheme.typography.bodyMedium,
+                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = MeshSatTeal, unfocusedBorderColor = MeshSatBorder),
+                    )
+                }
+
+                Button(
+                    onClick = {
+                        scope.launch {
+                            settings.setHubUrl(hubUrlInput)
+                            settings.setHubBridgeId(hubBridgeIdInput)
+                            settings.setHubCallsign(hubCallsignInput)
+                            settings.setHubUsername(hubUsernameInput)
+                            settings.setHubPassword(hubPasswordInput)
+                            settings.setHubHealthInterval(hubHealthIntervalInput)
+                            settings.setHubRelayTarget(hubRelayTargetInput)
+                            settings.setHubRelayUrl(hubRelayUrlInput)
+                        }
+                        Toast.makeText(context, "Hub Reporter settings saved (restart to apply)", Toast.LENGTH_SHORT).show()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MeshSatTeal),
+                ) {
+                    Text("Save", style = MaterialTheme.typography.bodySmall)
+                }
+
+                Text(
+                    text = "Connect to MeshSat Hub as a mobile field node. " +
+                        "Publishes birth/health/position to the fleet dashboard and TAK map. " +
+                        "Leave Bridge ID blank to use Android device ID.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MeshSatTextMuted,
+                )
+            }
+        }
+
+        if (section.shows(SetupSection.Sms)) {
+            // SMS was only ever offered from a banner in Messages; Setup is where people look for it.
+            val smsPermissions = arrayOf(
+                Manifest.permission.SEND_SMS,
+                Manifest.permission.RECEIVE_SMS,
+                Manifest.permission.READ_SMS,
             )
-
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    value = hubBridgeIdInput,
-                    onValueChange = { hubBridgeIdInput = it },
-                    label = { Text("Bridge ID", style = MaterialTheme.typography.bodySmall) },
-                    placeholder = { Text("auto (Android ID)", style = MaterialTheme.typography.bodySmall, color = MeshSatTextMuted) },
-                    singleLine = true, modifier = Modifier.weight(1f),
-                    textStyle = MaterialTheme.typography.bodyMedium,
-                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = MeshSatTeal, unfocusedBorderColor = MeshSatBorder),
-                )
-                OutlinedTextField(
-                    value = hubCallsignInput,
-                    onValueChange = { hubCallsignInput = it },
-                    label = { Text("Callsign", style = MaterialTheme.typography.bodySmall) },
-                    placeholder = { Text("TAK callsign", style = MaterialTheme.typography.bodySmall, color = MeshSatTextMuted) },
-                    singleLine = true, modifier = Modifier.weight(1f),
-                    textStyle = MaterialTheme.typography.bodyMedium,
-                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = MeshSatTeal, unfocusedBorderColor = MeshSatBorder),
-                )
+            fun smsAllowed() = smsPermissions.all {
+                ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
             }
-
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    value = hubUsernameInput,
-                    onValueChange = { hubUsernameInput = it },
-                    label = { Text("Username", style = MaterialTheme.typography.bodySmall) },
-                    singleLine = true, modifier = Modifier.weight(1f),
-                    textStyle = MaterialTheme.typography.bodyMedium,
-                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = MeshSatTeal, unfocusedBorderColor = MeshSatBorder),
+            var smsGranted by remember { mutableStateOf(smsAllowed()) }
+            val smsLauncher = rememberLauncherForActivityResult(
+                ActivityResultContracts.RequestMultiplePermissions(),
+            ) { smsGranted = smsAllowed() }
+            SectionCard("Text messages") {
+                ConnectionStatusRow(
+                    label = "SMS",
+                    connected = smsGranted,
+                    statusText = if (smsGranted) "Allowed" else "Not allowed yet",
+                    color = MeshSatTeal,
                 )
-                OutlinedTextField(
-                    value = hubPasswordInput,
-                    onValueChange = { hubPasswordInput = it },
-                    label = { Text("Password", style = MaterialTheme.typography.bodySmall) },
-                    singleLine = true, modifier = Modifier.weight(1f),
-                    textStyle = MaterialTheme.typography.bodyMedium,
-                    visualTransformation = if (showHubPassword) VisualTransformation.None else PasswordVisualTransformation(),
-                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = MeshSatTeal, unfocusedBorderColor = MeshSatBorder),
+                Text(
+                    text = "MeshSat sends and receives texts through this phone's SIM when the network works. " +
+                        "Your carrier's normal rates apply.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MeshSatTextSecondary,
                 )
-            }
-
-            OutlinedTextField(
-                value = hubHealthIntervalInput,
-                onValueChange = { hubHealthIntervalInput = it.filter { c -> c.isDigit() }.take(4) },
-                label = { Text("Health interval (seconds)", style = MaterialTheme.typography.bodySmall) },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                modifier = Modifier.fillMaxWidth(),
-                textStyle = MaterialTheme.typography.bodyMedium,
-                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = MeshSatTeal, unfocusedBorderColor = MeshSatBorder),
-            )
-
-            // --- Hub relay client (MESHSAT-1157): fallback tunnel to one kit through the Hub ---
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("Hub relay to a kit (fallback)", style = MaterialTheme.typography.bodyMedium)
-                Switch(
-                    checked = hubRelayEnabled,
-                    onCheckedChange = { scope.launch { settings.setHubRelayEnabled(it) } },
-                    colors = SwitchDefaults.colors(checkedTrackColor = MeshSatTeal),
-                )
-            }
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    value = hubRelayTargetInput,
-                    onValueChange = { hubRelayTargetInput = it },
-                    label = { Text("Relay target bridge ID", style = MaterialTheme.typography.bodySmall) },
-                    placeholder = { Text("kit-a", style = MaterialTheme.typography.bodySmall, color = MeshSatTextMuted) },
-                    singleLine = true, modifier = Modifier.weight(1f),
-                    textStyle = MaterialTheme.typography.bodyMedium,
-                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = MeshSatTeal, unfocusedBorderColor = MeshSatBorder),
-                )
-                OutlinedTextField(
-                    value = hubRelayUrlInput,
-                    onValueChange = { hubRelayUrlInput = it },
-                    label = { Text("Hub API URL (optional)", style = MaterialTheme.typography.bodySmall) },
-                    placeholder = { Text("derived from MQTT URL", style = MaterialTheme.typography.bodySmall, color = MeshSatTextMuted) },
-                    singleLine = true, modifier = Modifier.weight(1f),
-                    textStyle = MaterialTheme.typography.bodyMedium,
-                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = MeshSatTeal, unfocusedBorderColor = MeshSatBorder),
-                )
-            }
-
-            Button(
-                onClick = {
-                    scope.launch {
-                        settings.setHubUrl(hubUrlInput)
-                        settings.setHubBridgeId(hubBridgeIdInput)
-                        settings.setHubCallsign(hubCallsignInput)
-                        settings.setHubUsername(hubUsernameInput)
-                        settings.setHubPassword(hubPasswordInput)
-                        settings.setHubHealthInterval(hubHealthIntervalInput)
-                        settings.setHubRelayTarget(hubRelayTargetInput)
-                        settings.setHubRelayUrl(hubRelayUrlInput)
+                if (!smsGranted) {
+                    Button(
+                        onClick = { smsLauncher.launch(smsPermissions) },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("Allow SMS")
                     }
-                    Toast.makeText(context, "Hub Reporter settings saved (restart to apply)", Toast.LENGTH_SHORT).show()
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = MeshSatTeal),
-            ) {
-                Text("Save", style = MaterialTheme.typography.bodySmall)
+                }
             }
-
-            Text(
-                text = "Connect to MeshSat Hub as a mobile field node. " +
-                    "Publishes birth/health/position to the fleet dashboard and TAK map. " +
-                    "Leave Bridge ID blank to use Android device ID.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MeshSatTextMuted,
-            )
         }
+        if (section.shows(SetupSection.Sms)) {
+            SectionCard("Kit phone number") {
+                OutlinedTextField(
+                    value = phoneInput,
+                    onValueChange = { phoneInput = it },
+                    label = { Text("Kit phone number, e.g. +31612345678", style = MaterialTheme.typography.bodySmall) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    textStyle = MaterialTheme.typography.bodyMedium,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = MeshSatTeal,
+                        unfocusedBorderColor = MeshSatBorder,
+                    ),
+                )
 
-        SectionCard("MeshSat Pi") {
-            OutlinedTextField(
-                value = phoneInput,
-                onValueChange = { phoneInput = it },
-                label = { Text("Pi cellular phone number", style = MaterialTheme.typography.bodySmall) },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-                textStyle = MaterialTheme.typography.bodyMedium,
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = MeshSatTeal,
-                    unfocusedBorderColor = MeshSatBorder,
-                ),
-            )
+                Button(
+                    onClick = {
+                        scope.launch { settings.setMeshsatPiPhone(phoneInput) }
+                        Toast.makeText(context, "Saved", Toast.LENGTH_SHORT).show()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MeshSatTeal),
+                ) {
+                    Text("Save", style = MaterialTheme.typography.bodySmall)
+                }
 
-            Button(
-                onClick = {
-                    scope.launch { settings.setMeshsatPiPhone(phoneInput) }
-                    Toast.makeText(context, "Saved", Toast.LENGTH_SHORT).show()
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = MeshSatTeal),
-            ) {
-                Text("Save", style = MaterialTheme.typography.bodySmall)
+                Text(
+                    text = "The number of the SIM card in your MeshSat kit. SOS texts and encrypted SMS to the kit go to this number.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MeshSatTextMuted,
+                )
             }
-
-            Text(
-                text = "Phone number of the SIM card in MeshSat Pi's cellular modem. Used for sending encrypted SMS to the Pi.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MeshSatTextMuted,
-            )
-        }
-
-        // --- Crypto Tool ---
-        Button(
-            onClick = { navController?.navigate("decrypt") },
-            colors = ButtonDefaults.buttonColors(containerColor = MeshSatSurface),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text("Encrypt / Decrypt Tool", style = MaterialTheme.typography.bodyMedium)
-        }
-
-        // --- Phase I: Interface Management ---
-        Button(
-            onClick = { navController?.navigate("interfaces") },
-            colors = ButtonDefaults.buttonColors(containerColor = MeshSatSurface),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text("Interface Management", style = MaterialTheme.typography.bodyMedium)
-        }
-
-        // --- Phase L: Radio Config ---
-        Button(
-            onClick = { navController?.navigate("radio-config") },
-            colors = ButtonDefaults.buttonColors(containerColor = MeshSatSurface),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text("Radio Configuration", style = MaterialTheme.typography.bodyMedium)
-        }
-
-        // --- Phase J: Satellite Pass Predictor ---
-        Button(
-            onClick = { navController?.navigate("passes") },
-            colors = ButtonDefaults.buttonColors(containerColor = MeshSatSurface),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text("Satellite Pass Predictor", style = MaterialTheme.typography.bodyMedium)
-        }
-
-        // --- Phase G Screens ---
-        Button(
-            onClick = { navController?.navigate("topology") },
-            colors = ButtonDefaults.buttonColors(containerColor = MeshSatSurface),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text("Mesh Topology View", style = MaterialTheme.typography.bodyMedium)
-        }
-
-        Button(
-            onClick = { navController?.navigate("deliveries") },
-            colors = ButtonDefaults.buttonColors(containerColor = MeshSatSurface),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text("Delivery Status", style = MaterialTheme.typography.bodyMedium)
-        }
-
-        Button(
-            onClick = { navController?.navigate("geofence") },
-            colors = ButtonDefaults.buttonColors(containerColor = MeshSatSurface),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text("Geofence Zones", style = MaterialTheme.typography.bodyMedium)
-        }
-
-        Button(
-            onClick = { navController?.navigate("audit") },
-            colors = ButtonDefaults.buttonColors(containerColor = MeshSatSurface),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text("Audit Log", style = MaterialTheme.typography.bodyMedium)
         }
 
         // --- Offline Maps ---
-        SectionCard("Offline Maps") {
-            var offlineEnabled by remember { mutableStateOf(false) }
-            var offlineFile by remember { mutableStateOf("") }
-            var mapFiles by remember { mutableStateOf<List<MBTilesManager.MBTilesInfo>>(emptyList()) }
-            var importing by remember { mutableStateOf(false) }
+        if (section.shows(SetupSection.Maps)) {
+            SectionCard("Offline maps") {
+                var offlineEnabled by remember { mutableStateOf(false) }
+                var offlineFile by remember { mutableStateOf("") }
+                var mapFiles by remember { mutableStateOf<List<MBTilesManager.MBTilesInfo>>(emptyList()) }
+                var importing by remember { mutableStateOf(false) }
 
-            LaunchedEffect(Unit) {
-                offlineEnabled = settings.offlineMapEnabled.first()
-                offlineFile = settings.offlineMapFile.first()
-                mapFiles = withContext(Dispatchers.IO) { MBTilesManager.listFiles(context) }
-            }
+                LaunchedEffect(Unit) {
+                    offlineEnabled = settings.offlineMapEnabled.first()
+                    offlineFile = settings.offlineMapFile.first()
+                    mapFiles = withContext(Dispatchers.IO) { MBTilesManager.listFiles(context) }
+                }
 
-            val mbtilesPickerLauncher = rememberLauncherForActivityResult(
-                ActivityResultContracts.OpenDocument()
-            ) { uri ->
-                if (uri == null) return@rememberLauncherForActivityResult
-                scope.launch {
-                    try {
-                        importing = true
-                        val filename = withContext(Dispatchers.IO) {
-                            MBTilesManager.import(context, uri)
+                val mbtilesPickerLauncher = rememberLauncherForActivityResult(
+                    ActivityResultContracts.OpenDocument()
+                ) { uri ->
+                    if (uri == null) return@rememberLauncherForActivityResult
+                    scope.launch {
+                        try {
+                            importing = true
+                            val filename = withContext(Dispatchers.IO) {
+                                MBTilesManager.import(context, uri)
+                            }
+                            settings.setOfflineMapFile(filename)
+                            settings.setOfflineMapEnabled(true)
+                            offlineFile = filename
+                            offlineEnabled = true
+                            mapFiles = withContext(Dispatchers.IO) { MBTilesManager.listFiles(context) }
+                            Toast.makeText(context, "Map imported: $filename", Toast.LENGTH_SHORT).show()
+                        } catch (e: Exception) {
+                            Toast.makeText(context, "Import failed: ${e.message}", Toast.LENGTH_LONG).show()
+                        } finally {
+                            importing = false
                         }
-                        settings.setOfflineMapFile(filename)
-                        settings.setOfflineMapEnabled(true)
-                        offlineFile = filename
-                        offlineEnabled = true
-                        mapFiles = withContext(Dispatchers.IO) { MBTilesManager.listFiles(context) }
-                        Toast.makeText(context, "Map imported: $filename", Toast.LENGTH_SHORT).show()
-                    } catch (e: Exception) {
-                        Toast.makeText(context, "Import failed: ${e.message}", Toast.LENGTH_LONG).show()
-                    } finally {
-                        importing = false
                     }
                 }
-            }
 
-            // Enable/disable toggle
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("Use Offline Tiles", style = MaterialTheme.typography.bodyMedium)
-                    Text(
-                        "Serve map tiles from imported MBTiles file",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MeshSatTextMuted,
+                // Enable/disable toggle
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Use Offline Tiles", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "Serve map tiles from imported MBTiles file",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MeshSatTextMuted,
+                        )
+                    }
+                    Switch(
+                        checked = offlineEnabled,
+                        onCheckedChange = { enabled ->
+                            offlineEnabled = enabled
+                            scope.launch { settings.setOfflineMapEnabled(enabled) }
+                        },
+                        colors = SwitchDefaults.colors(checkedTrackColor = MeshSatTeal),
                     )
                 }
-                Switch(
-                    checked = offlineEnabled,
-                    onCheckedChange = { enabled ->
-                        offlineEnabled = enabled
-                        scope.launch { settings.setOfflineMapEnabled(enabled) }
-                    },
-                    colors = SwitchDefaults.colors(checkedTrackColor = MeshSatTeal),
-                )
-            }
 
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // Import button
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                OutlinedButton(
-                    onClick = {
-                        mbtilesPickerLauncher.launch(arrayOf("application/octet-stream", "application/x-sqlite3", "*/*"))
-                    },
-                    enabled = !importing,
-                ) {
-                    Text("Import MBTiles")
-                }
-                if (importing) {
-                    CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                    Text("Importing...", style = MaterialTheme.typography.bodySmall, color = MeshSatTextMuted)
-                }
-            }
-
-            // Imported map list
-            if (mapFiles.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(8.dp))
-                mapFiles.forEach { info ->
-                    val isActive = info.filename == offlineFile
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(
-                                if (isActive) MeshSatTeal.copy(alpha = 0.1f) else Color.Transparent,
-                                RoundedCornerShape(6.dp),
-                            )
-                            .border(
-                                1.dp,
-                                if (isActive) MeshSatTeal.copy(alpha = 0.4f) else MeshSatBorder,
-                                RoundedCornerShape(6.dp),
-                            )
-                            .clickable {
-                                offlineFile = info.filename
-                                offlineEnabled = true
-                                scope.launch {
-                                    settings.setOfflineMapFile(info.filename)
-                                    settings.setOfflineMapEnabled(true)
-                                }
-                            }
-                            .padding(10.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
+
+                // Import button
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    OutlinedButton(
+                        onClick = {
+                            mbtilesPickerLauncher.launch(arrayOf("application/octet-stream", "application/x-sqlite3", "*/*"))
+                        },
+                        enabled = !importing,
                     ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = info.name,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = if (isActive) MeshSatTeal else Color.Unspecified,
-                            )
-                            val sizeMb = "%.1f MB".format(info.sizeBytes / 1_048_576.0)
-                            val zoomRange = when {
-                                info.minZoom != null && info.maxZoom != null -> "z${info.minZoom}-${info.maxZoom}"
-                                else -> ""
-                            }
-                            Text(
-                                text = listOf(sizeMb, info.format.uppercase(), zoomRange)
-                                    .filter { it.isNotBlank() }.joinToString(" \u00B7 "),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MeshSatTextMuted,
-                            )
-                        }
-                        IconButton(onClick = {
-                            scope.launch {
-                                withContext(Dispatchers.IO) { MBTilesManager.delete(context, info.filename) }
-                                mapFiles = withContext(Dispatchers.IO) { MBTilesManager.listFiles(context) }
-                                if (offlineFile == info.filename) {
-                                    offlineFile = ""
-                                    offlineEnabled = false
-                                    settings.setOfflineMapFile("")
-                                    settings.setOfflineMapEnabled(false)
-                                }
-                                Toast.makeText(context, "Deleted: ${info.name}", Toast.LENGTH_SHORT).show()
-                            }
-                        }) {
-                            Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MeshSatTextMuted)
-                        }
+                        Text("Import MBTiles")
                     }
-                    Spacer(modifier = Modifier.height(4.dp))
+                    if (importing) {
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                        Text("Importing...", style = MaterialTheme.typography.bodySmall, color = MeshSatTextMuted)
+                    }
                 }
-            } else if (!importing) {
-                Text(
-                    "No offline maps imported. Use MBTiles files from OpenStreetMap or OpenMapTiles.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MeshSatTextMuted,
-                    modifier = Modifier.padding(top = 4.dp),
-                )
+
+                // Imported map list
+                if (mapFiles.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    mapFiles.forEach { info ->
+                        val isActive = info.filename == offlineFile
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(
+                                    if (isActive) MeshSatTeal.copy(alpha = 0.1f) else Color.Transparent,
+                                    RoundedCornerShape(6.dp),
+                                )
+                                .border(
+                                    1.dp,
+                                    if (isActive) MeshSatTeal.copy(alpha = 0.4f) else MeshSatBorder,
+                                    RoundedCornerShape(6.dp),
+                                )
+                                .clickable {
+                                    offlineFile = info.filename
+                                    offlineEnabled = true
+                                    scope.launch {
+                                        settings.setOfflineMapFile(info.filename)
+                                        settings.setOfflineMapEnabled(true)
+                                    }
+                                }
+                                .padding(10.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = info.name,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = if (isActive) MeshSatTeal else Color.Unspecified,
+                                )
+                                val sizeMb = "%.1f MB".format(info.sizeBytes / 1_048_576.0)
+                                val zoomRange = when {
+                                    info.minZoom != null && info.maxZoom != null -> "z${info.minZoom}-${info.maxZoom}"
+                                    else -> ""
+                                }
+                                Text(
+                                    text = listOf(sizeMb, info.format.uppercase(), zoomRange)
+                                        .filter { it.isNotBlank() }.joinToString(" \u00B7 "),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MeshSatTextMuted,
+                                )
+                            }
+                            IconButton(onClick = {
+                                scope.launch {
+                                    withContext(Dispatchers.IO) { MBTilesManager.delete(context, info.filename) }
+                                    mapFiles = withContext(Dispatchers.IO) { MBTilesManager.listFiles(context) }
+                                    if (offlineFile == info.filename) {
+                                        offlineFile = ""
+                                        offlineEnabled = false
+                                        settings.setOfflineMapFile("")
+                                        settings.setOfflineMapEnabled(false)
+                                    }
+                                    Toast.makeText(context, "Deleted: ${info.name}", Toast.LENGTH_SHORT).show()
+                                }
+                            }) {
+                                Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MeshSatTextMuted)
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                    }
+                } else if (!importing) {
+                    Text(
+                        "No offline maps imported. Use MBTiles files from OpenStreetMap or OpenMapTiles.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MeshSatTextMuted,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+                }
             }
         }
 
         // --- Telemetry (MESHSAT-494) ---
-        SectionCard("Release Telemetry") {
-            val telemetryEnabled by settings.telemetryEnabled.collectAsState(initial = true)
+        if (section.shows(SetupSection.Diagnostics)) {
+            SectionCard("Crash reports") {
+                val telemetryEnabled by settings.telemetryEnabled.collectAsState(initial = true)
 
-            SettingRow("Enable local telemetry") {
-                Switch(
-                    checked = telemetryEnabled,
-                    onCheckedChange = { scope.launch { settings.setTelemetryEnabled(it) } },
-                    colors = SwitchDefaults.colors(checkedTrackColor = MeshSatTeal),
+                SettingRow("Enable local telemetry") {
+                    Switch(
+                        checked = telemetryEnabled,
+                        onCheckedChange = { scope.launch { settings.setTelemetryEnabled(it) } },
+                        colors = SwitchDefaults.colors(checkedTrackColor = MeshSatTeal),
+                    )
+                }
+
+                Text(
+                    "Captures crashes, heap samples, and health heartbeats locally on this device. " +
+                        "Nothing is sent externally. Retrievable via localhost:6051/api/telemetry.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MeshSatTextMuted,
                 )
             }
-
-            Text(
-                "Captures crashes, heap samples, and health heartbeats locally on this device. " +
-                    "Nothing is sent externally. Retrievable via localhost:6051/api/telemetry.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MeshSatTextMuted,
-            )
         }
 
         // --- Service ---
-        SectionCard("Service") {
-            var showRestartDialog by remember { mutableStateOf(false) }
+        if (section.shows(SetupSection.Diagnostics)) {
+            SectionCard("Background service") {
+                var showRestartDialog by remember { mutableStateOf(false) }
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("Restart Gateway Service", style = MaterialTheme.typography.bodyMedium)
-                    Text(
-                        "Stop and restart all transports",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MeshSatTextMuted,
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Restart Gateway Service", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "Stop and restart all transports",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MeshSatTextMuted,
+                        )
+                    }
+                    OutlinedButton(
+                        onClick = { showRestartDialog = true },
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFE57373)),
+                    ) {
+                        Text("Restart")
+                    }
+                }
+
+                if (showRestartDialog) {
+                    AlertDialog(
+                        onDismissRequest = { showRestartDialog = false },
+                        title = { Text("Restart Service?") },
+                        text = {
+                            Text(
+                                "This will disconnect all transports and restart the gateway service. " +
+                                    "It should take a few seconds.",
+                            )
+                        },
+                        confirmButton = {
+                            Button(
+                                onClick = {
+                                    showRestartDialog = false
+                                    GatewayService.scheduleRestart(context)
+                                    Toast.makeText(context, "Service restarting...", Toast.LENGTH_SHORT).show()
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE57373)),
+                            ) {
+                                Text("Restart")
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { showRestartDialog = false }) {
+                                Text("Cancel")
+                            }
+                        },
                     )
                 }
-                OutlinedButton(
-                    onClick = { showRestartDialog = true },
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFE57373)),
-                ) {
-                    Text("Restart")
-                }
-            }
-
-            if (showRestartDialog) {
-                AlertDialog(
-                    onDismissRequest = { showRestartDialog = false },
-                    title = { Text("Restart Service?") },
-                    text = {
-                        Text(
-                            "This will disconnect all transports and restart the gateway service. " +
-                                "It should take a few seconds.",
-                        )
-                    },
-                    confirmButton = {
-                        Button(
-                            onClick = {
-                                showRestartDialog = false
-                                GatewayService.scheduleRestart(context)
-                                Toast.makeText(context, "Service restarting...", Toast.LENGTH_SHORT).show()
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE57373)),
-                        ) {
-                            Text("Restart")
-                        }
-                    },
-                    dismissButton = {
-                        TextButton(onClick = { showRestartDialog = false }) {
-                            Text("Cancel")
-                        }
-                    },
-                )
             }
         }
 
-        // --- About ---
-        Button(
-            onClick = { navController?.navigate("about") },
-            colors = ButtonDefaults.buttonColors(containerColor = MeshSatSurface),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text("About MeshSat Android", style = MaterialTheme.typography.bodyMedium)
-        }
     }
 }
 

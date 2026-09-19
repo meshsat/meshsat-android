@@ -672,8 +672,7 @@ class SettingsRepository(private val context: Context) {
     // --- Dashboard widget order (MESHSAT-401) ---
 
     val dashboardOrder: Flow<String> = context.dataStore.data.map {
-        it[stringPreferencesKey("dashboard_card_order")]
-            ?: "transports,signals,sos,location,queue,burst,reticulum,activity"
+        it[stringPreferencesKey("dashboard_card_order")] ?: ""
     }
 
     suspend fun setDashboardOrder(order: String) {

@@ -112,11 +112,6 @@ fun InterfacesScreen() {
             .padding(16.dp),
     ) {
         Text(
-            text = "Interfaces",
-            style = MaterialTheme.typography.headlineMedium,
-            modifier = Modifier.padding(bottom = 4.dp),
-        )
-        Text(
             text = "Transport configuration and health monitoring",
             style = MaterialTheme.typography.bodySmall,
             color = MeshSatTextMuted,

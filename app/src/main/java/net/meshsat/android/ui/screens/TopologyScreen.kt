@@ -78,10 +78,6 @@ fun TopologyScreen() {
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text(
-            text = "Mesh Topology",
-            style = MaterialTheme.typography.headlineMedium,
-        )
 
         if (!connected || nodes.isEmpty()) {
             Box(

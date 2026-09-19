@@ -95,7 +95,7 @@ import java.util.Date
 import java.util.Locale
 
 @Composable
-fun DashboardScreen() {
+fun DashboardScreen(navigate: (String) -> Unit = {}) {
     val context = LocalContext.current
     val db = AppDatabase.getInstance(context)
 
@@ -195,13 +195,12 @@ fun DashboardScreen() {
     // --- Dashboard card order (MESHSAT-401) ---
     val scope = rememberCoroutineScope()
     val settings = remember { net.meshsat.android.data.SettingsRepository(context) }
-    val defaultOrder = "transports,signals,sos,location,queue,burst,reticulum,activity"
-    var cardOrder by remember { mutableStateOf(defaultOrder.split(",")) }
+    var cardOrder by remember { mutableStateOf(HOME_CARDS) }
     var showReorderDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         val saved = settings.dashboardOrder.first()
-        cardOrder = saved.split(",").filter { it.isNotBlank() }
+        cardOrder = homeOrder(saved)
     }
 
     if (showReorderDialog) {
@@ -222,380 +221,319 @@ fun DashboardScreen() {
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = "Dashboard",
-                    style = MaterialTheme.typography.headlineMedium,
-                )
-                IconButton(onClick = { showReorderDialog = true }) {
-                    Text(
-                        text = "\u2630",
-                        color = MeshSatTextMuted,
-                        style = MaterialTheme.typography.titleLarge,
-                    )
-                }
-            }
-        }
+        item { HomeHeader(onArrange = { showReorderDialog = true }) }
+        item { HomeLanes(navigate) }
 
-        // ====== 1. Transport Status Cards (horizontal scroll) ======
-        item {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
-                    .height(IntrinsicSize.Min),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                // Iridium SBD
-                val sig = iridiumSignal?.value ?: 0
-                TransportStatusCard(
-                    title = "Iridium SBD",
-                    borderColor = ColorIridium,
-                    isOnline = iridiumConnected,
-                    metric = if (iridiumConnected) "$sig/5" else "--",
-                    metricLabel = "Signal",
-                    details = listOf(
-                        "IMEI" to (modemInfo?.value?.imei?.ifBlank { "--" } ?: "--"),
-                    ),
-                    modifier = Modifier.width(160.dp).fillMaxHeight(),
-                )
-
-                // Meshtastic LoRa
-                val rssi = meshRssi?.value ?: 0
-                val nodeCount = meshNodes?.value?.size ?: 0
-                TransportStatusCard(
-                    title = "Meshtastic LoRa",
-                    borderColor = ColorMesh,
-                    isOnline = meshConnected,
-                    metric = when {
-                        meshConnected -> if (rssi != 0) "${rssi}dBm" else "OK"
-                        meshConnecting -> "..."
-                        else -> "--"
-                    },
-                    metricLabel = "RSSI",
-                    details = listOf(
-                        "Nodes" to "$nodeCount",
-                    ),
-                    modifier = Modifier.width(160.dp).fillMaxHeight(),
-                )
-
-                // Cellular SMS
-                val latestCell = cellularHistory.lastOrNull()?.value
-                TransportStatusCard(
-                    title = "Cellular SMS",
-                    borderColor = ColorCellular,
-                    isOnline = true,
-                    metric = if (latestCell != null) "${latestCell}dBm" else "Ready",
-                    metricLabel = "Signal",
-                    details = listOf(
-                        "Today" to "$smsToday SMS",
-                    ),
-                    modifier = Modifier.width(160.dp).fillMaxHeight(),
-                )
-            }
-        }
-
-        // ====== Iridium mailbox, on request only: each check is billed (MESHSAT-400) ======
-        if (iridiumConnected) {
-            item {
-                DashboardCard(title = "Iridium Mailbox") {
-                    net.meshsat.android.ui.components.CheckMailboxButton()
-                }
-            }
-        }
-
-        // ====== 2. Signal History Charts ======
-        if (iridiumHistory.isNotEmpty()) {
-            item {
-                SignalChart(
-                    title = "Iridium Signal (6h)",
-                    records = iridiumHistory,
-                    maxValue = 5f,
-                    minValue = 0f,
-                    color = ColorIridium,
-                    formatValue = { "${it.toInt()}/5" },
-                )
-            }
-        }
-
-        if (meshHistory.isNotEmpty()) {
-            item {
-                SignalChart(
-                    title = "Mesh RSSI (6h)",
-                    records = meshHistory,
-                    maxValue = -30f,
-                    minValue = -100f,
-                    color = ColorMesh,
-                    formatValue = { "${it.toInt()}dBm" },
-                )
-            }
-        }
-
-        if (cellularHistory.isNotEmpty()) {
-            item {
-                SignalChart(
-                    title = "Cellular Signal (6h)",
-                    records = cellularHistory,
-                    maxValue = -50f,
-                    minValue = -120f,
-                    color = ColorCellular,
-                    formatValue = { "${it.toInt()}dBm" },
-                )
-            }
-        }
-
-        // ====== 3. SOS Card ======
-        item {
-            DashboardCard(title = "SOS Emergency") {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    // Status indicator
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(10.dp)
-                                .clip(CircleShape)
-                                .background(if (sosActive) MeshSatRed else MeshSatTextMuted)
-                        )
-                        Text(
-                            text = if (sosActive) "ARMED" else "Disarmed",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = if (sosActive) FontWeight.Bold else FontWeight.Normal,
-                            color = if (sosActive) MeshSatRed else MeshSatTextMuted,
-                        )
+        // The cards below follow the order set with Arrange (MESHSAT-401), which the old layout
+        // saved but never applied (MESHSAT-1249).
+        for (card in cardOrder) {
+            when (card) {
+                "mailbox" -> {
+                // ====== Iridium mailbox, on request only: each check is billed (MESHSAT-400) ======
+                if (iridiumConnected) {
+                    item {
+                        DashboardCard(title = "Iridium Mailbox") {
+                            net.meshsat.android.ui.components.CheckMailboxButton()
+                        }
                     }
-
-                    if (sosActive) {
-                        Text(
-                            text = "Sends: $sosSends/3",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = MeshSatRed,
+                }
+                }
+                "signals" -> {
+                // ====== 2. Signal History Charts ======
+                if (iridiumHistory.isNotEmpty()) {
+                    item {
+                        SignalChart(
+                            title = "Iridium Signal (6h)",
+                            records = iridiumHistory,
+                            maxValue = 5f,
+                            minValue = 0f,
+                            color = ColorIridium,
+                            formatValue = { "${it.toInt()}/5" },
                         )
                     }
                 }
 
-                Spacer(modifier = Modifier.height(8.dp))
+                if (meshHistory.isNotEmpty()) {
+                    item {
+                        SignalChart(
+                            title = "Mesh RSSI (6h)",
+                            records = meshHistory,
+                            maxValue = -30f,
+                            minValue = -100f,
+                            color = ColorMesh,
+                            formatValue = { "${it.toInt()}dBm" },
+                        )
+                    }
+                }
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    if (sosActive) {
-                        Button(
-                            onClick = {
-                                context.startService(
-                                    Intent(context, GatewayService::class.java)
-                                        .setAction(GatewayService.ACTION_SOS_CANCEL)
+                if (cellularHistory.isNotEmpty()) {
+                    item {
+                        SignalChart(
+                            title = "Cellular Signal (6h)",
+                            records = cellularHistory,
+                            maxValue = -50f,
+                            minValue = -120f,
+                            color = ColorCellular,
+                            formatValue = { "${it.toInt()}dBm" },
+                        )
+                    }
+                }
+                }
+                "sos" -> {
+                // ====== 3. SOS Card ======
+                item {
+                    DashboardCard(title = "SOS Emergency") {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            // Status indicator
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(10.dp)
+                                        .clip(CircleShape)
+                                        .background(if (sosActive) MeshSatRed else MeshSatTextMuted)
                                 )
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = MeshSatRed),
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            Text("CANCEL SOS")
-                        }
-                    } else {
-                        Button(
-                            onClick = { showSosDialog = true },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = MeshSatAmber,
-                                contentColor = Color.Black,
-                            ),
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            Text("ARM SOS", fontWeight = FontWeight.Bold)
-                        }
-
-                        OutlinedButton(
-                            onClick = {
-                                Toast.makeText(context, "Test SOS sent", Toast.LENGTH_SHORT).show()
-                            },
-                        ) {
-                            Text("Send Test")
-                        }
-                    }
-                }
-            }
-        }
-
-        // ====== 4. Location Card ======
-        item {
-            DashboardCard(title = "Location") {
-                val loc = phoneLocation
-                if (loc != null) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                    ) {
-                        Text(
-                            text = "%.6f, %.6f".format(loc.latitude, loc.longitude),
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                        Text(
-                            text = fixAgeText,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MeshSatTextMuted,
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(4.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    ) {
-                        InfoPair("Alt", "${loc.altitude.toInt()}m")
-                        InfoPair("Acc", "${loc.accuracy.toInt()}m")
-                        if (loc.hasSpeed()) InfoPair("Spd", "%.1f m/s".format(loc.speed))
-                        if (loc.hasBearing()) InfoPair("Hdg", "${loc.bearing.toInt()}\u00B0")
-                    }
-
-                    Text(
-                        text = "Source: ${loc.provider ?: "unknown"}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MeshSatTextMuted,
-                        modifier = Modifier.padding(top = 2.dp),
-                    )
-                } else {
-                    Text(
-                        text = "Waiting for GPS fix...",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MeshSatTextMuted,
-                    )
-                }
-            }
-        }
-
-        // ====== 5. Message Queue Card ======
-        item {
-            DashboardCard(title = "Message Queue") {
-                // Per-interface queue bars
-                QueueBar("Mesh", meshQueueDepth, ColorMesh)
-                QueueBar("Iridium", iridiumQueueDepth, ColorIridium)
-                QueueBar("SMS", smsQueueDepth, ColorCellular)
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
-                ) {
-                    StatBadge("Queued", queuedCount, MeshSatTeal)
-                    StatBadge("Pending", pendingCount, MeshSatAmber)
-                    StatBadge("Failed", failedCount, MeshSatRed)
-                    StatBadge("Dead", deadCount, MeshSatTextMuted)
-                }
-            }
-        }
-
-        // ====== 6. Burst Queue Card ======
-        item {
-            DashboardCard(title = "Burst Queue") {
-                val mtu = BurstQueue.IRIDIUM_MTU
-                // Estimate bytes: header + per-msg overhead. Rough estimate since we
-                // can't read the actual pending list from outside the lock.
-                val estimatedBytes = if (burstPending > 0)
-                    BurstQueue.BURST_HEADER_LEN + burstPending * (BurstQueue.BURST_MSG_HEADER_LEN + 40)
-                else 0
-                val progress = (estimatedBytes.toFloat() / mtu).coerceIn(0f, 1f)
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = "$burstPending pending",
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                    Text(
-                        text = "~${estimatedBytes}B / ${mtu}B MTU",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MeshSatTextMuted,
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(4.dp))
-
-                LinearProgressIndicator(
-                    progress = { progress },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(6.dp)
-                        .clip(RoundedCornerShape(3.dp)),
-                    color = ColorIridium,
-                    trackColor = MeshSatBorder,
-                )
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = if (burstShouldFlush) "Ready to flush" else "Accumulating",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = if (burstShouldFlush) MeshSatAmber else MeshSatTextMuted,
-                    )
-
-                    OutlinedButton(
-                        onClick = {
-                            val bq = GatewayService.burstQueue
-                            if (bq != null) {
-                                val (payload, count) = bq.flush()
-                                Toast.makeText(
-                                    context,
-                                    if (count > 0) "Flushed $count messages" else "Queue empty",
-                                    Toast.LENGTH_SHORT
-                                ).show()
+                                Text(
+                                    text = if (sosActive) "ARMED" else "Disarmed",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = if (sosActive) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (sosActive) MeshSatRed else MeshSatTextMuted,
+                                )
                             }
-                        },
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                    ) {
-                        Text("Flush", style = MaterialTheme.typography.bodySmall)
+
+                            if (sosActive) {
+                                Text(
+                                    text = "Sends: $sosSends/3",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MeshSatRed,
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            if (sosActive) {
+                                Button(
+                                    onClick = {
+                                        context.startService(
+                                            Intent(context, GatewayService::class.java)
+                                                .setAction(GatewayService.ACTION_SOS_CANCEL)
+                                        )
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = MeshSatRed),
+                                    modifier = Modifier.weight(1f),
+                                ) {
+                                    Text("CANCEL SOS")
+                                }
+                            } else {
+                                Button(
+                                    onClick = { showSosDialog = true },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MeshSatAmber,
+                                        contentColor = Color.Black,
+                                    ),
+                                    modifier = Modifier.weight(1f),
+                                ) {
+                                    Text("ARM SOS", fontWeight = FontWeight.Bold)
+                                }
+
+                                OutlinedButton(
+                                    onClick = {
+                                        Toast.makeText(context, "Test SOS sent", Toast.LENGTH_SHORT).show()
+                                    },
+                                ) {
+                                    Text("Send Test")
+                                }
+                            }
+                        }
                     }
                 }
-            }
-        }
+                }
+                "location" -> {
+                // ====== 4. Location Card ======
+                item {
+                    DashboardCard(title = "Location") {
+                        val loc = phoneLocation
+                        if (loc != null) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                            ) {
+                                Text(
+                                    text = "%.6f, %.6f".format(loc.latitude, loc.longitude),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                )
+                                Text(
+                                    text = fixAgeText,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MeshSatTextMuted,
+                                )
+                            }
 
-        // ====== 7. Activity Log ======
-        item {
-            Text(
-                text = "Activity Log",
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.padding(top = 4.dp),
-            )
-        }
+                            Spacer(modifier = Modifier.height(4.dp))
 
-        if (recentMessages.isEmpty()) {
-            item {
-                Text(
-                    text = "No recent messages",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MeshSatTextMuted,
-                    modifier = Modifier.padding(vertical = 8.dp),
-                )
-            }
-        } else {
-            items(
-                items = recentMessages,
-                key = { it.id },
-            ) { msg ->
-                ActivityLogEntry(msg)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                            ) {
+                                InfoPair("Alt", "${loc.altitude.toInt()}m")
+                                InfoPair("Acc", "${loc.accuracy.toInt()}m")
+                                if (loc.hasSpeed()) InfoPair("Spd", "%.1f m/s".format(loc.speed))
+                                if (loc.hasBearing()) InfoPair("Hdg", "${loc.bearing.toInt()}\u00B0")
+                            }
+
+                            Text(
+                                text = "Source: ${loc.provider ?: "unknown"}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MeshSatTextMuted,
+                                modifier = Modifier.padding(top = 2.dp),
+                            )
+                        } else {
+                            Text(
+                                text = "Waiting for GPS fix...",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MeshSatTextMuted,
+                            )
+                        }
+                    }
+                }
+                }
+                "queue" -> {
+                // ====== 5. Message Queue Card ======
+                item {
+                    DashboardCard(title = "Message Queue") {
+                        // Per-interface queue bars
+                        QueueBar("Mesh", meshQueueDepth, ColorMesh)
+                        QueueBar("Iridium", iridiumQueueDepth, ColorIridium)
+                        QueueBar("SMS", smsQueueDepth, ColorCellular)
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceEvenly,
+                        ) {
+                            StatBadge("Queued", queuedCount, MeshSatTeal)
+                            StatBadge("Pending", pendingCount, MeshSatAmber)
+                            StatBadge("Failed", failedCount, MeshSatRed)
+                            StatBadge("Dead", deadCount, MeshSatTextMuted)
+                        }
+                    }
+                }
+                }
+                "burst" -> {
+                // ====== 6. Burst Queue Card ======
+                item {
+                    DashboardCard(title = "Burst Queue") {
+                        val mtu = BurstQueue.IRIDIUM_MTU
+                        // Estimate bytes: header + per-msg overhead. Rough estimate since we
+                        // can't read the actual pending list from outside the lock.
+                        val estimatedBytes = if (burstPending > 0)
+                            BurstQueue.BURST_HEADER_LEN + burstPending * (BurstQueue.BURST_MSG_HEADER_LEN + 40)
+                        else 0
+                        val progress = (estimatedBytes.toFloat() / mtu).coerceIn(0f, 1f)
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = "$burstPending pending",
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                            Text(
+                                text = "~${estimatedBytes}B / ${mtu}B MTU",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MeshSatTextMuted,
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(4.dp))
+
+                        LinearProgressIndicator(
+                            progress = { progress },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(6.dp)
+                                .clip(RoundedCornerShape(3.dp)),
+                            color = ColorIridium,
+                            trackColor = MeshSatBorder,
+                        )
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = if (burstShouldFlush) "Ready to flush" else "Accumulating",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (burstShouldFlush) MeshSatAmber else MeshSatTextMuted,
+                            )
+
+                            OutlinedButton(
+                                onClick = {
+                                    val bq = GatewayService.burstQueue
+                                    if (bq != null) {
+                                        val (payload, count) = bq.flush()
+                                        Toast.makeText(
+                                            context,
+                                            if (count > 0) "Flushed $count messages" else "Queue empty",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                    }
+                                },
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                            ) {
+                                Text("Flush", style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                    }
+                }
+                }
+                "activity" -> {
+                // ====== 7. Activity Log ======
+                item {
+                    Text(
+                        text = "Activity Log",
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+                }
+
+                if (recentMessages.isEmpty()) {
+                    item {
+                        Text(
+                            text = "No recent messages",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MeshSatTextMuted,
+                            modifier = Modifier.padding(vertical = 8.dp),
+                        )
+                    }
+                } else {
+                    items(
+                        items = recentMessages,
+                        key = { it.id },
+                    ) { msg ->
+                        ActivityLogEntry(msg)
+                    }
+                }
+                }
             }
         }
     }
@@ -638,81 +576,6 @@ fun DashboardScreen() {
 // ============================================================================
 // Composable components
 // ============================================================================
-
-/** Card wrapper with colored left border for transport status cards. */
-@Composable
-private fun TransportStatusCard(
-    title: String,
-    borderColor: Color,
-    isOnline: Boolean,
-    metric: String,
-    metricLabel: String,
-    details: List<Pair<String, String>>,
-    modifier: Modifier = Modifier,
-) {
-    Row(
-        modifier = modifier
-            .background(MeshSatSurface, RoundedCornerShape(8.dp))
-            .border(1.dp, MeshSatBorder, RoundedCornerShape(8.dp))
-            .clip(RoundedCornerShape(8.dp)),
-    ) {
-        // Colored left border strip
-        Box(
-            modifier = Modifier
-                .width(4.dp)
-                .fillMaxHeight()
-                .background(borderColor)
-        )
-
-        Column(
-            modifier = Modifier
-                .padding(10.dp)
-                .fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(8.dp)
-                        .clip(CircleShape)
-                        .background(if (isOnline) MeshSatGreen else MeshSatRed)
-                )
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.labelMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-
-            Text(
-                text = metric,
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-                color = borderColor,
-            )
-
-            Text(
-                text = metricLabel,
-                style = MaterialTheme.typography.labelSmall,
-                color = MeshSatTextMuted,
-            )
-
-            details.forEach { (label, value) ->
-                Text(
-                    text = "$label: $value",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MeshSatTextMuted,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        }
-    }
-}
 
 /** Reusable card container. */
 @Composable
@@ -1008,16 +871,29 @@ private fun ActivityLogEntry(msg: Message) {
 // Reorder Dialog (MESHSAT-401)
 // ============================================================================
 
+/** Home's cards, in their default order, and what Arrange calls them. */
+private val HOME_CARDS = listOf("sos", "queue", "location", "signals", "mailbox", "burst", "activity")
+
 private val CARD_LABELS = mapOf(
-    "transports" to "Transport Status",
-    "signals" to "Signal Charts",
-    "sos" to "SOS Emergency",
+    "sos" to "SOS",
+    "queue" to "Message queue",
     "location" to "Location",
-    "queue" to "Message Queue",
-    "burst" to "Burst Queue",
-    "reticulum" to "Reticulum Network",
-    "activity" to "Activity Log",
+    "signals" to "Signal history",
+    "mailbox" to "Satellite mailbox",
+    "burst" to "Satellite batch queue",
+    "activity" to "Recent messages",
 )
+
+/**
+ * The saved order, cleaned: cards that no longer exist ("transports" became the lanes, "reticulum"
+ * never existed) are dropped, and cards added since are appended.
+ */
+private fun homeOrder(saved: String): List<String> {
+    // Nobody arranged Home yet (empty, or the old built-in default): use the current default.
+    if (saved.isBlank() || saved == "transports,signals,sos,location,queue,burst,reticulum,activity") return HOME_CARDS
+    val kept = saved.split(",").map { it.trim() }.filter { it in HOME_CARDS }.distinct()
+    return kept + HOME_CARDS.filter { it !in kept }
+}
 
 @Composable
 private fun ReorderDialog(
@@ -1029,11 +905,11 @@ private fun ReorderDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Reorder Dashboard") },
+        title = { Text("Arrange Home") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(
-                    "Tap arrows to move widgets up or down.",
+                    "Move a card up or down. The lanes stay at the top.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MeshSatTextMuted,
                 )

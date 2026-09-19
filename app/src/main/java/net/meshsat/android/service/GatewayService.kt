@@ -122,6 +122,11 @@ class GatewayService : Service() {
             val finishedAt: Long = 0,
         )
 
+        private val _passes = MutableStateFlow<List<net.meshsat.android.satellite.PassPrediction>>(emptyList())
+
+        /** The last pass predictions for the phone's position, for Home's satellite lane. */
+        val passes: StateFlow<List<net.meshsat.android.satellite.PassPrediction>> = _passes
+
         private val _mailbox = MutableStateFlow(MailboxCheck())
         val mailbox: StateFlow<MailboxCheck> = _mailbox
 
@@ -1105,6 +1110,7 @@ class GatewayService : Service() {
                     Log.i("MeshSat", "Pass prediction: ${parsed.size} TLEs (${tleSet.source}, ${tleSet.ageSec() / 3600}h old), ${sorted.size} passes, ${elapsedMs}ms")
                     cachedPasses = sorted
                     latestPasses = sorted
+                    _passes.value = sorted
                     cacheTimestampMs = nowMs
                     sorted
                 } else emptyList()

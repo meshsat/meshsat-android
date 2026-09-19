@@ -40,6 +40,9 @@ import net.meshsat.android.ui.theme.MeshSatTeal
 import net.meshsat.android.ui.theme.MeshSatTextMuted
 import net.meshsat.android.ui.theme.MeshSatTextSecondary
 import net.meshsat.android.ui.theme.PlexMono
+import androidx.compose.material3.Button
+import androidx.compose.ui.text.style.TextAlign
+import net.meshsat.android.ble.MeshtasticBle
 
 private enum class PeerSortMode(val label: String) {
     Name("Name"),
@@ -48,7 +51,7 @@ private enum class PeerSortMode(val label: String) {
 }
 
 @Composable
-fun PeersScreen() {
+fun PeersScreen(onConnect: () -> Unit = {}) {
     val nodes by GatewayService.meshtasticBle?.nodes?.collectAsState()
         ?: remember { mutableStateOf(emptyList()) }
 
@@ -74,7 +77,7 @@ fun PeersScreen() {
             .padding(16.dp),
     ) {
         Text(
-            text = "Peers",
+            text = "People",
             style = MaterialTheme.typography.headlineMedium,
             modifier = Modifier.padding(bottom = 4.dp),
         )
@@ -94,11 +97,31 @@ fun PeersScreen() {
                     .padding(top = 16.dp),
                 contentAlignment = Alignment.Center,
             ) {
-                Text(
-                    text = "No peers discovered yet.\nConnect to a Meshtastic radio.",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MeshSatTextMuted,
-                )
+                // Silence is not evidence of an empty mesh: a node only shows up once it transmits.
+                val meshUp = GatewayService.meshtasticBle?.state?.collectAsState()?.value == MeshtasticBle.State.Connected
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.padding(horizontal = 32.dp),
+                ) {
+                    Text(
+                        text = if (meshUp) "Your node is listening." else "Nobody heard yet.",
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    Text(
+                        text = if (meshUp) {
+                            "People appear here as soon as they transmit on the mesh."
+                        } else {
+                            "People appear here when your MeshSat node hears them on the mesh."
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MeshSatTextSecondary,
+                        textAlign = TextAlign.Center,
+                    )
+                    if (!meshUp) {
+                        Button(onClick = onConnect) { Text("Connect your node") }
+                    }
+                }
             }
         } else {
             // Sort header row (tap to cycle)
