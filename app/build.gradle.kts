@@ -65,6 +65,13 @@ android {
     androidResources {
         noCompress += listOf("onnx", "bin", "mbtiles")
     }
+
+    // No dependency metadata block in the APK or AAB: AGP encrypts it with a Google key,
+    // and F-Droid rejects APKs that carry one (MESHSAT-1258)
+    dependenciesInfo {
+        includeInApk = false
+        includeInBundle = false
+    }
 }
 
 protobuf {

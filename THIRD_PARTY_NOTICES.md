@@ -15,3 +15,13 @@ addition, the repository vendors or ships the following third-party material:
 
 `codebook_v1.bin` and `corpus_index.bin` are project-generated artefacts of
 the MSVQ-SC semantic codec, not third-party material.
+
+All four MSVQ-SC assets (`encoder.onnx`, `vocab.txt`, `codebook_v1.bin`,
+`corpus_index.bin`) are data, not code, and come from one script in the
+MeshSat Bridge repository (GPL-3.0): `sidecar/msvqsc/train.py` at
+`github.com/meshsat/meshsat`. It exports the encoder from all-MiniLM-L6-v2
+with INT8 quantisation, trains the residual codebook (8 stages of 1024
+entries, 384 dimensions) and embeds the corpus. The training corpus is the
+list built into that script, or a text file given with `--corpus`. Training
+starts from random values, so a rerun gives an equivalent codebook, not a
+byte-identical one.

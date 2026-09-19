@@ -1,0 +1,20 @@
+MeshSat turns an Android phone into a MeshSat gateway. Pair it with a MeshSat node, a pocket-sized box with a Meshtastic LoRa radio and a RockBLOCK 9603 Iridium modem, and one phone can send and receive over the mesh, by satellite and by SMS. It keeps working when the mobile network and the internet are gone. It also works with any plain Meshtastic radio, for the mesh only.
+
+Status: pre-release. This is a prototype under active development. It has never been deployed to a real user and has never been used in an actual emergency. Do not rely on it for your safety.
+
+What it does:
+
+• Mesh: Meshtastic over Bluetooth LE with the official protobufs: text, positions, telemetry, waypoints, node info and traceroute. A reply to a node goes to that node, not to the whole channel.
+• Satellite: Iridium SBD through the node's RockBLOCK 9603, up to 340 bytes out and 270 bytes in. Messages wait in a queue and are retried until they go out. The app opens a satellite session only when there is something to send, when the modem rings or when you check the mailbox, never on a timer, because every session costs a credit. Passes are predicted on the phone, with no internet needed.
+• SMS through the phone's own SIM, optionally encrypted per conversation with AES-256-GCM. Messages are compressed with MSVQ-SC, which is lossy: what arrives means the same, but may not be word for word what was sent.
+• APRS through a KISS TNC over TCP (Direwolf, for example) or directly to APRS-IS.
+• Hub, optional: the phone reports to a MeshSat Hub over MQTT with a client certificate and takes remote commands. The Hub is open source and can be self-hosted.
+• Reticulum: the phone runs as a Reticulum transport node and relays between its links.
+• Safety: hold the SOS button for 3 seconds and the SOS goes out on every route the phone has, each retried until it is sent, until you cancel it. A check-in timer and zones drawn on the map.
+• The map works offline down to country level. Night mode turns the whole app red.
+
+Satellite messaging needs a RockBLOCK modem and Iridium credits from a provider; Iridium is a paid commercial network.
+
+Permissions: Bluetooth and location, because Android needs location to scan for Bluetooth devices and the map shows where you are; SMS, to send and receive through your SIM; notifications. Starting after a phone restart is off until you switch it on.
+
+Documentation, and a table of what has and has not been verified: https://docs.meshsat.net/android/
