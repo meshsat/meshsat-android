@@ -282,7 +282,10 @@ class GatewayService : Service() {
 
         meshtasticBle = MeshtasticBle(this)
         registry.register("ble_mesh_0", meshtasticBle!!)
-        iridiumSpp = IridiumSpp()
+        iridiumSpp = IridiumSpp().also { spp ->
+            // Any satellite session can bring a message in: it is stored the moment it arrives.
+            spp.mtSink = { bytes -> storeIridiumMt(spp, String(bytes, Charsets.UTF_8)) }
+        }
         registry.register("iridium_spp_0", iridiumSpp!!)
         iridium9704Spp = net.meshsat.android.bt.Iridium9704Spp(this)
         registry.register("iridium_imt_0", iridium9704Spp!!)
@@ -2916,8 +2919,8 @@ class GatewayService : Service() {
 
         if (status.mtFlag) receiveIridiumMt(spp)
         if (ringAlert || status.raFlag || status.msgWaiting > 0) {
-            val result = spp.sbdix() ?: return
-            if (result.mtAvailable) receiveIridiumMt(spp)
+            // The session's message, if any, is stored by the modem's mtSink.
+            spp.sbdix()
         }
     }
 
