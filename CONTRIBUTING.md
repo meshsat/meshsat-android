@@ -29,11 +29,19 @@ Each transport requires specific hardware to test properly.
 - Pair via BLE from the app's scan screen
 - Test: send a message from the app, confirm it appears on the radio (and vice versa)
 
-### Iridium SPP
-- Requires an HC-05 Bluetooth adapter wired to a RockBLOCK 9603N / Iridium 9603N
-- HC-05 must be set to 19200 baud (`AT+UART=19200,0,0`)
-- Pair the HC-05 via Android Bluetooth settings first
-- Test: send an SBD message, confirm delivery via RockBLOCK portal or receiving device
+### Iridium (RockBLOCK 9603 on a MeshSat node)
+- Requires a MeshSat node: a Meshtastic radio running meshsat-firmware with a RockBLOCK 9603
+  on its serial port (see github.com/meshsat/meshsat-esp32). The app reaches the modem over the
+  node's Bluetooth Iridium service, on the same connection as the mesh; no HC-05 since 2.9.0.
+- Pair the node in the app: Setup > Your MeshSat node. Setup > Satellite shows the modem.
+- Free check with no satellite session: `POST http://127.0.0.1:6051/api/iridium/loopback?size=270`
+  (via `adb forward tcp:6051 tcp:6051`) writes, copies and reads back 270 bytes on the modem.
+- Test: send a message by satellite, confirm delivery in the Rock7 portal or on the Hub. Every
+  session that reaches the satellite network uses at least one credit.
+
+### Iridium (RockBLOCK 9704)
+- Requires an HC-05/06 Bluetooth serial adapter wired to a RockBLOCK 9704 (JSPR over serial),
+  paired in Android's Bluetooth settings first. Not yet tested on hardware.
 
 ### SMS
 - Requires a phone with an active SIM card and SMS permissions granted
@@ -48,7 +56,7 @@ When reporting test results for hardware, include:
 - **Android version** (e.g., Android 14, API 34)
 - **BLE chipset** (if known, from device specs)
 - **Radio firmware version** (for Meshtastic radios)
-- **HC-05 firmware version** (if testing Iridium path)
+- **Node firmware version** (meshsat-firmware build, if testing the satellite path)
 
 ## Pull Request Guidelines
 
