@@ -88,7 +88,6 @@ import net.meshsat.android.ui.theme.MeshSatTextMuted
 import net.meshsat.android.ui.theme.MeshSatTextSecondary
 import net.meshsat.android.ui.theme.ColorCellular
 import net.meshsat.android.codec.CannedCodebook
-import net.meshsat.android.ui.theme.ThemeState
 import androidx.compose.ui.graphics.Color
 import androidx.navigation.NavController
 import kotlinx.coroutines.launch
@@ -332,39 +331,6 @@ fun SettingsScreen(navController: NavController? = null) {
             text = "Settings",
             style = MaterialTheme.typography.headlineMedium,
         )
-
-        // --- Theme ---
-        SectionCard("Appearance") {
-            val darkModePref by ThemeState.darkMode.collectAsState()
-            val modes = listOf(true to "Dark", false to "Light", null to "System")
-            Text(
-                text = "Theme",
-                style = MaterialTheme.typography.bodySmall,
-                color = MeshSatTextMuted,
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                modes.forEach { (value, label) ->
-                    Text(
-                        text = label,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = if (darkModePref == value) MeshSatTeal else MeshSatTextMuted,
-                        modifier = Modifier
-                            .background(
-                                if (darkModePref == value) MeshSatTeal.copy(alpha = 0.15f)
-                                else Color.Transparent,
-                                RoundedCornerShape(12.dp),
-                            )
-                            .border(
-                                1.dp,
-                                if (darkModePref == value) MeshSatTeal else MeshSatBorder,
-                                RoundedCornerShape(12.dp),
-                            )
-                            .clickable { ThemeState.setDarkMode(value) }
-                            .padding(horizontal = 12.dp, vertical = 6.dp),
-                    )
-                }
-            }
-        }
 
         // --- Meshtastic BLE Section ---
         SectionCard("Meshtastic BLE") {

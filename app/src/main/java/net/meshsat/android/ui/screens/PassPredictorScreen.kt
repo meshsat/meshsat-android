@@ -79,6 +79,7 @@ import java.util.Locale
 import java.util.TimeZone
 import kotlin.math.min
 import kotlin.math.roundToInt
+import net.meshsat.android.ui.theme.PlexMono
 
 // Elevation environment presets matching Go web frontend
 private data class ElevPreset(val value: Int, val label: String, val desc: String)
@@ -651,7 +652,7 @@ private fun PassBanner(
                     Text(
                         countdownText,
                         style = MaterialTheme.typography.headlineSmall,
-                        fontFamily = FontFamily.Monospace,
+                        fontFamily = PlexMono,
                         fontWeight = FontWeight.Bold,
                         color = accentColor,
                     )
@@ -659,7 +660,7 @@ private fun PassBanner(
                 Text(
                     formatTimeUtc(pass.aosUnix),
                     style = MaterialTheme.typography.titleMedium,
-                    fontFamily = FontFamily.Monospace,
+                    fontFamily = PlexMono,
                     fontWeight = FontWeight.Bold,
                     color = if (showCountdown) MeshSatTextSecondary else accentColor,
                 )
@@ -741,7 +742,7 @@ private fun PassRow(pass: PassPrediction) {
         Text(
             text = "${formatTimeUtc(pass.aosUnix)}-${formatTimeUtc(pass.losUnix)}",
             style = MaterialTheme.typography.labelSmall,
-            fontFamily = FontFamily.Monospace,
+            fontFamily = PlexMono,
             color = MeshSatTextSecondary.copy(alpha = alpha),
             modifier = Modifier.weight(1f),
         )
@@ -750,7 +751,7 @@ private fun PassRow(pass: PassPrediction) {
         Text(
             text = formatDurationMin(pass.durationMin),
             style = MaterialTheme.typography.labelSmall,
-            fontFamily = FontFamily.Monospace,
+            fontFamily = PlexMono,
             color = MeshSatTextMuted.copy(alpha = alpha),
             modifier = Modifier.width(40.dp),
         )
@@ -779,7 +780,7 @@ private fun PassRow(pass: PassPrediction) {
             Text(
                 text = "${pass.peakElevDeg.roundToInt()}°",
                 style = MaterialTheme.typography.labelSmall,
-                fontFamily = FontFamily.Monospace,
+                fontFamily = PlexMono,
                 color = MeshSatTextMuted.copy(alpha = alpha),
             )
         }

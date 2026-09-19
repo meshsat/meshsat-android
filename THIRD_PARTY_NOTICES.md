@@ -10,6 +10,8 @@ addition, the repository vendors or ships the following third-party material:
 | `app/src/main/assets/encoder.onnx` | INT8-quantised ONNX export derived from `sentence-transformers/all-MiniLM-L6-v2` | Apache-2.0 |
 | `app/src/main/assets/vocab.txt` | WordPiece vocabulary (30.522 tokens) from the BERT uncased tokenizer | Apache-2.0 |
 | `app/src/main/assets/world.mbtiles` | Natural Earth raster world basemap (z0–z3) | Public domain (Natural Earth) |
+| `app/src/main/res/font/plex_*.ttf` (IBM Plex Sans 400/500/600, IBM Plex Mono 400/500) | IBM Plex (`github.com/IBM/plex`), the typeface of the MeshSat Bridge and brand | SIL Open Font License 1.1, Copyright 2017 IBM Corp., Reserved Font Name "Plex" |
+| `app/src/main/res/drawable*/brand_*.png`, `mipmap*/ic_launcher_*.png` | The approved MeshSat mark, extracted from `meshsat-website/brand/` without redrawing | MeshSat brand asset, not covered by the GPL; do not alter the mark |
 
 `codebook_v1.bin` and `corpus_index.bin` are project-generated artefacts of
 the MSVQ-SC semantic codec, not third-party material.

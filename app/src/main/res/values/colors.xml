@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="ic_launcher_background">#111827</color>
+    <!-- Brand guide, colour and background: Space Black -->
+    <color name="ic_launcher_background">#040406</color>
+    <color name="space_black">#FF040406</color>
+    <color name="surface">#FF15151B</color>
 </resources>

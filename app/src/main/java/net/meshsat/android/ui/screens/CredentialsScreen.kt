@@ -34,6 +34,7 @@ import java.security.cert.CertificateFactory
 import java.security.cert.X509Certificate
 import java.text.SimpleDateFormat
 import java.util.*
+import net.meshsat.android.ui.theme.PlexMono
 
 @Composable
 fun CredentialsScreen() {
@@ -192,7 +193,7 @@ private fun CredentialCard(cred: ProviderCredential, onDelete: () -> Unit) {
         Spacer(modifier = Modifier.height(4.dp))
 
         if (cred.certFingerprint.isNotBlank()) {
-            Text("SHA-256: ${cred.certFingerprint}", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = MeshSatTextMuted)
+            Text("SHA-256: ${cred.certFingerprint}", style = MaterialTheme.typography.bodySmall, fontFamily = PlexMono, color = MeshSatTextMuted)
         }
         if (cred.certSubject.isNotBlank()) {
             Text("Subject: ${cred.certSubject}", style = MaterialTheme.typography.bodySmall, color = MeshSatTextMuted, maxLines = 1)

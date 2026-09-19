@@ -58,6 +58,7 @@ import net.meshsat.android.ui.theme.MeshSatTextSecondary
 import com.geeksville.mesh.ChannelProtos
 import com.geeksville.mesh.ConfigProtos
 import kotlinx.coroutines.launch
+import net.meshsat.android.ui.theme.PlexMono
 
 // ═══════════════════════════════════════════════════════════════════════
 // Radio Configuration — MESHSAT-243
@@ -533,7 +534,7 @@ private fun ChannelsTabContent(
                         Text(
                             text = "PSK: ${pskHashLetter(ch.psk)}",
                             style = MaterialTheme.typography.bodySmall,
-                            fontFamily = FontFamily.Monospace,
+                            fontFamily = PlexMono,
                             color = MeshSatTextSecondary,
                         )
                         Text(
@@ -1164,7 +1165,7 @@ private fun InfoRow(label: String, value: String) {
         Text(
             text = value,
             style = MaterialTheme.typography.bodySmall,
-            fontFamily = FontFamily.Monospace,
+            fontFamily = PlexMono,
         )
     }
 }

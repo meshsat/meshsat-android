@@ -113,6 +113,7 @@ class GatewayService : Service() {
         const val IRIDIUM_QUEUED = "iridium:queued"
         /** How often the node is asked again for its modem while the phone does not hold it. */
         private const val PIPE_CLAIM_RETRY_MS = 15_000L
+        private const val PIPE_CLAIM_FIRST_RETRY_MS = 3_000L
 
         /** A mailbox check the user asked for (MESHSAT-400): running, or its last outcome. */
         data class MailboxCheck(
@@ -2561,6 +2562,7 @@ class GatewayService : Service() {
                     // and a node busy with its own modem hands it over later. STATUS is read
                     // again in case its notification was lost.
                     launch {
+                        var attempt = 0
                         while (true) {
                             when (pipe.owner.value) {
                                 IridiumPipeContract.Owner.Phone -> {}
@@ -2569,7 +2571,9 @@ class GatewayService : Service() {
                                     Log.i("MeshSat", "Iridium: no handover from the node yet (owner ${pipe.owner.value}); asking again")
                                 }
                             }
-                            delay(PIPE_CLAIM_RETRY_MS)
+                            // The first claim right after connecting is refused within ms while the
+                            // link comes up (seen on every reconnect), so the second comes soon.
+                            delay(if (attempt++ == 0) PIPE_CLAIM_FIRST_RETRY_MS else PIPE_CLAIM_RETRY_MS)
                         }
                     }
                     pipe.owner.collect { owner ->
@@ -3338,12 +3342,20 @@ class GatewayService : Service() {
         return net.meshsat.android.location.LocationFixes.freshest(lm)
     }
 
+    /** Tapping the gateway notification opens the app; it did nothing before (MESHSAT-1249). */
+    private fun openAppIntent(): PendingIntent = PendingIntent.getActivity(
+        this, 0,
+        Intent(this, MainActivity::class.java).apply { flags = Intent.FLAG_ACTIVITY_SINGLE_TOP },
+        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+    )
+
     private fun startForegroundNotification() {
         val notification = NotificationCompat.Builder(this, MeshSatApp.CHANNEL_GATEWAY)
             .setContentTitle("MeshSat Gateway")
             .setContentText("Listening for mesh, satellite, and SMS messages")
             .setSmallIcon(R.drawable.ic_notification)
             .setOngoing(true)
+            .setContentIntent(openAppIntent())
             .build()
 
         try {
@@ -3416,6 +3428,7 @@ class GatewayService : Service() {
             .setContentText(text)
             .setSmallIcon(R.drawable.ic_notification)
             .setOngoing(true)
+            .setContentIntent(openAppIntent())
             .build()
 
         try {

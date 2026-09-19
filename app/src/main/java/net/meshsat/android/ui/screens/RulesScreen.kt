@@ -77,6 +77,7 @@ import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import net.meshsat.android.ui.theme.PlexMono
 
 // ═══════════════════════════════════════════════════════════════════════
 // Bridge Rules Management — Phase H
@@ -778,7 +779,7 @@ private fun DeliveryRowBridge(delivery: MessageDeliveryEntity, onClick: () -> Un
                     style = MaterialTheme.typography.bodySmall,
                     color = MeshSatTextSecondary,
                     maxLines = 1,
-                    fontFamily = FontFamily.Monospace,
+                    fontFamily = PlexMono,
                 )
             }
 
@@ -891,7 +892,7 @@ private fun DlqItemCard(
             Text(
                 text = item.channel,
                 style = MaterialTheme.typography.labelSmall,
-                fontFamily = FontFamily.Monospace,
+                fontFamily = PlexMono,
                 color = channelColor(item.channel),
                 modifier = Modifier
                     .background(channelColor(item.channel).copy(alpha = 0.1f), RoundedCornerShape(4.dp))
@@ -901,7 +902,7 @@ private fun DlqItemCard(
                 text = item.status.uppercase(),
                 style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.Bold,
-                fontFamily = FontFamily.Monospace,
+                fontFamily = PlexMono,
                 color = statusColor,
                 modifier = Modifier
                     .background(statusColor.copy(alpha = 0.1f), RoundedCornerShape(4.dp))
@@ -928,7 +929,7 @@ private fun DlqItemCard(
             Text(
                 text = item.textPreview.take(80),
                 style = MaterialTheme.typography.bodySmall,
-                fontFamily = FontFamily.Monospace,
+                fontFamily = PlexMono,
                 color = MeshSatTextSecondary,
                 maxLines = 2,
                 modifier = Modifier
@@ -1277,7 +1278,7 @@ private fun DeliveryDetailDialogBridge(
                     Text(
                         text = delivery.textPreview,
                         style = MaterialTheme.typography.bodySmall,
-                        fontFamily = FontFamily.Monospace,
+                        fontFamily = PlexMono,
                         modifier = Modifier
                             .fillMaxWidth()
                             .background(MeshSatBorder.copy(alpha = 0.3f), RoundedCornerShape(4.dp))
