@@ -348,7 +348,9 @@ class GatewayService : Service() {
             ACTION_SOS_CANCEL -> cancelSos()
             ACTION_SEND_MESH -> {
                 val text = intent.getStringExtra(EXTRA_TEXT) ?: return START_STICKY
-                sendMeshMessage(text)
+                // A reply to a node goes to that node, not to the whole channel (MESHSAT-1249).
+                val to = net.meshsat.android.ui.Peers.nodeNum(intent.getStringExtra(EXTRA_RECIPIENT).orEmpty())
+                sendMeshMessage(text, to ?: 0xFFFFFFFFL)
             }
             ACTION_SEND_IRIDIUM -> {
                 val text = intent.getStringExtra(EXTRA_TEXT) ?: return START_STICKY
@@ -3164,6 +3166,8 @@ class GatewayService : Service() {
                     transport = "mesh",
                     direction = "tx",
                     sender = "self",
+                    // Filed under the node it went to, or under everyone on the mesh.
+                    recipient = if (to == 0xFFFFFFFFL) net.meshsat.android.ui.Peers.MESH_ALL else MeshtasticProtocol.formatNodeId(to),
                     text = text,
                     timestamp = System.currentTimeMillis(),
                 )

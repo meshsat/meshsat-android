@@ -15,6 +15,14 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -89,6 +97,11 @@ import net.meshsat.android.ui.theme.MeshSatRed
 import net.meshsat.android.ui.theme.MeshSatBorder
 import net.meshsat.android.ui.theme.MeshSatSurface
 import net.meshsat.android.ui.theme.MeshSatTeal
+import net.meshsat.android.ui.theme.MeshSatTextSecondary
+import net.meshsat.android.ui.theme.OffWhite
+import net.meshsat.android.ui.theme.MeshSatSurfaceLight
+import net.meshsat.android.ui.Words
+import net.meshsat.android.ui.Peers
 import net.meshsat.android.ui.theme.MeshSatTextMuted
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -108,6 +121,13 @@ fun MessagesScreen(openChat: (String) -> Unit = {}) {
 
     var viewMode by remember { mutableStateOf("conversations") } // default to conversations
     var searchQuery by remember { mutableStateOf("") }
+    var showNewMessage by remember { mutableStateOf(false) }
+    if (showNewMessage) {
+        NewMessageDialog(
+            onPick = { peer -> showNewMessage = false; openChat(peer) },
+            onDismiss = { showNewMessage = false },
+        )
+    }
     var selectedTab by remember { mutableStateOf("all") }
 
     // SMS permission state
@@ -145,7 +165,11 @@ fun MessagesScreen(openChat: (String) -> Unit = {}) {
         }
     }
 
-    val conversations by db.messageDao().getConversations().collectAsState(initial = emptyList())
+    val allConversations by db.messageDao().getConversations().collectAsState(initial = emptyList())
+    // The transport filter applies to chats too; it used to work only in All Messages.
+    val conversations = remember(allConversations, selectedTab) {
+        if (selectedTab == "all") allConversations else allConversations.filter { it.transport == selectedTab }
+    }
 
     // Stats
     val nodeCount = GatewayService.meshtasticBle?.nodes?.collectAsState()?.value?.size ?: 0
@@ -223,13 +247,13 @@ fun MessagesScreen(openChat: (String) -> Unit = {}) {
                             "mesh" -> ColorMesh.copy(alpha = 0.2f)
                             "iridium" -> ColorIridium.copy(alpha = 0.2f)
                             "sms" -> ColorCellular.copy(alpha = 0.2f)
-                            else -> MeshSatTeal.copy(alpha = 0.2f)
+                            else -> MeshSatSurfaceLight
                         },
                         selectedLabelColor = when (key) {
                             "mesh" -> ColorMesh
                             "iridium" -> ColorIridium
                             "sms" -> ColorCellular
-                            else -> MeshSatTeal
+                            else -> OffWhite
                         },
                     ),
                 )
@@ -270,8 +294,8 @@ fun MessagesScreen(openChat: (String) -> Unit = {}) {
                 onClick = { viewMode = "conversations" },
                 label = { Text("Chats", style = MaterialTheme.typography.bodySmall) },
                 colors = FilterChipDefaults.filterChipColors(
-                    selectedContainerColor = MeshSatTeal.copy(alpha = 0.2f),
-                    selectedLabelColor = MeshSatTeal,
+                    selectedContainerColor = MeshSatSurfaceLight,
+                    selectedLabelColor = OffWhite,
                 ),
             )
             FilterChip(
@@ -279,18 +303,18 @@ fun MessagesScreen(openChat: (String) -> Unit = {}) {
                 onClick = { viewMode = "all" },
                 label = { Text("All Messages", style = MaterialTheme.typography.bodySmall) },
                 colors = FilterChipDefaults.filterChipColors(
-                    selectedContainerColor = MeshSatTeal.copy(alpha = 0.2f),
-                    selectedLabelColor = MeshSatTeal,
+                    selectedContainerColor = MeshSatSurfaceLight,
+                    selectedLabelColor = OffWhite,
                 ),
             )
             // A message the app itself sends (satellite or mesh), even from an empty inbox.
             FilterChip(
                 selected = false,
-                onClick = { openChat("self") },
+                onClick = { showNewMessage = true },
                 label = { Text("New message", style = MaterialTheme.typography.bodySmall) },
                 colors = FilterChipDefaults.filterChipColors(
-                    selectedContainerColor = MeshSatTeal.copy(alpha = 0.2f),
-                    selectedLabelColor = MeshSatTeal,
+                    selectedContainerColor = MeshSatSurfaceLight,
+                    selectedLabelColor = OffWhite,
                 ),
             )
         }
@@ -390,9 +414,15 @@ private fun ConversationCard(conv: ConversationSummary, onClick: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.weight(1f)) {
-                Text(text = conv.sender, style = MaterialTheme.typography.titleMedium)
                 Text(
-                    text = conv.transport.uppercase(),
+                    text = Peers.displayName(conv.sender, GatewayService.meshtasticBle?.nodes?.value.orEmpty()),
+                    style = MaterialTheme.typography.titleMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                Text(
+                    text = Words.transport(conv.transport),
                     style = MaterialTheme.typography.bodySmall,
                     color = transportColor,
                     modifier = Modifier
@@ -413,9 +443,9 @@ private fun ConversationCard(conv: ConversationSummary, onClick: () -> Unit) {
                 Text(
                     text = "${conv.messageCount}",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MeshSatTeal,
+                    color = MeshSatTextSecondary,
                     modifier = Modifier
-                        .background(MeshSatTeal.copy(alpha = 0.15f), RoundedCornerShape(4.dp))
+                        .background(MeshSatSurfaceLight, RoundedCornerShape(4.dp))
                         .padding(horizontal = 6.dp, vertical = 2.dp),
                 )
             }
@@ -460,20 +490,19 @@ fun ConversationChatView(
     var showKeySection by remember { mutableStateOf(false) }
     var showKey by remember { mutableStateOf(false) }
 
-    // Compose bar state
+    // Compose bar state. The route follows who the chat is with (MESHSAT-1249): a mesh node over
+    // the mesh, a phone number by SMS, the satellite conversation by satellite.
     var composeText by remember { mutableStateOf("") }
-    // Conversations with a person default to SMS; the app's own sends default to the satellite.
-    var sendTransport by remember { mutableStateOf(if (peer == "self") "iridium" else "sms") }
-    var transportExpanded by remember { mutableStateOf(false) }
+    var sendTransport by remember { mutableStateOf(Peers.defaultTransport(peer)) }
+    val meshNodes = GatewayService.meshtasticBle?.nodes?.collectAsState()?.value.orEmpty()
 
     val meshConnected = GatewayService.meshtasticBle?.state?.collectAsState()?.value == MeshtasticBle.State.Connected
     val iridiumConnected = GatewayService.iridiumSpp?.state?.collectAsState()?.value == IridiumSpp.State.Connected
 
-    // Detect transport from conversation history
-    val primaryTransport = messages.firstOrNull { it.direction == "rx" }?.transport ?: "sms"
-    // A reply goes back the way the conversation came in: an Iridium chat answers over Iridium.
+    // A reply goes back the way the conversation came in, when that way can reach this peer.
+    val primaryTransport = messages.firstOrNull { it.direction == "rx" }?.transport ?: Peers.defaultTransport(peer)
     LaunchedEffect(primaryTransport) {
-        if (peer != "self") sendTransport = primaryTransport
+        if (primaryTransport in Peers.transportsFor(peer)) sendTransport = primaryTransport
     }
     val listState = rememberLazyListState()
 
@@ -491,13 +520,16 @@ fun ConversationChatView(
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = MeshSatTeal)
             }
             Column(modifier = Modifier.weight(1f)) {
-                Text(text = peer, style = MaterialTheme.typography.titleLarge)
                 Text(
-                    text = primaryTransport.uppercase(),
+                    text = Peers.displayName(peer, meshNodes),
+                    style = MaterialTheme.typography.titleLarge,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = Peers.detail(peer) ?: Words.transport(sendTransport),
                     style = MaterialTheme.typography.bodySmall,
-                    color = when (primaryTransport) {
-                        "mesh" -> ColorMesh; "iridium" -> ColorIridium; else -> ColorCellular
-                    },
+                    color = Words.transportColor(sendTransport),
                 )
             }
             IconButton(onClick = { showKeySection = !showKeySection }) {
@@ -544,86 +576,82 @@ fun ConversationChatView(
         }
 
         // Compose bar
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(MeshSatSurface, RoundedCornerShape(8.dp))
                 .border(1.dp, MeshSatBorder, RoundedCornerShape(8.dp))
                 .padding(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            // Transport picker
-            ExposedDropdownMenuBox(
-                expanded = transportExpanded,
-                onExpandedChange = { transportExpanded = !transportExpanded },
-                modifier = Modifier.weight(0.3f),
-            ) {
+            val send = {
+                if (composeText.isNotBlank()) {
+                    sendMessage(context, composeText.trim(), sendTransport, peer, meshConnected, iridiumConnected)
+                    composeText = ""
+                }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
-                    value = sendTransport.uppercase(),
-                    onValueChange = {},
-                    readOnly = true,
-                    singleLine = true,
-                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(transportExpanded) },
-                    modifier = Modifier.menuAnchor(),
-                    textStyle = MaterialTheme.typography.bodySmall,
+                    value = composeText,
+                    onValueChange = { composeText = it },
+                    placeholder = {
+                        Text(
+                            when (sendTransport) {
+                                "iridium" -> "Message by satellite"
+                                "mesh" -> if (peer == Peers.MESH_ALL) "Message everyone on the mesh" else "Message on the mesh"
+                                else -> "Text message"
+                            },
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    },
+                    maxLines = 4,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                    keyboardActions = KeyboardActions(onSend = { send() }),
+                    modifier = Modifier.weight(1f),
+                    textStyle = MaterialTheme.typography.bodyLarge,
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = MeshSatTeal,
+                        focusedBorderColor = MeshSatTextSecondary,
                         unfocusedBorderColor = MeshSatBorder,
                     ),
                 )
-                ExposedDropdownMenu(
-                    expanded = transportExpanded,
-                    onDismissRequest = { transportExpanded = false },
+                IconButton(
+                    onClick = send,
+                    enabled = composeText.isNotBlank(),
+                    modifier = Modifier.size(48.dp),
                 ) {
-                    DropdownMenuItem(
-                        text = { Text("SMS") },
-                        onClick = { sendTransport = "sms"; transportExpanded = false },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("MESH") },
-                        onClick = { sendTransport = "mesh"; transportExpanded = false },
-                        enabled = meshConnected,
-                    )
-                    DropdownMenuItem(
-                        text = { Text("IRIDIUM") },
-                        // Always offered: an Iridium message is queued until the modem can send it.
-                        onClick = { sendTransport = "iridium"; transportExpanded = false },
+                    Icon(
+                        Icons.AutoMirrored.Filled.Send,
+                        contentDescription = "Send",
+                        tint = if (composeText.isNotBlank()) MeshSatTeal else MeshSatTextMuted,
                     )
                 }
             }
-
-            OutlinedTextField(
-                value = composeText,
-                onValueChange = { composeText = it },
-                placeholder = { Text("Message...", style = MaterialTheme.typography.bodySmall) },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                keyboardActions = KeyboardActions(onSend = {
-                    if (composeText.isNotBlank()) {
-                        sendMessage(context, composeText, sendTransport, peer, meshConnected, iridiumConnected)
-                        composeText = ""
-                    }
-                }),
-                modifier = Modifier.weight(0.6f),
-                textStyle = MaterialTheme.typography.bodyMedium,
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = MeshSatTeal,
-                    unfocusedBorderColor = MeshSatBorder,
-                ),
+            Text(
+                text = composeHint(sendTransport, composeText, peer, meshConnected, iridiumConnected),
+                style = MaterialTheme.typography.bodySmall,
+                color = MeshSatTextSecondary,
+                modifier = Modifier.padding(start = 4.dp, top = 4.dp),
             )
-
-            IconButton(
-                onClick = {
-                    if (composeText.isBlank()) return@IconButton
-                    sendMessage(context, composeText, sendTransport, peer, meshConnected, iridiumConnected)
-                    composeText = ""
-                },
-                modifier = Modifier.weight(0.1f),
-            ) {
-                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send", tint = MeshSatTeal)
-            }
         }
+    }
+}
+
+/**
+ * The line under the message box: how this message goes, and for a satellite message its size and
+ * cost before it is sent (Rock7 bills up to 50 bytes per credit; the satellite limit is 340 bytes).
+ */
+private fun composeHint(transport: String, text: String, peer: String, meshUp: Boolean, satUp: Boolean): String {
+    val bytes = text.trim().toByteArray(Charsets.UTF_8).size
+    return when (transport) {
+        "iridium" -> {
+            val size = if (bytes == 0) "" else " $bytes bytes, ${Words.count((bytes + 49) / 50, "credit")}${if (bytes > 340) ", sent in parts" else ""}."
+            (if (satUp) "By satellite." else "By satellite, when the modem is back.") + size
+        }
+        "mesh" -> when {
+            !meshUp -> "On the mesh, when your node is connected."
+            peer == Peers.MESH_ALL -> "To everyone on the mesh channel."
+            else -> "Directly to this node on the mesh."
+        }
+        else -> if (bytes == 0) "By SMS from this phone." else "By SMS from this phone, ${text.trim().length} characters."
     }
 }
 
@@ -638,25 +666,27 @@ private fun sendMessage(
     when (transport) {
         "sms" -> {
             // Send SMS to the peer (encryption handled in GatewayService)
+            // The message appears in the chat with its state; no toast claims success early.
             context.startService(
                 Intent(context, GatewayService::class.java)
                     .setAction(GatewayService.ACTION_SEND_SMS)
                     .putExtra(GatewayService.EXTRA_TEXT, text)
                     .putExtra(GatewayService.EXTRA_RECIPIENT, peer)
             )
-            Toast.makeText(context, "Sending SMS to $peer", Toast.LENGTH_SHORT).show()
         }
         "mesh" -> {
             if (!meshConnected) {
-                Toast.makeText(context, "Mesh not connected", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "Not sent: your MeshSat node is not connected. Connect it in Setup.", Toast.LENGTH_LONG).show()
                 return
             }
+            // To this node directly, or to everyone on the channel (MESHSAT-1249: replies used to
+            // go to the whole channel and vanish from the conversation).
             context.startService(
                 Intent(context, GatewayService::class.java)
                     .setAction(GatewayService.ACTION_SEND_MESH)
                     .putExtra(GatewayService.EXTRA_TEXT, text)
+                    .putExtra(GatewayService.EXTRA_RECIPIENT, if (Peers.isMeshNode(peer)) peer else Peers.MESH_ALL)
             )
-            Toast.makeText(context, "Sent via MESH", Toast.LENGTH_SHORT).show()
         }
         "iridium" -> {
             // Queued even without the modem: it goes out once a session succeeds (MESHSAT-1243).
@@ -666,8 +696,6 @@ private fun sendMessage(
                     .putExtra(GatewayService.EXTRA_TEXT, text)
                     .putExtra(GatewayService.EXTRA_RECIPIENT, peer)
             )
-            val note = if (iridiumConnected) "Queued for Iridium" else "Queued for Iridium; it goes out when the modem is back"
-            Toast.makeText(context, note, Toast.LENGTH_SHORT).show()
         }
     }
 }
@@ -1052,3 +1080,87 @@ private fun MessageCard(msg: Message) {
     }
 }
 
+
+/**
+ * Who a new message is for (MESHSAT-1249): the satellite, everyone on the mesh, a node the phone
+ * has heard, or a phone number. It used to open a chat with the literal recipient "self", so an SMS
+ * written there went to "self".
+ */
+@Composable
+private fun NewMessageDialog(onPick: (String) -> Unit, onDismiss: () -> Unit) {
+    val nodes = GatewayService.meshtasticBle?.nodes?.collectAsState()?.value.orEmpty()
+    val myNum = GatewayService.meshtasticBle?.myInfo?.collectAsState()?.value?.myNodeNum ?: 0L
+    val imei = GatewayService.iridiumSpp?.modemInfo?.collectAsState()?.value?.imei.orEmpty()
+    var number by remember { mutableStateOf("") }
+    val numberOk = number.trim().let { n -> n.length >= 6 && n.all { it.isDigit() || it == '+' || it == ' ' } }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = MeshSatSurface,
+        title = { Text("New message") },
+        text = {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+            ) {
+                NewMessageRow(
+                    title = "Satellite",
+                    detail = "Through Rock7 to the Hub, from anywhere with a view of the sky",
+                    color = ColorIridium,
+                    onClick = { onPick(imei.ifBlank { Peers.SATELLITE }) },
+                )
+                NewMessageRow(
+                    title = "Everyone on the mesh",
+                    detail = "Every node on your channel",
+                    color = ColorMesh,
+                    onClick = { onPick(Peers.MESH_ALL) },
+                )
+                nodes.filter { it.nodeNum != myNum }.sortedByDescending { it.lastHeard }.take(20).forEach { node ->
+                    val id = net.meshsat.android.ble.MeshtasticProtocol.formatNodeId(node.nodeNum)
+                    NewMessageRow(
+                        title = node.longName.ifBlank { "Node $id" },
+                        detail = "On the mesh, $id",
+                        color = ColorMesh,
+                        onClick = { onPick(id) },
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = number,
+                    onValueChange = { number = it },
+                    label = { Text("Or a phone number, e.g. +31612345678") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Phone),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onPick(number.trim().replace(" ", "")) }, enabled = numberOk) {
+                Text("Text this number")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel", color = MeshSatTextSecondary) }
+        },
+    )
+}
+
+@Composable
+private fun NewMessageRow(title: String, detail: String, color: androidx.compose.ui.graphics.Color, onClick: () -> Unit) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 56.dp)
+            .clickable(onClick = onClick)
+            .padding(vertical = 6.dp),
+    ) {
+        Box(Modifier.size(10.dp).background(color, androidx.compose.foundation.shape.CircleShape))
+        Spacer(Modifier.width(12.dp))
+        Column {
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            Text(detail, style = MaterialTheme.typography.bodySmall, color = MeshSatTextSecondary)
+        }
+    }
+}
