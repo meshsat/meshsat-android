@@ -18,6 +18,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
+import kotlin.time.Duration
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 
@@ -46,6 +47,40 @@ class Dispatcher(
     private val scope: CoroutineScope,
     private val sequenceTracker: SequenceTracker = SequenceTracker(),
 ) {
+    /**
+     * When the next pass window above the obstacle mask opens for a satellite channel, as
+     * epoch ms, if that is after [afterMs]; null when a window is open or none is known.
+     * Retries of a satellite delivery wait for it (MESHSAT-1243).
+     */
+    @Volatile var nextWindowStart: ((channelId: String, afterMs: Long) -> Long?)? = null
+
+    /** Called after a delivery went out, e.g. to mark the chat message sent. */
+    @Volatile var onSent: (suspend (MessageDeliveryEntity) -> Unit)? = null
+
+    /**
+     * Queue a message the user wrote for [destInterface], outside the routing rules: it is
+     * stored, so it survives a restart, and retried until it goes out, with no retry cap
+     * and no expiry (MESHSAT-1243). Returns the delivery id, or null if it was not stored.
+     */
+    suspend fun enqueueDirect(destInterface: String, payload: ByteArray, textPreview: String, msgRef: String, priority: Int = 1): Long? =
+        try {
+            deliveryDao.insert(
+                MessageDeliveryEntity(
+                    msgRef = msgRef,
+                    channel = destInterface,
+                    status = "queued",
+                    priority = priority,
+                    payload = payload,
+                    textPreview = if (textPreview.length > 200) textPreview.take(200) else textPreview,
+                    maxRetries = 0,
+                    qosLevel = 1,
+                )
+            ).also { Log.i(TAG, "Delivery queued directly: dest=$destInterface ref=$msgRef") }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to queue a direct delivery: ${e.message}")
+            null
+        }
+
     /** Callback for actual message delivery to a transport. */
     fun interface DeliveryCallback {
         /** Send a message to the given interface. Returns null on success, error message on failure. */
@@ -351,6 +386,11 @@ class Dispatcher(
         deliveryDao.setSeqNum(del.id, seqNum)
 
         deliveryDao.setStatus(del.id, "sent")
+        try {
+            onSent?.invoke(del)
+        } catch (e: Exception) {
+            Log.w(TAG, "onSent for ${del.id} failed: ${e.message}")
+        }
 
         // For QoS >= 1, mark ACK as pending (at-least-once semantics)
         if (del.qosLevel >= 1) {
@@ -390,6 +430,11 @@ class Dispatcher(
         val initialWait = config?.initialWait ?: 5.seconds
         val maxWait = config?.maxWait ?: 5.minutes
         val backoffFunc = config?.backoffFunc ?: "linear"
+
+        if (backoffFunc == "isu") {
+            val now = System.currentTimeMillis()
+            return satelliteRetryAt(now, retries, initialWait, maxWait, nextWindowStart?.invoke(channelId, now))
+        }
 
         var wait = when (backoffFunc) {
             "isu" -> maxOf(initialWait, 3.minutes)
@@ -440,6 +485,18 @@ class Dispatcher(
 
     companion object {
         private const val TAG = "Dispatcher"
+
+        /**
+         * When to retry a satellite delivery: at least 3 minutes after a failed session (the
+         * ISU needs that after status 32/36), [maxWait] once the first five retries failed,
+         * and never before the next pass window above the obstacle mask, when one is known.
+         */
+        fun satelliteRetryAt(nowMs: Long, retries: Int, initialWait: Duration, maxWait: Duration, windowStartMs: Long?): Long {
+            val wait = if (retries <= 5) maxOf(initialWait, 3.minutes) else maxOf(maxWait, 3.minutes)
+            val earliest = nowMs + wait.inWholeMilliseconds
+            return if (windowStartMs != null && windowStartMs > earliest) windowStartMs else earliest
+        }
+
         private const val DEFAULT_MAX_HOPS = 8
         private const val DEFAULT_MAX_QUEUE_DEPTH = 500
         private const val MAX_DEDUP_ENTRIES = 1000
