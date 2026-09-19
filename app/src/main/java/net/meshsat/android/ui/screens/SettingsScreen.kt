@@ -91,6 +91,7 @@ import net.meshsat.android.codec.CannedCodebook
 import androidx.compose.ui.graphics.Color
 import androidx.navigation.NavController
 import kotlinx.coroutines.launch
+import net.meshsat.android.ui.components.collectOrNull
 
 /**
  * The pages of Setup (MESHSAT-1249). Settings used to be one scroll of 18 cards; each page now shows
@@ -187,14 +188,14 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
     var aprsHostInput by remember(aprsKissHost) { mutableStateOf(aprsKissHost) }
     var aprsPortInput by remember(aprsKissPort) { mutableStateOf(aprsKissPort) }
     var aprsFreqInput by remember(aprsFrequency) { mutableStateOf(aprsFrequency) }
-    val aprsKissState = GatewayService.kissClient?.state?.collectAsState()
+    val aprsKissState = GatewayService.kissClient?.state.collectOrNull()
     // APRS-IS state (MESHSAT-230)
     var aprsIsServerInput by remember(aprsIsServer) { mutableStateOf(aprsIsServer) }
     var aprsIsPortInput by remember(aprsIsPort) { mutableStateOf(aprsIsPort) }
     var aprsIsPasscodeInput by remember(aprsIsPasscode) { mutableStateOf(aprsIsPasscode) }
     var aprsIsFilterRangeInput by remember(aprsIsFilterRange) { mutableStateOf(aprsIsFilterRange) }
     var aprsIsBeaconIntervalInput by remember(aprsIsBeaconInterval) { mutableStateOf(aprsIsBeaconInterval) }
-    val aprsIsState = GatewayService.aprsIsClient?.state?.collectAsState()
+    val aprsIsState = GatewayService.aprsIsClient?.state.collectOrNull()
 
     // TAK state (MESHSAT-451)
     var takCallsignPrefixInput by remember(takCallsignPrefix) { mutableStateOf(takCallsignPrefix) }
@@ -202,7 +203,7 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
     // RNS TCP state (MESHSAT-268)
     var rnsTcpHostInput by remember(rnsTcpHost) { mutableStateOf(rnsTcpHost) }
     var rnsTcpPortInput by remember(rnsTcpPort) { mutableStateOf(rnsTcpPort) }
-    val rnsTcpState = GatewayService.rnsTcpInterface?.state?.collectAsState()
+    val rnsTcpState = GatewayService.rnsTcpInterface?.state.collectOrNull()
 
     // Hub Reporter state (MESHSAT-292)
     var hubUrlInput by remember(hubUrl) { mutableStateOf(hubUrl) }
@@ -218,14 +219,14 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
     // QR provisioning state
     var provisionBundle by remember { mutableStateOf<net.meshsat.android.crypto.ProvisionImporter.ProvisionBundle?>(null) }
     var showProvisionDialog by remember { mutableStateOf(false) }
-    val hubReporterState = GatewayService.hubReporter?.state?.collectAsState()
+    val hubReporterState = GatewayService.hubReporter?.state.collectOrNull()
 
     // BLE state
-    val meshState = GatewayService.meshtasticBle?.state?.collectAsState()
-    val iridiumState = GatewayService.iridiumSpp?.state?.collectAsState()
-    val iridiumSignal = GatewayService.iridiumSpp?.signal?.collectAsState()
-    val iridiumSilent = GatewayService.iridiumSpp?.modemSilent?.collectAsState()
-    val modemInfo = GatewayService.iridiumSpp?.modemInfo?.collectAsState()
+    val meshState = GatewayService.meshtasticBle?.state.collectOrNull()
+    val iridiumState = GatewayService.iridiumSpp?.state.collectOrNull()
+    val iridiumSignal = GatewayService.iridiumSpp?.signal.collectOrNull()
+    val iridiumSilent = GatewayService.iridiumSpp?.modemSilent.collectOrNull()
+    val modemInfo = GatewayService.iridiumSpp?.modemInfo.collectOrNull()
     // The 9603 lives on the MeshSat node, behind its BLE pipe (MESHSAT-1236).
     val iridiumPipe by (GatewayService.meshtasticBle?.iridiumPipe ?: MutableStateFlow(null)).collectAsState()
     val pipeOwner by remember(iridiumPipe) {
@@ -234,9 +235,9 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
     val nodePipeEnabled by settings.iridiumNodePipeEnabled.collectAsState(initial = true)
 
     // Iridium 9704 state
-    val iridium9704State = GatewayService.iridium9704Spp?.state?.collectAsState()
-    val iridium9704Signal = GatewayService.iridium9704Spp?.signal?.collectAsState()
-    val iridium9704ModemInfo = GatewayService.iridium9704Spp?.modemInfo?.collectAsState()
+    val iridium9704State = GatewayService.iridium9704Spp?.state.collectOrNull()
+    val iridium9704Signal = GatewayService.iridium9704Spp?.signal.collectOrNull()
+    val iridium9704ModemInfo = GatewayService.iridium9704Spp?.modemInfo.collectOrNull()
 
     // QR code scanner for key sync — handles both raw hex keys and meshsat://key/ URL bundles
     val qrScanLauncher = rememberLauncherForActivityResult(
@@ -370,8 +371,8 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
 
                 if (state == MeshtasticBle.State.Connected) {
                     // Show device info when connected
-                    val myInfo = GatewayService.meshtasticBle?.myInfo?.collectAsState()
-                    val meshNodes = GatewayService.meshtasticBle?.nodes?.collectAsState()
+                    val myInfo = GatewayService.meshtasticBle?.myInfo.collectOrNull()
+                    val meshNodes = GatewayService.meshtasticBle?.nodes.collectOrNull()
 
                     myInfo?.value?.let { info ->
                         if (info.firmwareVersion.isNotBlank()) {

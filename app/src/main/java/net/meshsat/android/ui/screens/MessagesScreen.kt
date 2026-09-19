@@ -107,6 +107,7 @@ import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import net.meshsat.android.ui.components.collectOrNull
 
 @OptIn(ExperimentalMaterial3Api::class)
 /**
@@ -172,7 +173,7 @@ fun MessagesScreen(openChat: (String) -> Unit = {}) {
     }
 
     // Stats
-    val nodeCount = GatewayService.meshtasticBle?.nodes?.collectAsState()?.value?.size ?: 0
+    val nodeCount = GatewayService.meshtasticBle?.nodes.collectOrNull()?.value?.size ?: 0
     val startOfDay = remember {
         val cal = java.util.Calendar.getInstance()
         cal.set(java.util.Calendar.HOUR_OF_DAY, 0)
@@ -494,10 +495,10 @@ fun ConversationChatView(
     // the mesh, a phone number by SMS, the satellite conversation by satellite.
     var composeText by remember { mutableStateOf("") }
     var sendTransport by remember { mutableStateOf(Peers.defaultTransport(peer)) }
-    val meshNodes = GatewayService.meshtasticBle?.nodes?.collectAsState()?.value.orEmpty()
+    val meshNodes = GatewayService.meshtasticBle?.nodes.collectOrNull()?.value.orEmpty()
 
-    val meshConnected = GatewayService.meshtasticBle?.state?.collectAsState()?.value == MeshtasticBle.State.Connected
-    val iridiumConnected = GatewayService.iridiumSpp?.state?.collectAsState()?.value == IridiumSpp.State.Connected
+    val meshConnected = GatewayService.meshtasticBle?.state.collectOrNull()?.value == MeshtasticBle.State.Connected
+    val iridiumConnected = GatewayService.iridiumSpp?.state.collectOrNull()?.value == IridiumSpp.State.Connected
 
     // A reply goes back the way the conversation came in, when that way can reach this peer.
     val primaryTransport = messages.firstOrNull { it.direction == "rx" }?.transport ?: Peers.defaultTransport(peer)
@@ -1088,9 +1089,9 @@ private fun MessageCard(msg: Message) {
  */
 @Composable
 private fun NewMessageDialog(onPick: (String) -> Unit, onDismiss: () -> Unit) {
-    val nodes = GatewayService.meshtasticBle?.nodes?.collectAsState()?.value.orEmpty()
-    val myNum = GatewayService.meshtasticBle?.myInfo?.collectAsState()?.value?.myNodeNum ?: 0L
-    val imei = GatewayService.iridiumSpp?.modemInfo?.collectAsState()?.value?.imei.orEmpty()
+    val nodes = GatewayService.meshtasticBle?.nodes.collectOrNull()?.value.orEmpty()
+    val myNum = GatewayService.meshtasticBle?.myInfo.collectOrNull()?.value?.myNodeNum ?: 0L
+    val imei = GatewayService.iridiumSpp?.modemInfo.collectOrNull()?.value?.imei.orEmpty()
     var number by remember { mutableStateOf("") }
     val numberOk = number.trim().let { n -> n.length >= 6 && n.all { it.isDigit() || it == '+' || it == ' ' } }
 

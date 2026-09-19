@@ -65,6 +65,7 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sin
 import kotlin.math.sqrt
+import net.meshsat.android.ui.components.collectOrNull
 
 // A node or a link counts as recent when heard within this window; older ones are drawn muted.
 private const val FRESH_MS = 15 * 60 * 1000L
@@ -183,12 +184,12 @@ private fun buildTopology(
 @Composable
 fun TopologyScreen() {
     val ble = GatewayService.meshtasticBle
-    val connected = ble?.state?.collectAsState()?.value == MeshtasticBle.State.Connected
-    val nodes = ble?.nodes?.collectAsState()?.value ?: emptyList()
-    val myNodeNum = ble?.myInfo?.collectAsState()?.value?.myNodeNum ?: 0L
-    val reports = ble?.neighborReports?.collectAsState()?.value ?: emptyMap()
-    val signals = ble?.linkSignals?.collectAsState()?.value ?: emptyMap()
-    val bluetoothRssi = ble?.rssi?.collectAsState()?.value ?: 0
+    val connected = ble?.state.collectOrNull()?.value == MeshtasticBle.State.Connected
+    val nodes = ble?.nodes.collectOrNull()?.value ?: emptyList()
+    val myNodeNum = ble?.myInfo.collectOrNull()?.value?.myNodeNum ?: 0L
+    val reports = ble?.neighborReports.collectOrNull()?.value ?: emptyMap()
+    val signals = ble?.linkSignals.collectOrNull()?.value ?: emptyMap()
+    val bluetoothRssi = ble?.rssi.collectOrNull()?.value ?: 0
 
     // Freshness moves with the clock, not only with new packets.
     var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }

@@ -54,6 +54,7 @@ import net.meshsat.android.ui.theme.MeshSatTextMuted
 import net.meshsat.android.ui.theme.MeshSatTextPrimary
 import net.meshsat.android.ui.theme.MeshSatTextSecondary
 import net.meshsat.android.ui.theme.PlexMono
+import net.meshsat.android.ui.components.collectOrNull
 
 private enum class PeerSortMode(val label: String) {
     LastSeen("Last heard"),
@@ -76,10 +77,10 @@ fun PeersScreen(
     onShowOnMap: (Long) -> Unit = {},
 ) {
     val ble = GatewayService.meshtasticBle
-    val nodes = ble?.nodes?.collectAsState()?.value ?: emptyList()
-    val signals = ble?.linkSignals?.collectAsState()?.value ?: emptyMap()
-    val myNodeNum = ble?.myInfo?.collectAsState()?.value?.myNodeNum ?: 0L
-    val meshUp = ble?.state?.collectAsState()?.value == MeshtasticBle.State.Connected
+    val nodes = ble?.nodes.collectOrNull()?.value ?: emptyList()
+    val signals = ble?.linkSignals.collectOrNull()?.value ?: emptyMap()
+    val myNodeNum = ble?.myInfo.collectOrNull()?.value?.myNodeNum ?: 0L
+    val meshUp = ble?.state.collectOrNull()?.value == MeshtasticBle.State.Connected
 
     var sortMode by remember { mutableStateOf(PeerSortMode.LastSeen) }
     var selected by remember { mutableStateOf<Long?>(null) }
