@@ -1,0 +1,3 @@
+Satellite messages are sent once and no longer twice: a message that failed stayed loaded in the modem and went out again with the next mailbox check.
+
+A message now leaves as soon as the modem can see a satellite, and after "no network service" it tries again every three minutes instead of waiting up to half an hour.
