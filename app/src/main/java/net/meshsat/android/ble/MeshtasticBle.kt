@@ -326,7 +326,12 @@ class MeshtasticBle(private val context: Context) {
             if (pipe.usable) _iridiumPipe.value = pipe
         }
         _state.value = State.Connected
-        sendToRadio(MeshtasticProtocol.encodeWantConfig(Random.nextInt(1, Int.MAX_VALUE)))
+        // An encoding failure must not end the session: fromRadio is still read below.
+        try {
+            sendToRadio(MeshtasticProtocol.encodeWantConfig(Random.nextInt(1, Int.MAX_VALUE)))
+        } catch (e: Exception) {
+            scope.launch { _error.emit("want_config failed: ${e.message}") }
+        }
         readFromRadio()
     }
 

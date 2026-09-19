@@ -37,6 +37,14 @@
 -keep class net.meshsat.android.crypto.MsvqscEncoder { *; }
 -keep class net.meshsat.android.crypto.MsvqscCodebook { *; }
 
+# protobuf-javalite (Meshtastic and TAK messages) — MESHSAT-1236
+# The lite runtime finds each message's fields by name through reflection. v2.9.0 let R8
+# rename them, so building ToRadio{want_config_id} threw "Field payloadVariant_ ... not
+# found" and no release build ever synced with a Meshtastic radio over BLE.
+-keepclassmembers class * extends com.google.protobuf.GeneratedMessageLite {
+    <fields>;
+}
+
 # Eclipse Paho MQTT (Hub reporter, MQTT transport, relay) — MESHSAT-1235
 # Paho loads its logger with Class.forName and its tcp/ssl/ws/wss network modules through
 # ServiceLoader. v2.8.6 renamed every Paho class, so `new MqttClient(...)` threw
