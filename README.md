@@ -9,16 +9,28 @@ The phone IS the gateway. No companion app, no server dependency, no internet re
 
 <table>
   <tr>
-    <td width="33%"><img src="docs/screenshots/01-dashboard.png" alt="Dashboard" /></td>
-    <td width="33%"><img src="docs/screenshots/03-map.png" alt="Map" /></td>
-    <td width="33%"><img src="docs/screenshots/04-pass-predictor.png" alt="Pass Predictor" /></td>
+    <td width="33%"><img src="docs/screenshots/2026-09/01-home.png" alt="Home: messages can go out by satellite, mesh, SMS and the Hub, with a line for each and three messages on their way by satellite" /></td>
+    <td width="33%"><img src="docs/screenshots/2026-09/05-setup.png" alt="Setup: your MeshSat node, satellite, Hub and SMS, each with its status" /></td>
+    <td width="33%"><img src="docs/screenshots/2026-09/08-satellite-passes.png" alt="Satellite passes: an Iridium satellite overhead now and the passes over the next day" /></td>
   </tr>
   <tr>
-    <td align="center"><sub><b>Dashboard</b> — live cellular signal, SOS, location, queue depth</sub></td>
-    <td align="center"><sub><b>Map</b> — native OSM tiles with GPS marker, track lines, node filters</sub></td>
-    <td align="center"><sub><b>Pass Predictor</b> — SGP4 orbital mechanics, active Iridium pass at 71° peak elevation</sub></td>
+    <td align="center"><sub><b>Home</b>: every way out on one screen, and your messages on their way</sub></td>
+    <td align="center"><sub><b>Setup</b>: node, satellite, Hub and SMS, each with where it stands</sub></td>
+    <td align="center"><sub><b>Satellite passes</b>: computed on the phone, no internet needed</sub></td>
+  </tr>
+  <tr>
+    <td width="33%"><img src="docs/screenshots/2026-09/06-setup-your-node.png" alt="Your MeshSat node: connected over Bluetooth, with its node id and its own radio" /></td>
+    <td width="33%"><img src="docs/screenshots/2026-09/07-setup-satellite.png" alt="Satellite: the node's modem connected, with Poll Signal and Check Mailbox" /></td>
+    <td width="33%"><img src="docs/screenshots/2026-09/10-setup-safety.png" alt="Safety: zones and the check-in timer" /></td>
+  </tr>
+  <tr>
+    <td align="center"><sub><b>Your MeshSat node</b>: its LoRa radio and Iridium modem over one Bluetooth link</sub></td>
+    <td align="center"><sub><b>Satellite</b>: the node's modem, signal and mailbox</sub></td>
+    <td align="center"><sub><b>Safety</b>: zones and the check-in timer</sub></td>
   </tr>
 </table>
+
+<sub>MeshSat Android 2.11 on a Pixel 9a, connected to a <a href="https://docs.meshsat.net/node/">MeshSat node</a> and the Hub, 19 September 2026. Real data, with the modem's IMEI and the phone's position blurred.</sub>
 
 ## Quick Start
 
