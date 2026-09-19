@@ -14,6 +14,7 @@ import net.meshsat.android.engine.InterfaceManager
 import net.meshsat.android.engine.SigningService
 import fi.iki.elonen.NanoHTTPD
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.json.JSONObject
@@ -95,6 +96,8 @@ class LocalApiServer(
             // Iridium 9603 on the MeshSat node (MESHSAT-1236); both are free, no satellite session
             method == Method.GET && uri == "/api/iridium/status" -> handleIridiumStatus()
             method == Method.POST && uri == "/api/iridium/loopback" -> handleIridiumLoopback(session)
+            // Billed: one satellite session, like the Check Mailbox button (MESHSAT-400)
+            method == Method.POST && uri == "/api/iridium/mailbox" -> handleIridiumMailbox()
 
             // System
             method == Method.POST && uri == "/api/system/restart" -> handleRestart()
@@ -408,6 +411,32 @@ class LocalApiServer(
             put("ok", ok)
             put("bytes", size)
             put("ms", System.currentTimeMillis() - started)
+        })
+    }
+
+    /** Start a mailbox check and wait for its outcome, up to two minutes. */
+    private fun handleIridiumMailbox(): Response {
+        val gw = net.meshsat.android.service.GatewayService
+        if (!gw.checkIridiumMailbox()) {
+            return jsonError(Response.Status.SERVICE_UNAVAILABLE, "a mailbox check is already running, or the service is down")
+        }
+        val done = runBlocking {
+            kotlinx.coroutines.withTimeoutOrNull(120_000) { gw.mailbox.first { !it.running } }
+        } ?: return jsonError(Response.Status.INTERNAL_ERROR, "no outcome within two minutes")
+        val result = done.result ?: return jsonError(Response.Status.INTERNAL_ERROR, "no outcome")
+        return jsonOk(JSONObject().apply {
+            put("result", result::class.simpleName)
+            put("text", net.meshsat.android.ui.components.describeMailboxResult(result))
+            when (result) {
+                is net.meshsat.android.bt.IridiumSpp.MailboxResult.Checked -> {
+                    put("received", result.received)
+                    put("still_queued", result.stillQueued)
+                    put("sent_outgoing", result.sentOutgoing)
+                }
+                is net.meshsat.android.bt.IridiumSpp.MailboxResult.SessionFailed -> put("mo_status", result.moStatus)
+                is net.meshsat.android.bt.IridiumSpp.MailboxResult.Held -> put("held_s", result.seconds)
+                else -> {}
+            }
         })
     }
 

@@ -106,6 +106,25 @@ class GatewayService : Service() {
             private set
         var iridium9704Spp: net.meshsat.android.bt.Iridium9704Spp? = null
             private set
+
+        private var service: GatewayService? = null
+
+        /** A mailbox check the user asked for (MESHSAT-400): running, or its last outcome. */
+        data class MailboxCheck(
+            val running: Boolean = false,
+            val result: IridiumSpp.MailboxResult? = null,
+            val finishedAt: Long = 0,
+        )
+
+        private val _mailbox = MutableStateFlow(MailboxCheck())
+        val mailbox: StateFlow<MailboxCheck> = _mailbox
+
+        /**
+         * Check the Iridium mailbox now: one billed SBDIX (see [IridiumSpp.checkMailbox]). It
+         * runs in the service, so leaving the screen does not lose a received message.
+         * Returns false if the service is not running or a check is already under way.
+         */
+        fun checkIridiumMailbox(): Boolean = service?.startMailboxCheck() ?: false
         val rulesEngine = RulesEngine()
 
         // SOS state
@@ -241,6 +260,7 @@ class GatewayService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        service = this
         settings = SettingsRepository(this)
         db = AppDatabase.getInstance(this)
 
@@ -369,6 +389,7 @@ class GatewayService : Service() {
         msvqscEncoder = null
         net.meshsat.android.sms.SmsReceiver.relayCallback = null
         scope.cancel()
+        if (service === this) service = null
         super.onDestroy()
     }
 
@@ -2704,6 +2725,26 @@ class GatewayService : Service() {
     /** Read the MT buffer, then store and forward the message. */
     private suspend fun receiveIridiumMt(spp: IridiumSpp) {
         val mtText = spp.readMtBuffer() ?: return
+        storeIridiumMt(spp, mtText)
+    }
+
+    private fun startMailboxCheck(): Boolean {
+        synchronized(_mailbox) {
+            if (_mailbox.value.running) return false
+            _mailbox.value = MailboxCheck(running = true)
+        }
+        scope.launch {
+            val spp = iridiumSpp
+            val result = spp?.checkMailbox { bytes -> storeIridiumMt(spp, String(bytes, Charsets.UTF_8)) }
+                ?: IridiumSpp.MailboxResult.NotConnected
+            Log.i("MeshSat", "Iridium mailbox check: $result")
+            _mailbox.value = MailboxCheck(running = false, result = result, finishedAt = System.currentTimeMillis())
+        }
+        return true
+    }
+
+    /** Store an MT message and hand it to the routing rules. */
+    private suspend fun storeIridiumMt(spp: IridiumSpp, mtText: String) {
         val imei = spp.modemInfo.value.imei.ifBlank { "iridium" }
 
         // Dedup: skip if we've already processed this exact message

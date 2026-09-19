@@ -30,6 +30,7 @@ class IridiumSppOverPipeTest {
         val commands: MutableList<String> = Collections.synchronizedList(mutableListOf<String>())
         var echo = true
         var sbdixReply = "+SBDIX: 0, 219, 0, 0, 0, 0"
+        var sbdsxReply = "+SBDSX: 0, 218, 0, -1, 0, 0"
         var mt: ByteArray = ByteArray(0)
         var moWritten: ByteArray? = null
         private var receiver: ((ByteArray) -> Unit)? = null
@@ -87,7 +88,7 @@ class IridiumSppOverPipeTest {
                 command == "AT+CGMM" -> reply(command, "\r\nIRIDIUM 9600 Family SBD Transceiver\r\n\r\nOK\r\n")
                 command == "AT+CGSN" -> reply(command, "\r\n300434067943980\r\n\r\nOK\r\n")
                 command == "AT+CSQ" -> reply(command, "\r\n+CSQ:4\r\n\r\nOK\r\n")
-                command == "AT+SBDSX" -> reply(command, "\r\n+SBDSX: 0, 218, 1, -1, 0, 0\r\n\r\nOK\r\n")
+                command == "AT+SBDSX" -> reply(command, "\r\n$sbdsxReply\r\n\r\nOK\r\n")
                 command.startsWith("AT+SBDWB=") -> {
                     binaryLeft = command.removePrefix("AT+SBDWB=").toInt() + 2
                     binary.reset()
@@ -208,6 +209,64 @@ class IridiumSppOverPipeTest {
         assertEquals("AT+SBDD2", modem.commands.last())
         assertFalse(modem.commands.contains("AT+SBDIX"))
         assertNull(modem.moWritten)
+    }
+
+    @Test
+    fun `an empty mailbox check is one session and reports no messages`() = runBlocking {
+        val modem = FakeModem()
+        val spp = attached(modem)
+        val got = mutableListOf<ByteArray>()
+        val result = spp.checkMailbox { got.add(it) }
+        assertEquals(IridiumSpp.MailboxResult.Checked(received = 0, stillQueued = 0, sentOutgoing = false), result)
+        assertEquals(1, modem.commands.count { it == "AT+SBDIX" })
+        assertTrue(got.isEmpty())
+    }
+
+    @Test
+    fun `a waiting MT is fetched and handed over, and what still waits is reported`() = runBlocking {
+        val modem = FakeModem()
+        val spp = attached(modem)
+        modem.sbdixReply = "+SBDIX: 0, 219, 1, 7, 5, 2"
+        modem.mt = "hello".toByteArray()
+        val got = mutableListOf<String>()
+        val result = spp.checkMailbox { got.add(String(it)) }
+        assertEquals(IridiumSpp.MailboxResult.Checked(received = 1, stillQueued = 2, sentOutgoing = false), result)
+        assertEquals(listOf("hello"), got)
+    }
+
+    @Test
+    fun `an MT already in the buffer is read for free, and a waiting MO goes out in the session`() = runBlocking {
+        val modem = FakeModem()
+        val spp = attached(modem)
+        modem.sbdsxReply = "+SBDSX: 1, 218, 1, 6, 0, 0"
+        modem.mt = "earlier".toByteArray()
+        val got = mutableListOf<String>()
+        val result = spp.checkMailbox { got.add(String(it)) }
+        assertEquals(IridiumSpp.MailboxResult.Checked(received = 1, stillQueued = 0, sentOutgoing = true), result)
+        assertEquals(listOf("earlier"), got)
+        assertTrue(modem.commands.indexOf("AT+SBDRB") < modem.commands.indexOf("AT+SBDIX"))
+    }
+
+    @Test
+    fun `no network is reported, and the next check within the hold sends nothing`() = runBlocking {
+        val modem = FakeModem()
+        val spp = attached(modem)
+        modem.sbdixReply = "+SBDIX: 32, 218, 0, 0, 0, 0"
+        assertEquals(IridiumSpp.MailboxResult.SessionFailed(32), spp.checkMailbox { })
+        val sessions = modem.commands.count { it == "AT+SBDIX" }
+        val held = spp.checkMailbox { }
+        assertTrue(held is IridiumSpp.MailboxResult.Held && held.seconds > 0)
+        assertEquals(sessions, modem.commands.count { it == "AT+SBDIX" })
+    }
+
+    @Test
+    fun `a mailbox check without the modem sends nothing`() = runBlocking {
+        val modem = FakeModem()
+        val spp = attached(modem)
+        spp.detach()
+        val before = modem.commands.size
+        assertEquals(IridiumSpp.MailboxResult.NotConnected, spp.checkMailbox { })
+        assertEquals(before, modem.commands.size)
     }
 
     @Test
