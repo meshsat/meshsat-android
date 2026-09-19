@@ -65,9 +65,12 @@ You need Android 8.0 or later.
 
 1. **Pair your node.** In Setup, open **Your MeshSat node**, tap **Scan for Meshtastic devices**, then **Connect** next to your node and enter its Bluetooth PIN. The scan lists every Meshtastic device in range, so pick the node by its name (a v0 node advertises as `MSIR_` plus four hex digits). A plain Meshtastic radio pairs the same way.
 2. **Satellite.** With **Use the node's modem** on (the default), the app uses the node's RockBLOCK while it is connected. Setup > Satellite shows the modem, with **Poll Signal** and **Check Mailbox**. After a restart the app reconnects to the same node and takes the modem back by itself.
-3. **Hub (optional).** Setup > Hub > **Scan Hub Provision QR**, with the QR code from the Hub. That sets the Hub address, credentials and client certificate.
-4. **SMS.** In Setup > SMS, tap **Allow SMS** and fill in the **Kit phone number**. SOS texts go to that number too.
-5. **Send something.** In Messages, tap **New message** and pick who it is for: a node, everyone on the mesh, a phone number or the satellite. For a satellite message the compose bar shows the bytes and credits before you send. Home shows each way out: a solid line works, a dotted line is not available, and an orange dot is a message on its way.
+3. **Hub (optional).** Setup > Hub > **Scan the Hub's QR code**, with the QR code from the Hub. That sets the Hub address, credentials and client certificate.
+4. **SMS.** In Setup > SMS, tap **Allow SMS** and fill in the **Kit phone number**.
+5. **Emergency contacts.** In Setup > Safety, add the people an SOS goes to by SMS, then tap **Test the alarm** to see every route work.
+6. **Send something.** In Messages, tap **New message** and pick who it is for: a node, everyone on the mesh, a phone number or the satellite. For a satellite message the compose bar shows the bytes and credits before you send. Home shows each way out: a solid line works, a dotted line is not available, and an orange dot is a message on its way.
+
+On first launch a welcome page says what each Android permission is for before Android asks, and Home keeps a **Getting started** list of these steps until they are done.
 
 Routing rules (Setup > Advanced > Routing rules) decide what is forwarded between links automatically, for example mesh messages out by satellite.
 
@@ -81,11 +84,11 @@ Routing rules (Setup > Advanced > Routing rules) decide what is forwarded betwee
 - **Hub.** MQTT with a client certificate. The phone shows up in the Hub's fleet like a field kit, reports health and positions, and takes remote commands: send a message, flush the queue, update config, rotate keys, reboot. When a field kit cannot be reached directly, the app can reach it through a tunnel via the Hub.
 - **TAK.** Positions from the Hub's TAK feed appear on the map. Receive only.
 - **Reticulum.** The phone runs as a Reticulum transport node and relays between the mesh, both Iridium modems, MQTT and TCP peers.
-- **Safety.** SOS sends three alerts 30 seconds apart: over the mesh, by satellite if the modem is connected at that moment, and by SMS to your kit's number. A check-in timer sends SOS if the phone sees no activity for too long, and zones, drawn on the map, record when a mesh node enters or leaves an area.
+- **Safety.** Hold the SOS button on Home for 3 seconds. The SOS goes out on every route the phone has, each one retried until it is sent: by satellite as the Bridge's SOS frame, which the Hub raises as an alarm; as a mesh broadcast, which any MeshSat kit in range relays; by SMS with a map link to each emergency contact; and to the Hub over the internet. It stays on, with a banner on every screen and a line per route saying where it stands, until you cancel it in the app or from the notification. Everyone who got it is then told you are safe. **Test the alarm** uses the same routes with a text that raises no alarm, and a position report instead of the SOS frame by satellite. A check-in timer sends SOS if the phone sees no activity for too long, and zones, drawn on the map, record when a mesh node enters or leaves an area.
 - **Records.** A message queue with everything waiting, sent or given up, and config export and import in YAML or JSON, in the same format as the Bridge.
 - **Local API** on 127.0.0.1:6051, for testing and automation.
 
-The map works without internet down to country level, from a world overview built into the app. The gateway runs as a foreground service, so the phone keeps relaying with the screen off.
+The map works without internet down to country level, from a world overview built into the app. The gateway runs as a foreground service, so the phone keeps relaying with the screen off; to have it start again after a phone restart, switch on **Start after a phone restart** in Setup > Advanced > Diagnostics (off by default). **Night mode**, the moon on Home, turns the whole app red to keep your night vision.
 
 ## What works, and what does not
 
@@ -100,7 +103,11 @@ The map works without internet down to country level, from a world overview buil
 | The phone connected to the Hub as a bridge | Verified 19 September 2026 |
 | Recovery when the node drops out mid-session | Same code as a restart, **not exercised yet** |
 | RockBLOCK 9704 | **Not tested on hardware** |
-| SOS rework: hold to send, emergency contacts, retries through the queue, cancel from the notification | **In development.** Today's SOS works as described above |
+| SOS: hold to send, SMS to an emergency contact, cancel, and the cancellation after it | Verified 19 September 2026 on the Android 11 emulator (2.13.0) |
+| SOS by satellite to the Hub | The frame matches the Bridge's byte for byte in tests. **Not sent through the Hub yet**: it would page the on-call chain |
+| SOS over the mesh and to the Hub online, and Test the alarm on the phone | **Not exercised yet** |
+| SMS on Android 8 to 12 | Broken before 2.13.0 (the app said the phone could not send SMS). Fixed; verified on the Android 11 emulator |
+| Starting after a phone restart (option) | Verified on the Android 11 emulator |
 | A second tick when the Hub confirms a satellite message arrived | **In development** |
 | Deployment to a real end user | **Never** |
 | Use in an actual emergency | **Never** |
