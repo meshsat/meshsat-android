@@ -135,11 +135,23 @@ object MeshtasticProtoAdapter {
         )
     }
 
-    /** Extract NodeInfo from FromRadio. */
+    /**
+     * Extract NodeInfo from FromRadio.
+     *
+     * hops_away has no presence in the bundled proto (upstream made it optional), so 0 reads the
+     * same as "not known". The firmware keeps the SNR of the last packet it heard from the node, so
+     * 0 hops together with a non-zero SNR, not via MQTT, is taken as heard directly; 0 hops with no
+     * SNR is reported as unknown (-1) rather than guessed.
+     */
     fun extractNodeInfo(fromRadio: MeshProtos.FromRadio): MeshtasticProtocol.MeshNodeInfo? {
         if (!fromRadio.hasNodeInfo()) return null
         val ni = fromRadio.nodeInfo
         val user = if (ni.hasUser()) ni.user else null
+        val hopsAway = when {
+            ni.hopsAway > 0 -> ni.hopsAway
+            ni.snr != 0f && !ni.viaMqtt -> 0
+            else -> -1
+        }
         return MeshtasticProtocol.MeshNodeInfo(
             nodeNum = ni.num.toLong() and 0xFFFFFFFFL,
             longName = user?.longName ?: "",
@@ -147,7 +159,37 @@ object MeshtasticProtoAdapter {
             macaddr = user?.macaddr?.toByteArray()?.joinToString(":") { "%02x".format(it) } ?: "",
             hwModel = user?.hwModelValue ?: 0,
             batteryLevel = if (ni.hasDeviceMetrics()) ni.deviceMetrics.batteryLevel else -1,
-            lastHeard = if (ni.lastHeard != 0) ni.lastHeard.toLong() * 1000 else 0,
+            lastHeard = if (ni.lastHeard != 0) (ni.lastHeard.toLong() and 0xFFFFFFFFL) * 1000 else 0,
+            snr = ni.snr,
+            hopsAway = hopsAway,
+            viaMqtt = ni.viaMqtt,
+            isLicensed = user?.isLicensed ?: false,
+        )
+    }
+
+    /**
+     * How our radio heard this packet over the air, or null when it did not: a packet that came
+     * through MQTT, or one with no receive metrics at all (our own node's packets, and anything the
+     * radio did not receive by LoRa, carry rx_snr 0 and rx_rssi 0). hop_start is set by the sender;
+     * hop_start - hop_limit is how many times it was relayed, 0 meaning our radio heard the sender
+     * itself. Without hop_start (older firmware) the hop count is unknown (-1), never guessed.
+     */
+    fun extractLinkSignal(fromRadio: MeshProtos.FromRadio): MeshtasticProtocol.MeshLinkSignal? {
+        if (!fromRadio.hasPacket()) return null
+        val pkt = fromRadio.packet
+        if (pkt.viaMqtt) return null
+        if (pkt.rxSnr == 0f && pkt.rxRssi == 0) return null
+        val from = pkt.from.toLong() and 0xFFFFFFFFL
+        if (from == 0L) return null
+        val hopStart = pkt.hopStart
+        val hopLimit = pkt.hopLimit
+        val hops = if (hopStart > 0 && hopLimit in 0..hopStart) hopStart - hopLimit else -1
+        return MeshtasticProtocol.MeshLinkSignal(
+            from = from,
+            snr = pkt.rxSnr,
+            rssi = pkt.rxRssi,
+            hopsAway = hops,
+            heardAt = System.currentTimeMillis(),
         )
     }
 
@@ -227,14 +269,20 @@ object MeshtasticProtoAdapter {
             return null
         }
 
+        // node_id is the reporter; fall back to the packet's sender if a firmware leaves it out.
+        val reporter = (ni.nodeId.toLong() and 0xFFFFFFFFL).takeIf { it != 0L }
+            ?: (pkt.from.toLong() and 0xFFFFFFFFL)
         return MeshtasticProtocol.MeshNeighborInfo(
-            nodeId = ni.nodeId.toLong() and 0xFFFFFFFFL,
-            neighbors = ni.neighborsList.map { n ->
-                MeshtasticProtocol.MeshNeighbor(
-                    nodeId = n.nodeId.toLong() and 0xFFFFFFFFL,
-                    snr = n.snr,
-                )
-            },
+            nodeId = reporter,
+            neighbors = ni.neighborsList
+                .filter { it.nodeId != 0 }
+                .map { n ->
+                    MeshtasticProtocol.MeshNeighbor(
+                        nodeId = n.nodeId.toLong() and 0xFFFFFFFFL,
+                        snr = n.snr,
+                    )
+                },
+            broadcastIntervalSecs = ni.nodeBroadcastIntervalSecs,
         )
     }
 
@@ -361,10 +409,12 @@ object MeshtasticProtoAdapter {
         return MeshtasticProtocol.MeshChannel(
             index = ch.index,
             name = settings?.name ?: "",
-            role = ch.role.number,
+            // roleValue, not role.number: an enum value this proto does not know would throw.
+            role = ch.roleValue,
             psk = settings?.psk?.toByteArray() ?: ByteArray(0),
             uplinkEnabled = settings?.uplinkEnabled ?: false,
             downlinkEnabled = settings?.downlinkEnabled ?: false,
+            settings = settings,
         )
     }
 

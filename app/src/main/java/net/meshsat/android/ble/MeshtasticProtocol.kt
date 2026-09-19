@@ -1,5 +1,6 @@
 package net.meshsat.android.ble
 
+import com.geeksville.mesh.ChannelProtos
 import com.geeksville.mesh.ConfigProtos
 import com.geeksville.mesh.MeshProtos
 import com.geeksville.mesh.ModuleConfigProtos
@@ -78,7 +79,11 @@ object MeshtasticProtocol {
         val gasResistance: Float = 0f,
     )
 
-    /** Node info from mesh. */
+    /**
+     * Node info from mesh. [snr] and [hopsAway] are what the radio's own node list says about the
+     * last packet it heard from the node: [hopsAway] 0 means heard directly, -1 means the radio
+     * does not know (the proto has no presence for hops_away, see MeshtasticProtoAdapter).
+     */
     data class MeshNodeInfo(
         val nodeNum: Long,
         val longName: String = "",
@@ -87,6 +92,10 @@ object MeshtasticProtocol {
         val hwModel: Int = 0,
         val batteryLevel: Int = -1,
         val lastHeard: Long = 0,
+        val snr: Float = 0f,
+        val hopsAway: Int = -1,
+        val viaMqtt: Boolean = false,
+        val isLicensed: Boolean = false,
     )
 
     /** My node info (this radio's device info). */
@@ -130,15 +139,44 @@ object MeshtasticProtocol {
         val icon: Int = 0,
     )
 
-    /** Neighbor info — mesh topology data. */
+    /** Neighbor info — mesh topology data: [nodeId] reports the nodes it hears directly. */
     data class MeshNeighborInfo(
         val nodeId: Long,
         val neighbors: List<MeshNeighbor>,
+        val broadcastIntervalSecs: Int = 0,
     )
 
+    /** One node a NeighborInfo sender hears, and the SNR (dB) it hears it at. */
     data class MeshNeighbor(
         val nodeId: Long,
         val snr: Float,
+    )
+
+    /** A NeighborInfo packet as the phone keeps it: who reported, whom it hears, and when it arrived. */
+    data class NeighborReport(
+        val nodeId: Long,
+        val neighbors: List<MeshNeighbor>,
+        val broadcastIntervalSecs: Int,
+        val receivedAt: Long,
+    )
+
+    /**
+     * How our radio heard the last packet from [from], over the air: the signal of the last hop
+     * ([snr] in dB, [rssi] in dBm) and how many hops the packet had taken ([hopsAway], -1 when the
+     * packet does not say, e.g. older firmware that sends no hop_start).
+     */
+    data class MeshLinkSignal(
+        val from: Long,
+        val snr: Float,
+        val rssi: Int,
+        val hopsAway: Int,
+        val heardAt: Long,
+    )
+
+    /** What one FromRadio frame says about links: the packet's signal, and a NeighborInfo if it is one. */
+    data class LinkObservation(
+        val signal: MeshLinkSignal?,
+        val neighborInfo: MeshNeighborInfo?,
     )
 
     /** Traceroute result. */
@@ -187,7 +225,10 @@ object MeshtasticProtocol {
         val emoji: Int = 0,
     )
 
-    /** Channel configuration from radio. */
+    /**
+     * Channel configuration from radio. [settings] is the radio's own ChannelSettings, kept so an
+     * edit changes only what the user changed (position precision, id and the rest ride along).
+     */
     data class MeshChannel(
         val index: Int,
         val name: String,
@@ -195,11 +236,16 @@ object MeshtasticProtocol {
         val psk: ByteArray,
         val uplinkEnabled: Boolean = false,
         val downlinkEnabled: Boolean = false,
+        val settings: ChannelProtos.ChannelSettings? = null,
     ) {
+        // Every field counts: with only index, name and role, the channels StateFlow swallowed a
+        // re-read that changed the key or the MQTT switches, and the screen kept showing the old ones.
         override fun equals(other: Any?): Boolean {
             if (this === other) return true
             if (other !is MeshChannel) return false
-            return index == other.index && name == other.name && role == other.role
+            return index == other.index && name == other.name && role == other.role &&
+                psk.contentEquals(other.psk) && uplinkEnabled == other.uplinkEnabled &&
+                downlinkEnabled == other.downlinkEnabled && settings == other.settings
         }
         override fun hashCode(): Int = index * 31 + name.hashCode()
     }
@@ -349,6 +395,18 @@ object MeshtasticProtocol {
         return MeshtasticProtoAdapter.extractWaypoint(fromRadio)
     }
 
+    /**
+     * What one raw FromRadio frame says about mesh links: the over-the-air signal of its packet and,
+     * for a NEIGHBORINFO_APP packet, the neighbours it reports. Null when it says nothing.
+     */
+    fun parseLinkObservation(data: ByteArray): LinkObservation? {
+        val fromRadio = MeshtasticProtoAdapter.parseFromRadio(data) ?: return null
+        val signal = MeshtasticProtoAdapter.extractLinkSignal(fromRadio)
+        val neighbors = MeshtasticProtoAdapter.extractNeighborInfo(fromRadio)
+        if (signal == null && neighbors == null) return null
+        return LinkObservation(signal, neighbors)
+    }
+
     /** Parse neighbor info from FromRadio. */
     fun parseNeighborInfoFromRadio(data: ByteArray): MeshNeighborInfo? {
         val fromRadio = MeshtasticProtoAdapter.parseFromRadio(data) ?: return null
@@ -383,6 +441,55 @@ object MeshtasticProtocol {
 
     /** Format a node number as hex string (e.g., !27ca8f1c). */
     fun formatNodeId(num: Long): String = "!%08x".format(num)
+
+    /**
+     * want_config_id nonce that asks for the configuration only, without the node list
+     * (firmware PhoneAPI SPECIAL_NONCE_ONLY_CONFIG). Older firmware treats it as a normal
+     * want_config and sends everything, which is harmless.
+     */
+    const val WANT_CONFIG_ONLY_CONFIG = 69420
+
+    // Names for models the bundled proto predates or spells in a way people do not use.
+    private val hardwareNames = mapOf(
+        4 to "LilyGO T-Beam",
+        7 to "LilyGO T-Echo",
+        9 to "RAK WisBlock 4631",
+        12 to "LilyGO T-Beam Supreme",
+        43 to "Heltec V3",
+        44 to "Heltec Wireless Stick Lite V3",
+        48 to "Heltec Wireless Tracker",
+        50 to "LilyGO T-Deck",
+        51 to "LilyGO T-Watch S3",
+        65 to "Heltec Capsule Sensor V3",
+        69 to "Heltec Mesh Node T114",
+        71 to "Seeed Card Tracker T1000-E",
+        80 to "M5Stack CoreS3",
+        81 to "Seeed XIAO ESP32-S3",
+        88 to "Seeed XIAO nRF52840 kit",
+        89 to "ThinkNode M1",
+        90 to "ThinkNode M2",
+        94 to "Heltec Mesh Pocket",
+        95 to "Seeed Solar Node",
+        99 to "Seeed Wio Tracker L1",
+        102 to "LilyGO T-Deck Pro",
+        103 to "LilyGO T-Lora Pager",
+        110 to "Heltec V4",
+        255 to "Custom hardware",
+    )
+
+    /**
+     * The hardware model a node reports (User.hw_model), as a name people recognise. One mapping
+     * for every screen: "Unknown model (code N)" when neither this app nor its proto knows the code.
+     */
+    fun hardwareName(code: Int): String {
+        if (code == 0) return "Unknown model"
+        hardwareNames[code]?.let { return it }
+        val known = MeshProtos.HardwareModel.forNumber(code) ?: return "Unknown model (code $code)"
+        return known.name.split('_').joinToString(" ") { word ->
+            if (word.any { it.isDigit() } || word.length <= 3) word
+            else word.lowercase().replaceFirstChar { it.uppercase() }
+        }
+    }
 
     // ═══════════════════════════════════════════════════════════════
     // Admin message encoding — delegates to adapter
