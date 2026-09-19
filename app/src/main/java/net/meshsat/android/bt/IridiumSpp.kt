@@ -115,6 +115,14 @@ class IridiumSpp(private val clock: () -> Long = System::currentTimeMillis) {
     /** The node's pipe is ours but no modem has answered AT for [WAKE_GRACE_MS]: none is fitted, or it has no power. */
     val modemSilent: StateFlow<Boolean> = _modemSilent
 
+    /**
+     * Where a message brought in by any satellite session goes, e.g. to be stored and shown. Every
+     * session downloads one waiting message into the modem, whatever started it, and the modem keeps
+     * only one: read later, it is overwritten by the next. On 19 Sep two messages from Rock7 were
+     * lost that way while messages were being sent.
+     */
+    @Volatile var mtSink: (suspend (ByteArray) -> Unit)? = null
+
     private val _ringAlerts = MutableSharedFlow<Unit>(extraBufferCapacity = 4)
 
     /** The modem reported a waiting MT message (unsolicited SBDRING). */
@@ -133,6 +141,8 @@ class IridiumSpp(private val clock: () -> Long = System::currentTimeMillis) {
         val mtMsn: Int,
         val mtLength: Int,
         val mtQueued: Int,
+        /** The message this session brought in, already read from the modem, or null. */
+        val mt: ByteArray? = null,
     ) {
         val moSuccess get() = moStatus in 0..4
         val mtAvailable get() = mtStatus == 1
@@ -335,7 +345,7 @@ class IridiumSpp(private val clock: () -> Long = System::currentTimeMillis) {
      * SBD session (AT+SBDIX), billed. Refused while held after status 32/36. On success the
      * MO buffer is cleared.
      */
-    suspend fun sbdix(): SbdixResult? {
+    suspend fun sbdix(deliverMt: Boolean = true): SbdixResult? {
         if (!isWireReady()) return null
         val hold = sbdixHoldRemainingMs()
         if (hold > 0) {
@@ -371,7 +381,21 @@ class IridiumSpp(private val clock: () -> Long = System::currentTimeMillis) {
                 result.moStatus == 32 || result.moStatus == 36 -> sbdixHeldUntil = clock() + SBDIX_HOLD_MS
                 result.moSuccess -> clearMoBuffer()
             }
-            result
+            // A message came in with this session: read it now, before another session overwrites it.
+            val mt = if (result.mtAvailable) readMtBinary()?.takeIf { it.isNotEmpty() } else null
+            if (mt != null) {
+                Log.i(TAG, "SBDIX brought a message in: ${mt.size} bytes, MTMSN ${result.mtMsn}")
+                if (deliverMt) {
+                    mtSink?.let { sink ->
+                        try {
+                            sink(mt)
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Storing the message that came in failed: ${e.message}")
+                        }
+                    }
+                }
+            }
+            result.copy(mt = mt)
         } catch (e: Exception) {
             _error.emit("SBDIX failed: ${e.message}")
             null
@@ -485,11 +509,10 @@ class IridiumSpp(private val clock: () -> Long = System::currentTimeMillis) {
         if (status?.mtFlag == true) {
             readMtBinary()?.takeIf { it.isNotEmpty() }?.let { onMessage(it); received++ }
         }
-        val result = sbdix() ?: return MailboxResult.NoAnswer
+        // The session's message is handed over here, not through mtSink, so it is stored once.
+        val result = sbdix(deliverMt = false) ?: return MailboxResult.NoAnswer
+        result.mt?.let { onMessage(it); received++ }
         if (!result.moSuccess) return MailboxResult.SessionFailed(result.moStatus)
-        if (result.mtAvailable) {
-            readMtBinary()?.takeIf { it.isNotEmpty() }?.let { onMessage(it); received++ }
-        }
         return MailboxResult.Checked(received, result.mtQueued, sentOutgoing = status?.moFlag == true)
     }
 

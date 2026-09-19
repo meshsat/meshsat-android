@@ -184,6 +184,21 @@ class IridiumSppOverPipeTest {
     }
 
     @Test
+    fun `a session that brings a message in hands it over at once, whatever started it`() = runBlocking {
+        val modem = FakeModem().apply {
+            sbdixReply = "+SBDIX: 0, 220, 1, 7, 5, 0"
+            mt = "hello".toByteArray()
+        }
+        val spp = attached(modem)
+        val got = Collections.synchronizedList(mutableListOf<String>())
+        spp.mtSink = { got.add(String(it)) }
+        val result = spp.sbdix()
+        assertEquals(listOf("hello"), got.toList())
+        assertEquals("hello", String(result!!.mt!!))
+        assertTrue(modem.commands.contains("AT+SBDRB"))
+    }
+
+    @Test
     fun `SBDWB sends the payload with its checksum, binary-safe`() = runBlocking {
         val modem = FakeModem()
         val spp = attached(modem)
