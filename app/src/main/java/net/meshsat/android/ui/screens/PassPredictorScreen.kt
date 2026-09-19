@@ -225,12 +225,12 @@ fun PassPredictorScreen() {
                         onClick = {
                             scope.launch {
                                 refreshing = true
-                                val got = fetcher.refreshFromCelestrak()
+                                val got = fetcher.refreshFromNetwork()
                                 refreshing = false
                                 if (got == null) {
                                     android.widget.Toast.makeText(
                                         context,
-                                        "Could not download new elements; predicting offline with the ones on the phone.",
+                                        "Could not download new elements (Celestrak or TLE API); predicting offline with the ones on the phone.",
                                         android.widget.Toast.LENGTH_LONG,
                                     ).show()
                                 }

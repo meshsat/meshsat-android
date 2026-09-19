@@ -1042,7 +1042,7 @@ class GatewayService : Service() {
                 val now = System.currentTimeMillis()
                 if (now - lastAttemptMs >= 12 * 3600_000L && fetcher.isCacheStale()) {
                     lastAttemptMs = now
-                    fetcher.refreshFromCelestrak()
+                    fetcher.refreshFromNetwork()
                 }
                 delay(3600_000L)
             }

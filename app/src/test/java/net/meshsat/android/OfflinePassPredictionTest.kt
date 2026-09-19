@@ -23,6 +23,17 @@ class OfflinePassPredictionTest {
     }
 
     @Test
+    fun `the TLE API fallback keeps Iridium NEXT and drops the first generation and debris`() {
+        assertTrue(TleFetcher.isIridiumNext("IRIDIUM 106"))
+        assertTrue(TleFetcher.isIridiumNext("IRIDIUM 180 "))
+        assertTrue(!TleFetcher.isIridiumNext("IRIDIUM 7"))
+        assertTrue(!TleFetcher.isIridiumNext("IRIDIUM 33 DEB"))
+        assertTrue(!TleFetcher.isIridiumNext("IRIDIUM 97"))
+        // The filter reproduces Celestrak's iridium-NEXT group exactly.
+        assertTrue(bundled.all { TleFetcher.isIridiumNext(it.name) })
+    }
+
+    @Test
     fun `the newer set wins, and the snapshot fills in when nothing was downloaded`() {
         val older = bundled.map { it.copy(epochJd = it.epochJd - 30) }
         assertEquals(TleFetcher.Source.Bundled, TleFetcher.choose(emptyList(), bundled).source)
