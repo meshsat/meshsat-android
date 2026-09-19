@@ -87,11 +87,9 @@ class RnsIridiumInterface(
 
         return try {
             val status = spp.sbdStatus() ?: return false
+            // The MT flag means the message is already in the modem's buffer: reading it is
+            // free, while an SBDIX here would be billed for nothing (MESHSAT-1236).
             if (!status.mtFlag) return false
-
-            // Initiate session to receive MT
-            val result = spp.sbdix() ?: return false
-            if (result.mtStatus != 1 || result.mtLength <= 0) return false
 
             handleMtMessage()
             true
@@ -102,8 +100,8 @@ class RnsIridiumInterface(
     }
 
     private suspend fun handleMtMessage() {
-        val mtData = spp.readMtBuffer() ?: return
-        val mtBytes = mtData.toByteArray(Charsets.ISO_8859_1)
+        // Binary read: a Reticulum packet is not text and does not survive AT+SBDRT.
+        val mtBytes = spp.readMtBinary() ?: return
 
         // Check for RNS magic byte
         if (mtBytes.isEmpty() || mtBytes[0] != SBD_RNS_MAGIC) {

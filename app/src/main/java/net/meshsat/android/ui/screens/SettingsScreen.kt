@@ -66,12 +66,14 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import net.meshsat.android.ble.MeshtasticBle
+import net.meshsat.android.ble.IridiumPipeContract
 import net.meshsat.android.bt.IridiumSpp
 import net.meshsat.android.crypto.AesGcmCrypto
 import net.meshsat.android.data.SettingsRepository
 import net.meshsat.android.map.MBTilesManager
 import net.meshsat.android.service.GatewayService
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import net.meshsat.android.ui.theme.ColorIridium
@@ -200,6 +202,12 @@ fun SettingsScreen(navController: NavController? = null) {
     val iridiumState = GatewayService.iridiumSpp?.state?.collectAsState()
     val iridiumSignal = GatewayService.iridiumSpp?.signal?.collectAsState()
     val modemInfo = GatewayService.iridiumSpp?.modemInfo?.collectAsState()
+    // The 9603 lives on the MeshSat node, behind its BLE pipe (MESHSAT-1236).
+    val iridiumPipe by (GatewayService.meshtasticBle?.iridiumPipe ?: MutableStateFlow(null)).collectAsState()
+    val pipeOwner by remember(iridiumPipe) {
+        iridiumPipe?.owner ?: MutableStateFlow(IridiumPipeContract.Owner.Unknown)
+    }.collectAsState()
+    val nodePipeEnabled by settings.iridiumNodePipeEnabled.collectAsState(initial = true)
 
     // Iridium 9704 state
     val iridium9704State = GatewayService.iridium9704Spp?.state?.collectAsState()
@@ -310,11 +318,6 @@ fun SettingsScreen(navController: NavController? = null) {
         } else {
             Toast.makeText(context, "Bluetooth permissions required for BLE scan", Toast.LENGTH_LONG).show()
         }
-    }
-
-    // HC-05 paired devices
-    val pairedHc05 = remember {
-        GatewayService.iridiumSpp?.getPairedDevices() ?: emptyList()
     }
 
     Column(
@@ -499,24 +502,31 @@ fun SettingsScreen(navController: NavController? = null) {
             }
         }
 
-        // --- Iridium HC-05 Section ---
-        SectionCard("Iridium HC-05 SPP") {
+        // --- Iridium 9603 on the MeshSat node (MESHSAT-1236) ---
+        SectionCard("Iridium 9603 (MeshSat node)") {
             val state = iridiumState?.value ?: IridiumSpp.State.Disconnected
             ConnectionStatusRow(
                 label = "Status",
                 connected = state == IridiumSpp.State.Connected,
-                statusText = when (state) {
-                    IridiumSpp.State.Connected -> {
-                        val sig = iridiumSignal?.value ?: 0
-                        "Connected (Signal: $sig/5)"
-                    }
-                    IridiumSpp.State.Connecting -> "Connecting..."
-                    IridiumSpp.State.Disconnected -> "Disconnected"
+                statusText = when {
+                    state == IridiumSpp.State.Connected -> "Connected (Signal: ${iridiumSignal?.value ?: 0}/5)"
+                    state == IridiumSpp.State.Connecting -> "Checking the modem..."
+                    !nodePipeEnabled -> "Off: the node keeps its modem"
+                    iridiumPipe == null -> "No MeshSat node connected"
+                    pipeOwner == IridiumPipeContract.Owner.Node -> "The node is using its modem"
+                    else -> "Waiting for the node"
                 },
                 color = ColorIridium,
             )
 
-            // Show modem info when connected
+            SettingRow("Use the node's modem") {
+                Switch(
+                    checked = nodePipeEnabled,
+                    onCheckedChange = { scope.launch { settings.setIridiumNodePipeEnabled(it) } },
+                    colors = SwitchDefaults.colors(checkedTrackColor = MeshSatTeal),
+                )
+            }
+
             if (state == IridiumSpp.State.Connected) {
                 modemInfo?.value?.let { info ->
                     if (info.manufacturer.isNotBlank()) {
@@ -530,66 +540,24 @@ fun SettingsScreen(navController: NavController? = null) {
                     }
                 }
 
-                Row(
+                Button(
+                    onClick = {
+                        scope.launch {
+                            val sig = GatewayService.iridiumSpp?.pollSignal()
+                            Toast.makeText(context, "Signal: $sig/5", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MeshSatTeal),
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Button(
-                        onClick = {
-                            scope.launch {
-                                val sig = GatewayService.iridiumSpp?.pollSignal()
-                                Toast.makeText(context, "Signal: $sig/5", Toast.LENGTH_SHORT).show()
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = MeshSatTeal),
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Text("Poll Signal", style = MaterialTheme.typography.bodySmall)
-                    }
-                    Button(
-                        onClick = {
-                            context.startService(
-                                Intent(context, GatewayService::class.java)
-                                    .setAction(GatewayService.ACTION_DISCONNECT_IRIDIUM)
-                            )
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = MeshSatRed),
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Text("Disconnect", style = MaterialTheme.typography.bodySmall)
-                    }
+                    Text("Poll Signal", style = MaterialTheme.typography.bodySmall)
                 }
-            }
-
-            // Show paired HC-05/06 devices when disconnected
-            if (state == IridiumSpp.State.Disconnected) {
-                if (pairedHc05.isNotEmpty()) {
-                    Text(
-                        text = "Paired HC-05/06 devices:",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MeshSatTextMuted,
-                    )
-                    pairedHc05.forEach { device ->
-                        @Suppress("MissingPermission")
-                        DeviceRow(
-                            name = device.name ?: "HC-05",
-                            address = device.address,
-                            onClick = {
-                                context.startService(
-                                    Intent(context, GatewayService::class.java)
-                                        .setAction(GatewayService.ACTION_CONNECT_IRIDIUM)
-                                        .putExtra(GatewayService.EXTRA_ADDRESS, device.address)
-                                )
-                            },
-                        )
-                    }
-                } else {
-                    Text(
-                        text = "No paired HC-05/06 modules found. Pair the HC-05 in Android Bluetooth settings first.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MeshSatTextMuted,
-                    )
-                }
+            } else if (iridiumPipe == null) {
+                Text(
+                    text = "The RockBLOCK 9603 is reached through a MeshSat node. Connect the node under Meshtastic; its modem appears here.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MeshSatTextMuted,
+                )
             }
         }
 
