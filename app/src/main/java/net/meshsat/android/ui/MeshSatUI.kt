@@ -6,7 +6,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -122,7 +124,15 @@ fun MeshSatUI() {
             }
         }
     ) { padding ->
-        Box(modifier = Modifier.padding(padding)) {
+        // Edge to edge (enableEdgeToEdge), the window is no longer resized for the keyboard, so
+        // the content makes room for it itself; consuming the bar padding first keeps the bottom
+        // bar's height from being counted twice under the keyboard.
+        Box(
+            modifier = Modifier
+                .padding(padding)
+                .consumeWindowInsets(padding)
+                .imePadding(),
+        ) {
             // MapScreen lives OUTSIDE NavHost — always in the view tree, never
             // destroyed by navigation. Shown/hidden via alpha + input blocking.
             // This is the only reliable way to keep osmdroid's MapView alive
