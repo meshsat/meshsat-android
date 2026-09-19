@@ -121,11 +121,11 @@ fun MapButton(icon: ImageVector, description: String, onClick: () -> Unit, modif
  * the OpenStreetMap credit while they can.
  */
 @Composable
-fun MapStatusNote(detailed: DetailedMap?, modifier: Modifier = Modifier) {
+fun MapStatusNote(detailed: DetailedMap?, modifier: Modifier = Modifier, worldOnlyNote: String? = null) {
     val offline by MapTiles.offline.collectAsState()
     val text = when {
         offline && detailed != null -> "Offline map: ${detailed.name}. Outside it, the world overview."
-        offline -> "Offline map: world overview, country level only. Add a detailed map in Setup > Maps."
+        offline -> worldOnlyNote ?: "Offline map: world overview, country level only. Add a detailed map in Setup > Maps."
         else -> null
     }
     Column(modifier = modifier.widthIn(max = 320.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {

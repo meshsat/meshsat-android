@@ -398,8 +398,11 @@ fun GeofenceScreen() {
                 MapButton(Icons.Outlined.Add, "Zoom in", { mapView.controller.zoomIn() })
                 MapButton(Icons.Outlined.Remove, "Zoom out", { mapView.controller.zoomOut() })
             }
+            // The world overview stops at country level (zoom 3), far above any zone, so zooming out
+            // would only shrink the zone to a dot: the map keeps its zoom and says what still works.
             MapStatusNote(
                 detailed = detailed,
+                worldOnlyNote = "Offline, with no street detail here. Zones still work: place one around your position. For detail, add a map in Setup > Maps.",
                 modifier = Modifier
                     .align(Alignment.BottomStart)
                     .padding(start = 8.dp, bottom = 8.dp, end = 64.dp),
