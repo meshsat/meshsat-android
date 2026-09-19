@@ -3398,9 +3398,18 @@ class GatewayService : Service() {
         } catch (e: Exception) {
             Log.w("MeshSat", "startForeground with type failed, retrying: ${e.message}")
             try {
-                // Fallback: remoteMessaging only (always safe on API 34+)
+                // Fallback without location, which Android refuses to a service started at boot
+                // before the app has been opened; Bluetooth stays, so the node still connects
+                // (MESHSAT-1249). remoteMessaging alone is always allowed on API 34+.
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                    startForeground(1, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_REMOTE_MESSAGING)
+                    val bt = ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
+                    val types = ServiceInfo.FOREGROUND_SERVICE_TYPE_REMOTE_MESSAGING or
+                        (if (bt) ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE else 0)
+                    try {
+                        startForeground(1, notification, types)
+                    } catch (e3: Exception) {
+                        startForeground(1, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_REMOTE_MESSAGING)
+                    }
                 } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     startForeground(1, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
                 } else {
