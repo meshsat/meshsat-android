@@ -30,6 +30,10 @@ interface MessageDeliveryDao {
     @Query("UPDATE message_deliveries SET status = 'retry', retries = :retries, next_retry = :nextRetry, last_error = :lastError, updated_at = :now WHERE id = :id")
     suspend fun scheduleRetry(id: Long, retries: Int, nextRetry: Long, lastError: String, now: Long = System.currentTimeMillis())
 
+    /** Wait until [nextRetry] without counting a try: the channel could not take it just now. */
+    @Query("UPDATE message_deliveries SET status = 'retry', next_retry = :nextRetry, last_error = :lastError, updated_at = :now WHERE id = :id")
+    suspend fun deferRetry(id: Long, nextRetry: Long, lastError: String, now: Long = System.currentTimeMillis())
+
     @Query("UPDATE message_deliveries SET status = 'dead', last_error = 'cancelled', updated_at = :now WHERE id = :id AND status IN ('queued', 'retry')")
     suspend fun cancel(id: Long, now: Long = System.currentTimeMillis())
 

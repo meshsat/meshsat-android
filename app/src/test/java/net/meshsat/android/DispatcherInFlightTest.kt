@@ -132,6 +132,78 @@ class DispatcherInFlightTest {
         }
     }
 
+    @Test
+    fun `a not-now answer waits without counting a try and stops the batch`() = runBlocking {
+        val rows = listOf(
+            MessageDeliveryEntity(id = 1, msgRef = "msg:1", channel = "iridium_0", textPreview = "old", maxRetries = 0),
+            MessageDeliveryEntity(id = 2, msgRef = "msg:2", channel = "iridium_0", textPreview = "new", maxRetries = 0),
+        )
+        val calls = Collections.synchronizedList(mutableListOf<String>())
+        var served = false
+        val dao = fake<MessageDeliveryDao> { name, args ->
+            when (name) {
+                "getPending" -> if (served) emptyList<MessageDeliveryEntity>() else { served = true; rows }
+                "getById" -> rows.first { it.id == args[0] as Long }
+                "deferRetry" -> { calls.add("defer:${args[0]}"); Unit }
+                "scheduleRetry" -> { calls.add("retry:${args[0]}"); Unit }
+                else -> NONE
+            }
+        }
+        val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+        val attempts = Collections.synchronizedList(mutableListOf<String>())
+        val dispatcher = Dispatcher(
+            deliveryDao = dao,
+            accessEvaluator = AccessEvaluator(fake<AccessRuleDao>(), fake<ObjectGroupDao>(), scope),
+            failoverResolver = null,
+            registry = ChannelRegistry(),
+            deliveryCallback = { _, _, text ->
+                attempts.add(text)
+                "${Dispatcher.NOT_NOW}120000 the modem pauses"
+            },
+            scope = scope,
+        )
+        try {
+            dispatcher.startWorker("iridium_0")
+            withTimeout(10_000) { while ("defer:1" !in calls) delay(10) }
+            delay(300)
+            assertEquals(listOf("old"), attempts.toList())
+            assertEquals(listOf("defer:1"), calls.toList())
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun `a successful send makes the channel's other waiting messages due now`() = runBlocking {
+        val row = MessageDeliveryEntity(id = 5, msgRef = "msg:5", channel = "iridium_0", textPreview = "tst2", maxRetries = 0)
+        val woken = Collections.synchronizedList(mutableListOf<String>())
+        var served = false
+        val dao = fake<MessageDeliveryDao> { name, args ->
+            when (name) {
+                "getPending" -> if (served) emptyList<MessageDeliveryEntity>() else { served = true; listOf(row) }
+                "getById" -> row
+                "retryNowForChannel" -> { woken.add(args[0] as String); 2 }
+                else -> NONE
+            }
+        }
+        val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+        val dispatcher = Dispatcher(
+            deliveryDao = dao,
+            accessEvaluator = AccessEvaluator(fake<AccessRuleDao>(), fake<ObjectGroupDao>(), scope),
+            failoverResolver = null,
+            registry = ChannelRegistry(),
+            deliveryCallback = { _, _, _ -> null },
+            scope = scope,
+        )
+        try {
+            dispatcher.startWorker("iridium_0")
+            withTimeout(10_000) { while (woken.isEmpty()) delay(10) }
+            assertEquals(listOf("iridium_0"), woken.toList())
+        } finally {
+            scope.cancel()
+        }
+    }
+
     private companion object {
         val NONE = Any()
     }

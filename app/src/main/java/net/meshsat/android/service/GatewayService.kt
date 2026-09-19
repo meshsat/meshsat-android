@@ -111,6 +111,8 @@ class GatewayService : Service() {
         private var service: GatewayService? = null
         private const val IRIDIUM_STATUS_NOTIFICATION_ID = 7603
         const val IRIDIUM_QUEUED = "iridium:queued"
+        /** A satellite send that reported a failure after the upload, so it may have arrived. */
+        const val IRIDIUM_UNCONFIRMED = "iridium:unconfirmed"
         /** How often the node is asked again for its modem while the phone does not hold it. */
         private const val PIPE_CLAIM_RETRY_MS = 15_000L
         private const val PIPE_CLAIM_FIRST_RETRY_MS = 3_000L
@@ -2128,6 +2130,13 @@ class GatewayService : Service() {
                         }
                     }
                 }
+                // A satellite send that reported a failure after the upload may have arrived: the chat
+                // shows "May have been sent" until a retry is confirmed (MESHSAT-1243).
+                disp.onUnconfirmed = { del, _ ->
+                    if (del.channel == "iridium_0" && del.msgRef.startsWith("msg:")) {
+                        del.msgRef.removePrefix("msg:").toLongOrNull()?.let { db.messageDao().setForwardedTo(it, IRIDIUM_UNCONFIRMED) }
+                    }
+                }
                 disp.nextWindowStart = { channelId, afterMs ->
                     if (channelId.startsWith("iridium")) nextIridiumWindowStart(afterMs) else null
                 }
@@ -2174,15 +2183,25 @@ class GatewayService : Service() {
                         ?: return "iridium not available"
                     if (spp.state.value != IridiumSpp.State.Connected)
                         return "iridium not connected"
+                    // The modem's pause after a session found no network is not this message's
+                    // failure: it waits without using up a try (MESHSAT-1243).
+                    val hold = spp.sbdixHoldRemainingMs()
+                    if (hold > 0) return "${Dispatcher.NOT_NOW}$hold the satellite modem pauses after a session found no network"
                     val data = if (payload.isNotEmpty()) payload else textPreview.toByteArray()
                     // Fragment messages >340B using Iridium 2-byte header.
                     val fragments = IridiumFragment.fragment(data, IridiumFragment.MO_MTU, nextMsgID())
                     val chunks = fragments ?: listOf(data)
                     for ((i, chunk) in chunks.withIndex()) {
+                        val part = if (chunks.size > 1) " (part ${i + 1} of ${chunks.size})" else ""
                         val written = spp.writeMoBuffer(chunk)
-                        if (!written) return "MO buffer write failed (fragment $i/${chunks.size})"
-                        val result = spp.sbdix()
-                        if (result?.moSuccess != true) return "SBDIX failed (fragment $i/${chunks.size}): mo_status=${result?.moStatus}"
+                        if (!written) return "Could not hand the message to the modem$part"
+                        val result = spp.sbdix() ?: return "The modem gave no readable answer$part"
+                        if (!result.moSuccess) {
+                            val why = "status ${result.moStatus}, ${IridiumSpp.moStatusText(result.moStatus)}, MOMSN ${result.moMsn}$part"
+                            // The upload may have reached the gateway before the link was cut: say so,
+                            // and retry all the same, so a message is never lost (a duplicate costs a credit).
+                            return if (result.moStatus in IridiumSpp.MO_MAYBE_SENT) "${Dispatcher.UNCONFIRMED} $why" else "Not sent: $why"
+                        }
                     }
                     null // success: Dispatcher.onSent records it
                 }

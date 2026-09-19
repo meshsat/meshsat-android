@@ -1,5 +1,6 @@
 package net.meshsat.android.bt
 
+import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -53,6 +54,37 @@ class IridiumSpp(private val clock: () -> Long = System::currentTimeMillis) {
         /** Silent this long, the modem is reported as not answering; the checks go on, slower. */
         const val WAKE_GRACE_MS = 60_000L
         const val SILENT_RETRY_MS = 30_000L
+        private const val TAG = "IridiumSpp"
+
+        /**
+         * MO statuses where the message may have reached the gateway although the modem reports a
+         * failure: the session was cut after the upload (9602/9603 AT manual, +SBDIX). Seen on
+         * flaneur on 19 Sep: Rock7 delivered "tst" while the app recorded a failure.
+         */
+        val MO_MAYBE_SENT = setOf(10, 13, 17, 18, 19)
+
+        /** What an +SBDIX MO status means, in plain words. */
+        fun moStatusText(code: Int): String = when (code) {
+            in 0..4 -> "sent"
+            10 -> "the gateway did not finish the call in time"
+            11 -> "the modem's outgoing queue is full"
+            12 -> "the message has too many segments"
+            13 -> "the session did not complete"
+            14 -> "the segment size is invalid"
+            15 -> "the gateway denied access"
+            16 -> "the modem is locked"
+            17 -> "the gateway did not answer"
+            18 -> "the radio link dropped"
+            19 -> "the link failed"
+            32 -> "no network service"
+            33 -> "antenna fault"
+            34 -> "the radio is switched off"
+            35 -> "the modem is busy"
+            36 -> "the gateway asked to try again later"
+            37 -> "satellite messaging is paused by the network"
+            38 -> "the network is limiting traffic"
+            else -> "failed"
+        }
     }
 
     enum class State { Disconnected, Connecting, Connected }
@@ -313,7 +345,14 @@ class IridiumSpp(private val clock: () -> Long = System::currentTimeMillis) {
         return try {
             val resp = sendAT("AT+SBDIX", SBDIX_TIMEOUT_MS)
             val match = Regex("[+]SBDIX:\\s*(\\d+),\\s*(\\d+),\\s*(\\d+),\\s*(\\d+),\\s*(\\d+),\\s*(\\d+)")
-                .find(resp) ?: return null
+                .find(resp)
+            if (match == null) {
+                // Never silent: a session whose answer cannot be read may still have sent.
+                val raw = resp.replace("\r", "\\r").replace("\n", "\\n").take(120)
+                Log.w(TAG, "SBDIX answer not readable: $raw")
+                _error.emit("The modem's answer to a satellite session could not be read")
+                return null
+            }
             val vals = match.groupValues.drop(1).map { it.toInt() }
             val result = SbdixResult(
                 moStatus = vals[0],
@@ -322,6 +361,11 @@ class IridiumSpp(private val clock: () -> Long = System::currentTimeMillis) {
                 mtMsn = vals[3],
                 mtLength = vals[4],
                 mtQueued = vals[5],
+            )
+            Log.i(
+                TAG,
+                "SBDIX: MO status ${result.moStatus} (${moStatusText(result.moStatus)}), MOMSN ${result.moMsn}, " +
+                    "MT status ${result.mtStatus}, ${result.mtQueued} waiting",
             )
             when {
                 result.moStatus == 32 || result.moStatus == 36 -> sbdixHeldUntil = clock() + SBDIX_HOLD_MS

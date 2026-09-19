@@ -194,6 +194,7 @@ class LocalApiServer(
                 put("priority", d.priority)
                 put("text_preview", d.textPreview)
                 put("retries", d.retries)
+                put("last_error", d.lastError)
                 put("qos_level", d.qosLevel)
                 put("seq_num", d.seqNum)
                 put("ack_status", d.ackStatus ?: JSONObject.NULL)

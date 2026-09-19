@@ -60,6 +60,12 @@ class Dispatcher(
     @Volatile var onSent: (suspend (MessageDeliveryEntity) -> Unit)? = null
 
     /**
+     * Called when a send may have arrived although it reported a failure ([UNCONFIRMED]), e.g. to
+     * mark the chat message "May have been sent". The delivery is retried all the same.
+     */
+    @Volatile var onUnconfirmed: (suspend (MessageDeliveryEntity, String) -> Unit)? = null
+
+    /**
      * Queue a message the user wrote for [destInterface], outside the routing rules: it is
      * stored, so it survives a restart, and retried until it goes out, with no retry cap
      * and no expiry (MESHSAT-1243). Returns the delivery id, or null if it was not stored.
@@ -348,14 +354,16 @@ class Dispatcher(
         }
 
         for (del in deliveries) {
-            deliver(channelId, del)
+            // A channel that cannot take a message right now cannot take the next one either.
+            if (!deliver(channelId, del)) break
         }
     }
 
-    private suspend fun deliver(channelId: String, del: MessageDeliveryEntity) {
+    /** Deliver one message. False when the channel said "not now" and the batch should stop. */
+    private suspend fun deliver(channelId: String, del: MessageDeliveryEntity): Boolean {
         // Re-check status (may have changed)
-        val fresh = deliveryDao.getById(del.id) ?: return
-        if (fresh.status in listOf("sent", "dead", "cancelled", "delivered")) return
+        val fresh = deliveryDao.getById(del.id) ?: return true
+        if (fresh.status in listOf("sent", "dead", "cancelled", "delivered")) return true
 
         // Egress rule check
         if (accessEvaluator.hasEgressRules(channelId)) {
@@ -364,29 +372,49 @@ class Dispatcher(
             if (matches.isEmpty()) {
                 deliveryDao.setStatus(del.id, "denied", "egress rules denied")
                 Log.i(TAG, "Delivery ${del.id} denied by egress rules on $channelId")
-                return
+                return true
             }
         }
 
         // TTL check before send (P0 exempt)
         if (del.priority > 0 && del.expiresAt != null && System.currentTimeMillis() > del.expiresAt) {
             deliveryDao.setStatus(del.id, "expired", "TTL expired before send")
-            return
+            return true
         }
 
         // A send that has started finishes and records its outcome even when the worker is
         // stopped meanwhile. Cancelled mid-send, the row stayed 'sending' until the app restarted,
         // and a satellite session that did go out would have been sent (and billed) again.
-        withContext(NonCancellable) {
+        return withContext(NonCancellable) {
             deliveryDao.setStatus(del.id, "sending")
 
             val payload = del.payload ?: del.textPreview.toByteArray()
             val error = deliveryCallback.deliver(channelId, payload, del.textPreview)
 
-            if (error != null) {
-                handleFailure(channelId, del, error)
-            } else {
-                handleSuccess(channelId, del)
+            when {
+                error == null -> {
+                    handleSuccess(channelId, del)
+                    true
+                }
+                error.startsWith(NOT_NOW) -> {
+                    // Not this message's failure (the satellite modem's pause after a session found
+                    // no network): wait it out without counting a try.
+                    val waitMs = error.removePrefix(NOT_NOW).substringBefore(' ').toLongOrNull() ?: 60_000L
+                    deliveryDao.deferRetry(del.id, System.currentTimeMillis() + waitMs, error)
+                    Log.i(TAG, "Delivery ${del.id} waits ${waitMs / 1000} s: $channelId cannot send now")
+                    false
+                }
+                else -> {
+                    if (error.startsWith(UNCONFIRMED)) {
+                        try {
+                            onUnconfirmed?.invoke(del, error)
+                        } catch (e: Exception) {
+                            Log.w(TAG, "onUnconfirmed for ${del.id} failed: ${e.message}")
+                        }
+                    }
+                    handleFailure(channelId, del, error)
+                    true
+                }
             }
         }
     }
@@ -402,6 +430,11 @@ class Dispatcher(
         } catch (e: Exception) {
             Log.w(TAG, "onSent for ${del.id} failed: ${e.message}")
         }
+        // The link works right now (for a satellite, the sky is open): whatever else waits for this
+        // channel goes next, oldest first, instead of at its own backoff (seen on flaneur, 19 Sep:
+        // a new message went out while two older ones sat on 30 min spacing).
+        val woke = deliveryDao.retryNowForChannel(channelId)
+        if (woke > 0) Log.i(TAG, "$woke more deliveries for $channelId are due now: a send just worked")
 
         // For QoS >= 1, mark ACK as pending (at-least-once semantics)
         if (del.qosLevel >= 1) {
@@ -430,7 +463,7 @@ class Dispatcher(
         // Schedule retry with backoff
         val nextRetry = calculateNextRetry(channelId, newRetries)
         deliveryDao.scheduleRetry(del.id, newRetries, nextRetry, error)
-        Log.w(TAG, "Delivery ${del.id} retry $newRetries scheduled for $channelId")
+        Log.w(TAG, "Delivery ${del.id} retry $newRetries scheduled for $channelId: $error")
     }
 
     private fun calculateNextRetry(channelId: String, retries: Int): Long {
@@ -495,6 +528,16 @@ class Dispatcher(
     }
 
     companion object {
+        /**
+         * A delivery callback's answer when the channel cannot take a message right now for a
+         * reason that is not the message's: this prefix, then the milliseconds to wait, then a
+         * reason. The delivery waits without counting a try, and the rest of the batch waits too.
+         */
+        const val NOT_NOW = "not-now:"
+
+        /** A callback's answer for a send that may have arrived although it failed (the link dropped mid-session). */
+        const val UNCONFIRMED = "unconfirmed:"
+
         private const val TAG = "Dispatcher"
 
         /**
