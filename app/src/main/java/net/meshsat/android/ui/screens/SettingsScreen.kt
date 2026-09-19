@@ -1938,11 +1938,27 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
                 var offlineFile by remember { mutableStateOf("") }
                 var mapFiles by remember { mutableStateOf<List<MBTilesManager.MBTilesInfo>>(emptyList()) }
                 var importing by remember { mutableStateOf(false) }
+                var confirmDelete by remember { mutableStateOf<MBTilesManager.MBTilesInfo?>(null) }
 
                 LaunchedEffect(Unit) {
                     offlineEnabled = settings.offlineMapEnabled.first()
                     offlineFile = settings.offlineMapFile.first()
                     mapFiles = withContext(Dispatchers.IO) { MBTilesManager.listFiles(context) }
+                }
+
+                // The world overview ships inside the app and is copied next to the added maps, so
+                // it is shown on its own line and can never be deleted from the list.
+                val detailedMaps = mapFiles.filter { it.filename != MBTilesManager.BUNDLED_WORLD_MAP }
+                val usableMaps = detailedMaps.filter { !it.isVector }
+                val inUse = offlineEnabled && usableMaps.any { it.filename == offlineFile }
+
+                fun useMap(filename: String) {
+                    offlineFile = filename
+                    offlineEnabled = true
+                    scope.launch {
+                        settings.setOfflineMapFile(filename)
+                        settings.setOfflineMapEnabled(true)
+                    }
                 }
 
                 val mbtilesPickerLauncher = rememberLauncherForActivityResult(
@@ -1955,47 +1971,146 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
                             val filename = withContext(Dispatchers.IO) {
                                 MBTilesManager.import(context, uri)
                             }
-                            settings.setOfflineMapFile(filename)
-                            settings.setOfflineMapEnabled(true)
-                            offlineFile = filename
-                            offlineEnabled = true
                             mapFiles = withContext(Dispatchers.IO) { MBTilesManager.listFiles(context) }
-                            Toast.makeText(context, "Map imported: $filename", Toast.LENGTH_SHORT).show()
+                            val added = mapFiles.firstOrNull { it.filename == filename }
+                            if (added != null && added.isVector) {
+                                Toast.makeText(
+                                    context,
+                                    "Added, but this file has vector tiles, which the map cannot show.",
+                                    Toast.LENGTH_LONG,
+                                ).show()
+                            } else {
+                                useMap(filename)
+                                Toast.makeText(context, "Map added: ${added?.name ?: filename}", Toast.LENGTH_SHORT).show()
+                            }
                         } catch (e: Exception) {
-                            Toast.makeText(context, "Import failed: ${e.message}", Toast.LENGTH_LONG).show()
+                            Toast.makeText(context, "Could not add this map: ${e.message}", Toast.LENGTH_LONG).show()
                         } finally {
                             importing = false
                         }
                     }
                 }
 
-                // Enable/disable toggle
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
+                Text(
+                    "The map downloads its detail from the internet. Without internet it shows what is installed here.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MeshSatTextSecondary,
+                )
+
+                Text("Installed", style = MaterialTheme.typography.titleSmall, color = MeshSatTextSecondary)
+
+                // Always present: the bundled Natural Earth overview (assets/world.mbtiles).
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(1.dp, MeshSatBorder, RoundedCornerShape(6.dp))
+                        .padding(12.dp),
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("Use Offline Tiles", style = MaterialTheme.typography.bodyMedium)
-                        Text(
-                            "Serve map tiles from imported MBTiles file",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MeshSatTextMuted,
-                        )
-                    }
-                    Switch(
-                        checked = offlineEnabled,
-                        onCheckedChange = { enabled ->
-                            offlineEnabled = enabled
-                            scope.launch { settings.setOfflineMapEnabled(enabled) }
-                        },
-                        colors = SwitchDefaults.colors(checkedTrackColor = MeshSatTeal),
+                    Text("World overview", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        "Built in and always installed. Countries and coastlines at a zoomed-out scale, " +
+                            "shown when there is no internet.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MeshSatTextMuted,
                     )
                 }
 
-                Spacer(modifier = Modifier.height(8.dp))
+                detailedMaps.forEach { info ->
+                    val isActive = inUse && info.filename == offlineFile
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(
+                                if (isActive) MeshSatTeal.copy(alpha = 0.1f) else Color.Transparent,
+                                RoundedCornerShape(6.dp),
+                            )
+                            .border(
+                                1.dp,
+                                if (isActive) MeshSatTeal.copy(alpha = 0.4f) else MeshSatBorder,
+                                RoundedCornerShape(6.dp),
+                            )
+                            .then(
+                                if (info.isVector) {
+                                    Modifier
+                                } else {
+                                    Modifier.clickable(onClickLabel = "Use ${info.name}") { useMap(info.filename) }
+                                },
+                            )
+                            .padding(start = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        androidx.compose.material3.RadioButton(
+                            selected = isActive,
+                            onClick = null,
+                            enabled = !info.isVector,
+                        )
+                        Column(modifier = Modifier.weight(1f).padding(vertical = 8.dp)) {
+                            Text(
+                                text = info.name,
+                                style = MaterialTheme.typography.bodyMedium,
+                                maxLines = 1,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                            )
+                            val sizeMb = "%.1f MB".format(info.sizeBytes / 1_048_576.0)
+                            val zoomRange = if (info.minZoom != null && info.maxZoom != null) {
+                                "zoom ${info.minZoom} to ${info.maxZoom}"
+                            } else {
+                                ""
+                            }
+                            Text(
+                                text = listOf(sizeMb, zoomRange).filter { it.isNotBlank() }.joinToString(", "),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MeshSatTextMuted,
+                            )
+                            when {
+                                info.isVector -> Text(
+                                    "Vector tiles: the map cannot show this file.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MeshSatAmber,
+                                )
+                                isActive -> Text(
+                                    "In use",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MeshSatTeal,
+                                )
+                            }
+                        }
+                        IconButton(onClick = { confirmDelete = info }) {
+                            Icon(Icons.Default.Delete, contentDescription = "Delete ${info.name}", tint = MeshSatTextMuted)
+                        }
+                    }
+                }
 
-                // Import button
+                if (usableMaps.isNotEmpty()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                            Text("Use my detailed map", style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                "Shown first. Outside it the map uses online tiles, or the world overview without internet.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MeshSatTextMuted,
+                            )
+                        }
+                        Switch(
+                            checked = inUse,
+                            onCheckedChange = { on ->
+                                if (on) {
+                                    val pick = usableMaps.firstOrNull { it.filename == offlineFile } ?: usableMaps.first()
+                                    useMap(pick.filename)
+                                } else {
+                                    offlineEnabled = false
+                                    scope.launch { settings.setOfflineMapEnabled(false) }
+                                }
+                            },
+                            colors = SwitchDefaults.colors(checkedTrackColor = MeshSatTeal),
+                        )
+                    }
+                }
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -2007,62 +2122,31 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
                         },
                         enabled = !importing,
                     ) {
-                        Text("Import MBTiles")
+                        Text("Add a detailed map")
                     }
                     if (importing) {
                         CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                        Text("Importing...", style = MaterialTheme.typography.bodySmall, color = MeshSatTextMuted)
+                        Text("Adding the map", style = MaterialTheme.typography.bodySmall, color = MeshSatTextMuted)
                     }
                 }
+                Text(
+                    "Use an MBTiles file with PNG or JPEG tiles, for example one exported from OpenStreetMap " +
+                        "for your area. Files with vector tiles cannot be shown.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MeshSatTextMuted,
+                )
 
-                // Imported map list
-                if (mapFiles.isNotEmpty()) {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    mapFiles.forEach { info ->
-                        val isActive = info.filename == offlineFile
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(
-                                    if (isActive) MeshSatTeal.copy(alpha = 0.1f) else Color.Transparent,
-                                    RoundedCornerShape(6.dp),
-                                )
-                                .border(
-                                    1.dp,
-                                    if (isActive) MeshSatTeal.copy(alpha = 0.4f) else MeshSatBorder,
-                                    RoundedCornerShape(6.dp),
-                                )
-                                .clickable {
-                                    offlineFile = info.filename
-                                    offlineEnabled = true
-                                    scope.launch {
-                                        settings.setOfflineMapFile(info.filename)
-                                        settings.setOfflineMapEnabled(true)
-                                    }
-                                }
-                                .padding(10.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = info.name,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = if (isActive) MeshSatTeal else Color.Unspecified,
-                                )
-                                val sizeMb = "%.1f MB".format(info.sizeBytes / 1_048_576.0)
-                                val zoomRange = when {
-                                    info.minZoom != null && info.maxZoom != null -> "z${info.minZoom}-${info.maxZoom}"
-                                    else -> ""
-                                }
-                                Text(
-                                    text = listOf(sizeMb, info.format.uppercase(), zoomRange)
-                                        .filter { it.isNotBlank() }.joinToString(" \u00B7 "),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MeshSatTextMuted,
-                                )
-                            }
-                            IconButton(onClick = {
+                confirmDelete?.let { info ->
+                    AlertDialog(
+                        onDismissRequest = { confirmDelete = null },
+                        containerColor = MeshSatSurface,
+                        title = { Text("Delete this map?") },
+                        text = {
+                            Text("${info.name} is removed from this phone. You can add it again from a file.")
+                        },
+                        confirmButton = {
+                            TextButton(onClick = {
+                                confirmDelete = null
                                 scope.launch {
                                     withContext(Dispatchers.IO) { MBTilesManager.delete(context, info.filename) }
                                     mapFiles = withContext(Dispatchers.IO) { MBTilesManager.listFiles(context) }
@@ -2072,20 +2156,17 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
                                         settings.setOfflineMapFile("")
                                         settings.setOfflineMapEnabled(false)
                                     }
-                                    Toast.makeText(context, "Deleted: ${info.name}", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, "Map deleted: ${info.name}", Toast.LENGTH_SHORT).show()
                                 }
                             }) {
-                                Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MeshSatTextMuted)
+                                Text("Delete", color = MeshSatRed)
                             }
-                        }
-                        Spacer(modifier = Modifier.height(4.dp))
-                    }
-                } else if (!importing) {
-                    Text(
-                        "No offline maps imported. Use MBTiles files from OpenStreetMap or OpenMapTiles.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MeshSatTextMuted,
-                        modifier = Modifier.padding(top = 4.dp),
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { confirmDelete = null }) {
+                                Text("Keep it")
+                            }
+                        },
                     )
                 }
             }
