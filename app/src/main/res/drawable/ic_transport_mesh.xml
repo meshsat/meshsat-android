@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Mesh: the pentagon of connected nodes from the MeshSat mark. Generated from the MeshSat mark's measured geometry (sticker master, 4716 px):
+     node centres, orbit ellipse and satellite dot; strokes and dots thickened for 24 dp. MESHSAT-1249. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:pathData="M11.69,4.00L20.24,9.84L17.51,19.91L7.02,20.00L3.76,10.16z"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.70"
+        android:strokeLineJoin="round" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M9.59,4.00a2.10,2.10 0 1,0 4.20,0a2.10,2.10 0 1,0 -4.20,0zM18.14,9.84a2.10,2.10 0 1,0 4.20,0a2.10,2.10 0 1,0 -4.20,0zM15.41,19.91a2.10,2.10 0 1,0 4.20,0a2.10,2.10 0 1,0 -4.20,0zM4.92,20.00a2.10,2.10 0 1,0 4.20,0a2.10,2.10 0 1,0 -4.20,0zM1.66,10.16a2.10,2.10 0 1,0 4.20,0a2.10,2.10 0 1,0 -4.20,0z" />
+</vector>

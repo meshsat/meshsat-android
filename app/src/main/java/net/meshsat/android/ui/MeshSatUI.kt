@@ -29,8 +29,6 @@ import androidx.compose.material.icons.outlined.Group
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Map
 import androidx.compose.material.icons.outlined.MyLocation
-import androidx.compose.material.icons.outlined.SatelliteAlt
-import androidx.compose.material.icons.outlined.SettingsInputAntenna
 import androidx.compose.material.icons.outlined.Sms
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.Icon
@@ -110,6 +108,8 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
+import androidx.compose.ui.res.vectorResource
+import net.meshsat.android.R
 
 /** The five tabs (MESHSAT-1249): close to the Bridge's operator shell. */
 private enum class Tab(val route: String, val label: String, val icon: ImageVector, val selectedIcon: ImageVector) {
@@ -333,9 +333,9 @@ private fun StatusStrip() {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        StripItem(Icons.Outlined.SatelliteAlt, satColor, if (satState == IridiumSpp.State.Connected) "$bars/5" else null,
+        StripItem(ImageVector.vectorResource(R.drawable.ic_transport_satellite), satColor, if (satState == IridiumSpp.State.Connected) "$bars/5" else null,
             "Satellite " + if (satState == IridiumSpp.State.Connected) "signal $bars of 5" else "not connected")
-        StripItem(Icons.Outlined.SettingsInputAntenna, meshColor, if (meshState == MeshtasticBle.State.Connected) "$nodeCount" else null,
+        StripItem(ImageVector.vectorResource(R.drawable.ic_transport_mesh), meshColor, if (meshState == MeshtasticBle.State.Connected) "$nodeCount" else null,
             "Mesh " + if (meshState == MeshtasticBle.State.Connected) "$nodeCount nodes" else "not connected")
         StripItem(Icons.Outlined.Sms, smsColor, null, "SMS")
         StripItem(Icons.Outlined.Cloud, hubColor, null, "Hub")

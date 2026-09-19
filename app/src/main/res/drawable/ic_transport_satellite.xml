@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Satellite: the orbit and the satellite from the MeshSat mark. Generated from the mark's measured
+     geometry (sticker master, 4716 px): the orbit ellipse (tilt -25 degrees, axes 795 x 310), its solid
+     arc and dotted part, and the satellite; weights raised for 24 dp. MESHSAT-1249. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:pathData="M9.85,8.07L10.13,7.94L10.40,7.82L10.68,7.71L10.96,7.59L11.24,7.48L11.52,7.37L11.80,7.27L12.08,7.17L12.36,7.07L12.64,6.98L12.91,6.89L13.19,6.81L13.46,6.73L13.74,6.65L14.01,6.58L14.28,6.51L14.54,6.45L14.81,6.39L15.07,6.33L15.33,6.28L15.58,6.24L15.83,6.20L16.08,6.16L16.33,6.13"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.9"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M19.63,10.50a0.90,0.90 0 1,0 1.80,0a0.90,0.90 0 1,0 -1.80,0zM18.00,12.29a0.90,0.90 0 1,0 1.80,0a0.90,0.90 0 1,0 -1.80,0zM15.70,14.06a0.90,0.90 0 1,0 1.80,0a0.90,0.90 0 1,0 -1.80,0zM12.94,15.66a0.90,0.90 0 1,0 1.80,0a0.90,0.90 0 1,0 -1.80,0zM9.96,16.95a0.90,0.90 0 1,0 1.80,0a0.90,0.90 0 1,0 -1.80,0zM7.03,17.82a0.90,0.90 0 1,0 1.80,0a0.90,0.90 0 1,0 -1.80,0zM4.39,18.19a0.90,0.90 0 1,0 1.80,0a0.90,0.90 0 1,0 -1.80,0zM2.27,18.02a0.90,0.90 0 1,0 1.80,0a0.90,0.90 0 1,0 -1.80,0zM0.87,17.35a0.90,0.90 0 1,0 1.80,0a0.90,0.90 0 1,0 -1.80,0zM0.31,16.21a0.90,0.90 0 1,0 1.80,0a0.90,0.90 0 1,0 -1.80,0zM0.63,14.72a0.90,0.90 0 1,0 1.80,0a0.90,0.90 0 1,0 -1.80,0zM1.80,12.99a0.90,0.90 0 1,0 1.80,0a0.90,0.90 0 1,0 -1.80,0zM3.73,11.20a0.90,0.90 0 1,0 1.80,0a0.90,0.90 0 1,0 -1.80,0zM6.24,9.48a0.90,0.90 0 1,0 1.80,0a0.90,0.90 0 1,0 -1.80,0z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M18.95,7.35a2.30,2.30 0 1,0 4.60,0a2.30,2.30 0 1,0 -4.60,0z" />
+</vector>
