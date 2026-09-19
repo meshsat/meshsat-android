@@ -65,6 +65,7 @@ import net.meshsat.android.bt.IridiumSpp
 import net.meshsat.android.data.AppDatabase
 import net.meshsat.android.hub.HubReporter
 import net.meshsat.android.service.GatewayService
+import net.meshsat.android.ui.components.MapFocus
 import net.meshsat.android.ui.components.SubScreen
 import net.meshsat.android.ui.screens.AboutScreen
 import net.meshsat.android.ui.screens.AdvancedScreen
@@ -186,7 +187,7 @@ fun MeshSatUI() {
                     Modifier.fillMaxSize().alpha(0f).pointerInput(Unit) {}
                 },
             ) {
-                MapScreen()
+                MapScreen(visible = currentRoute == "map")
             }
 
             // The NavHost stays composed on the Map tab too (its map route draws nothing), so Back
@@ -202,7 +203,20 @@ fun MeshSatUI() {
                     )
                 }
                 composable("map") { }
-                composable("people") { PeersScreen(onConnect = { navigate("setup/node") }) }
+                composable("people") {
+                    PeersScreen(
+                        onConnect = { navigate("setup/node") },
+                        onMessage = { peer -> navigate("chat/${Uri.encode(peer)}") },
+                        onShowOnMap = { nodeNum ->
+                            MapFocus.show(nodeNum)
+                            navController.navigate(Tab.Map.route) {
+                                popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                                launchSingleTop = true
+                                restoreState = true
+                            }
+                        },
+                    )
+                }
                 composable("setup") { SetupScreen(navigate) }
                 composable("setup/{section}") { entry ->
                     val name = entry.arguments?.getString("section")
@@ -217,7 +231,7 @@ fun MeshSatUI() {
                     }
                 }
                 composable("passes") { SubScreen("Satellite passes", back) { PassPredictorScreen() } }
-                composable("radio-config") { SubScreen("Mesh radio settings", back) { RadioConfigScreen() } }
+                composable("radio-config") { SubScreen("Mesh radio settings", back) { RadioConfigScreen(onConnect = { navigate("setup/node") }) } }
                 composable("rules") { SubScreen("Routing rules", back) { RulesScreen() } }
                 composable("interfaces") { SubScreen("Links", back) { InterfacesScreen() } }
                 composable("deliveries") { SubScreen("Message queue", back) { DeliveryScreen() } }

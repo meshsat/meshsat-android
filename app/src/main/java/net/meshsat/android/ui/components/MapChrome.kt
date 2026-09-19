@@ -125,7 +125,7 @@ fun MapStatusNote(detailed: DetailedMap?, modifier: Modifier = Modifier) {
     val offline by MapTiles.offline.collectAsState()
     val text = when {
         offline && detailed != null -> "Offline map: ${detailed.name}. Outside it, the world overview."
-        offline -> "Offline map: world overview. Add a detailed map in Setup > Maps."
+        offline -> "Offline map: world overview, country level only. Add a detailed map in Setup > Maps."
         else -> null
     }
     Column(modifier = modifier.widthIn(max = 320.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {

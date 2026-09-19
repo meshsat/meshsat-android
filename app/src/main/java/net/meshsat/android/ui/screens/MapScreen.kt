@@ -294,6 +294,31 @@ fun MapScreen(visible: Boolean = true) {
         }
     }
 
+    // Offline with only the world overview (detail down to country level): zoom out once so the
+    // map shows land instead of an empty dark grid at street level.
+    val offline by net.meshsat.android.map.MapTiles.offline.collectAsState()
+    LaunchedEffect(offline, detailed) {
+        if (offline && detailed == null && mapView.zoomLevelDouble > 6.0) {
+            mapView.controller.setZoom(5.0)
+        }
+    }
+
+    // People > Show on map: centre on that node once its position is known (MESHSAT-1249).
+    val focus by net.meshsat.android.ui.components.MapFocus.node.collectAsState()
+    LaunchedEffect(focus, nodes) {
+        val want = focus ?: return@LaunchedEffect
+        if (nodes.isEmpty()) return@LaunchedEffect // positions not loaded yet; runs again when they are
+        val node = nodes.firstOrNull { it.nodeId == want }
+        if (node == null) {
+            Toast.makeText(context, "This node has not sent a position yet.", Toast.LENGTH_SHORT).show()
+        } else {
+            hidden = hidden - node.nodeId
+            showNodes = true
+            mapView.controller.animateTo(GeoPoint(node.latitude, node.longitude), maxOf(mapView.zoomLevelDouble, 14.0), 600L)
+        }
+        net.meshsat.android.ui.components.MapFocus.consumed()
+    }
+
     val centreOnMe: () -> Unit = {
         val loc = phoneLocation
         if (loc == null) {
