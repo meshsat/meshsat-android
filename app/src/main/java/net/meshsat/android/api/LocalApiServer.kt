@@ -92,6 +92,10 @@ class LocalApiServer(
             // Settings (localhost only, for E2E automation)
             method == Method.POST && uri == "/api/settings/hub" -> handleHubSettings(session)
 
+            // Iridium 9603 on the MeshSat node (MESHSAT-1236); both are free, no satellite session
+            method == Method.GET && uri == "/api/iridium/status" -> handleIridiumStatus()
+            method == Method.POST && uri == "/api/iridium/loopback" -> handleIridiumLoopback(session)
+
             // System
             method == Method.POST && uri == "/api/system/restart" -> handleRestart()
 
@@ -375,6 +379,36 @@ class LocalApiServer(
             })
         }
         return arr
+    }
+
+    // --- Iridium (MESHSAT-1236) ---
+
+    private fun handleIridiumStatus(): Response {
+        val spp = net.meshsat.android.service.GatewayService.iridiumSpp
+            ?: return jsonError(Response.Status.SERVICE_UNAVAILABLE, "iridium not available")
+        val pipe = net.meshsat.android.service.GatewayService.meshtasticBle?.iridiumPipe?.value
+        return jsonOk(JSONObject().apply {
+            put("state", spp.state.value.name)
+            put("node_pipe", pipe != null)
+            put("owner", pipe?.owner?.value?.name ?: "")
+            put("imei", spp.modemInfo.value.imei)
+            put("signal", spp.signal.value)
+            put("sbdix_hold_ms", spp.sbdixHoldRemainingMs())
+        })
+    }
+
+    /** SBDWB -> SBDTC -> SBDRB through the node's pipe; ?size=1..270, default 100. */
+    private fun handleIridiumLoopback(session: IHTTPSession): Response {
+        val spp = net.meshsat.android.service.GatewayService.iridiumSpp
+            ?: return jsonError(Response.Status.SERVICE_UNAVAILABLE, "iridium not available")
+        val size = session.parms["size"]?.toIntOrNull()?.coerceIn(1, 270) ?: 100
+        val started = System.currentTimeMillis()
+        val ok = runBlocking { spp.loopbackTest(size) }
+        return jsonOk(JSONObject().apply {
+            put("ok", ok)
+            put("bytes", size)
+            put("ms", System.currentTimeMillis() - started)
+        })
     }
 
     // --- System ---

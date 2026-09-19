@@ -21,6 +21,8 @@ import net.meshsat.android.MeshSatApp
 import net.meshsat.android.R
 import net.meshsat.android.ble.MeshtasticBle
 import net.meshsat.android.ble.MeshtasticProtocol
+import net.meshsat.android.ble.IridiumPipeContract
+import net.meshsat.android.ble.asModemLink
 import net.meshsat.android.bt.IridiumSpp
 import net.meshsat.android.channel.ChannelRegistry
 import net.meshsat.android.channel.registerAndroidDefaults
@@ -67,6 +69,8 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 
 /**
@@ -80,10 +84,8 @@ class GatewayService : Service() {
 
     companion object {
         const val ACTION_CONNECT_MESH = "net.meshsat.android.CONNECT_MESH"
-        const val ACTION_CONNECT_IRIDIUM = "net.meshsat.android.CONNECT_IRIDIUM"
         const val ACTION_CONNECT_IRIDIUM9704 = "net.meshsat.android.CONNECT_IRIDIUM9704"
         const val ACTION_DISCONNECT_MESH = "net.meshsat.android.DISCONNECT_MESH"
-        const val ACTION_DISCONNECT_IRIDIUM = "net.meshsat.android.DISCONNECT_IRIDIUM"
         const val ACTION_DISCONNECT_IRIDIUM9704 = "net.meshsat.android.DISCONNECT_IRIDIUM9704"
         const val ACTION_SOS_ACTIVATE = "net.meshsat.android.SOS_ACTIVATE"
         const val ACTION_SOS_CANCEL = "net.meshsat.android.SOS_CANCEL"
@@ -247,7 +249,7 @@ class GatewayService : Service() {
 
         meshtasticBle = MeshtasticBle(this)
         registry.register("ble_mesh_0", meshtasticBle!!)
-        iridiumSpp = IridiumSpp(this)
+        iridiumSpp = IridiumSpp()
         registry.register("iridium_spp_0", iridiumSpp!!)
         iridium9704Spp = net.meshsat.android.bt.Iridium9704Spp(this)
         registry.register("iridium_imt_0", iridium9704Spp!!)
@@ -265,6 +267,7 @@ class GatewayService : Service() {
             initFieldIntelligence()
             initSigningAndApi()
             observeTransports()
+            observeIridiumPipe()
             startSignalPolling()
             startLocationUpdates()
             initMsvqsc()
@@ -289,18 +292,12 @@ class GatewayService : Service() {
                 meshtasticBle?.connect(addr)
                 scope.launch { settings.setMeshtasticBleAddress(addr) }
             }
-            ACTION_CONNECT_IRIDIUM -> {
-                val addr = intent.getStringExtra(EXTRA_ADDRESS) ?: return START_STICKY
-                iridiumSpp?.connect(addr)
-                scope.launch { settings.setIridiumBtAddress(addr) }
-            }
             ACTION_CONNECT_IRIDIUM9704 -> {
                 val addr = intent.getStringExtra(EXTRA_ADDRESS) ?: return START_STICKY
                 iridium9704Spp?.connect(addr)
                 scope.launch { settings.setIridium9704BtAddress(addr) }
             }
             ACTION_DISCONNECT_MESH -> meshtasticBle?.disconnect()
-            ACTION_DISCONNECT_IRIDIUM -> iridiumSpp?.disconnect()
             ACTION_DISCONNECT_IRIDIUM9704 -> iridium9704Spp?.disconnect()
             ACTION_SOS_ACTIVATE -> activateSos()
             ACTION_SOS_CANCEL -> cancelSos()
@@ -1833,8 +1830,8 @@ class GatewayService : Service() {
                     null // connection is async — setOnline called from state observer
                 }
                 interfaceId == "iridium_0" -> {
-                    val spp = iridiumSpp ?: return@setConnectCallback "iridium transport not available"
-                    spp.reconnect()
+                    // The 9603 arrives with the MeshSat node's BLE link; this only allows taking it.
+                    iridiumWanted.value = true
                     null
                 }
                 interfaceId == "iridium9704_0" -> {
@@ -1895,7 +1892,7 @@ class GatewayService : Service() {
         mgr.setDisconnectCallback { interfaceId ->
             when {
                 interfaceId.startsWith("mesh") -> meshtasticBle?.disconnect()
-                interfaceId == "iridium_0" -> iridiumSpp?.disconnect()
+                interfaceId == "iridium_0" -> { iridiumWanted.value = false }
                 interfaceId == "iridium9704_0" -> iridium9704Spp?.disconnect()
                 interfaceId.startsWith("mqtt") -> mqttTransport?.disconnect()
                 interfaceId.startsWith("aprs") -> kissClient?.disconnect()
@@ -2362,6 +2359,40 @@ class GatewayService : Service() {
         }
     }
 
+    /** Lets InterfaceManager release the node's modem without changing the saved setting. */
+    private val iridiumWanted = MutableStateFlow(true)
+
+    /**
+     * The RockBLOCK 9603 is reached through the MeshSat node's BLE pipe (MESHSAT-1236). While a
+     * node offers it, the setting allows it and the interface is up, the phone subscribes,
+     * which asks the node for the modem, and runs the 9603 driver whenever STATUS says the
+     * phone owns it. Otherwise it lets go, so the node's own logic can use the modem.
+     */
+    private fun observeIridiumPipe() {
+        val ble = meshtasticBle ?: return
+        val spp = iridiumSpp ?: return
+        scope.launch {
+            combine(ble.iridiumPipe, settings.iridiumNodePipeEnabled, iridiumWanted) { pipe, enabled, wanted ->
+                Triple(pipe, enabled, wanted)
+            }.collectLatest { (pipe, enabled, wanted) ->
+                spp.detach()
+                if (pipe == null) return@collectLatest
+                if (!enabled || !wanted) {
+                    pipe.release()
+                    return@collectLatest
+                }
+                if (!pipe.claim()) Log.i("MeshSat", "Iridium: the node holds its modem, waiting for it")
+                pipe.owner.collect { owner ->
+                    if (owner == IridiumPipeContract.Owner.Phone) {
+                        if (spp.state.value == IridiumSpp.State.Disconnected) spp.attach(pipe.asModemLink())
+                    } else {
+                        spp.detach()
+                    }
+                }
+            }
+        }
+    }
+
     private fun observeTransports() {
         // Listen for incoming Meshtastic messages — unified single-parse dispatch (MESHSAT-241)
         meshtasticBle?.let { ble ->
@@ -2594,14 +2625,16 @@ class GatewayService : Service() {
             }
         }
 
-        // Listen for Iridium MT (mobile-terminated) messages
+        // Listen for Iridium MT (mobile-terminated) messages: once the modem is up, and on every
+        // ring alert. Never on a timer, because every SBDIX is billed (MESHSAT-1236).
         iridiumSpp?.let { spp ->
             scope.launch {
                 spp.state.collect { state ->
-                    if (state == IridiumSpp.State.Connected) {
-                        pollIridiumMt()
-                    }
+                    if (state == IridiumSpp.State.Connected) pollIridiumMt(ringAlert = false)
                 }
+            }
+            scope.launch {
+                spp.ringAlerts.collect { pollIridiumMt(ringAlert = true) }
             }
         }
 
@@ -2654,42 +2687,46 @@ class GatewayService : Service() {
     }
 
     /**
-     * Check Iridium mailbox via SBDSX, then SBDIX if messages waiting.
-     * Reads MT buffer and stores/forwards the message.
+     * Fetch MT traffic. A message already in the modem's MT buffer is read for free; only a
+     * ring alert, or a gateway that reported messages waiting, is worth a billed SBDIX.
      */
-    private suspend fun pollIridiumMt() {
+    private suspend fun pollIridiumMt(ringAlert: Boolean) {
         val spp = iridiumSpp ?: return
         val status = spp.sbdStatus() ?: return
 
-        if (status.mtFlag || status.msgWaiting > 0) {
+        if (status.mtFlag) receiveIridiumMt(spp)
+        if (ringAlert || status.raFlag || status.msgWaiting > 0) {
             val result = spp.sbdix() ?: return
-            if (result.mtAvailable) {
-                val mtText = spp.readMtBuffer() ?: return
-                val imei = spp.modemInfo.value.imei.ifBlank { "iridium" }
-
-                // Dedup: skip if we've already processed this exact message
-                val dedupKey = "iridium:$imei:${mtText.hashCode()}"
-                if (deduplicator.isDuplicateKey(dedupKey)) {
-                    Log.d("MeshSat", "Dedup: skipping duplicate iridium MT")
-                    return
-                }
-
-                db.messageDao().insert(
-                    Message(
-                        transport = "iridium",
-                        direction = "rx",
-                        sender = imei,
-                        text = mtText,
-                        encrypted = false,
-                        timestamp = System.currentTimeMillis(),
-                    )
-                )
-
-                postMessageNotification("Iridium: $imei", mtText)
-                interfaceManager?.recordActivity("iridium_0")
-                evaluateAndForward(ForwardingRule.Transport.IRIDIUM, mtText, imei)
-            }
+            if (result.mtAvailable) receiveIridiumMt(spp)
         }
+    }
+
+    /** Read the MT buffer, then store and forward the message. */
+    private suspend fun receiveIridiumMt(spp: IridiumSpp) {
+        val mtText = spp.readMtBuffer() ?: return
+        val imei = spp.modemInfo.value.imei.ifBlank { "iridium" }
+
+        // Dedup: skip if we've already processed this exact message
+        val dedupKey = "iridium:$imei:${mtText.hashCode()}"
+        if (deduplicator.isDuplicateKey(dedupKey)) {
+            Log.d("MeshSat", "Dedup: skipping duplicate iridium MT")
+            return
+        }
+
+        db.messageDao().insert(
+            Message(
+                transport = "iridium",
+                direction = "rx",
+                sender = imei,
+                text = mtText,
+                encrypted = false,
+                timestamp = System.currentTimeMillis(),
+            )
+        )
+
+        postMessageNotification("Iridium: $imei", mtText)
+        interfaceManager?.recordActivity("iridium_0")
+        evaluateAndForward(ForwardingRule.Transport.IRIDIUM, mtText, imei)
     }
 
     private suspend fun evaluateAndForward(source: ForwardingRule.Transport, text: String, sender: String) {

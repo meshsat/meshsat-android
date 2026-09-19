@@ -25,7 +25,8 @@ class SettingsRepository(private val context: Context) {
         val KEY_AUTO_DECRYPT_SMS = booleanPreferencesKey("auto_decrypt_sms")
         val KEY_MESHSAT_PI_PHONE = stringPreferencesKey("meshsat_pi_phone") // phone number of Pi's modem
         val KEY_MESHTASTIC_BLE_ADDR = stringPreferencesKey("meshtastic_ble_address")
-        val KEY_IRIDIUM_BT_ADDR = stringPreferencesKey("iridium_bt_address")
+        // The phone takes the MeshSat node's RockBLOCK 9603 over its BLE pipe (MESHSAT-1236).
+        val KEY_IRIDIUM_NODE_PIPE = booleanPreferencesKey("iridium_node_pipe_enabled")
         val KEY_IRIDIUM9704_BT_ADDR = stringPreferencesKey("iridium9704_bt_address")
         val KEY_MSVQSC_ENABLED = booleanPreferencesKey("msvqsc_enabled")
         val KEY_MSVQSC_STAGES = stringPreferencesKey("msvqsc_stages") // "auto" or "2"-"8"
@@ -185,8 +186,11 @@ class SettingsRepository(private val context: Context) {
         context.dataStore.edit { it[KEY_MESHTASTIC_BLE_ADDR] = address }
     }
 
-    suspend fun setIridiumBtAddress(address: String) {
-        context.dataStore.edit { it[KEY_IRIDIUM_BT_ADDR] = address }
+    /** Take the node's 9603 while connected to a MeshSat node; off leaves it to the node. */
+    val iridiumNodePipeEnabled: Flow<Boolean> = context.dataStore.data.map { it[KEY_IRIDIUM_NODE_PIPE] ?: true }
+
+    suspend fun setIridiumNodePipeEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[KEY_IRIDIUM_NODE_PIPE] = enabled }
     }
 
     suspend fun setIridium9704BtAddress(address: String) {
