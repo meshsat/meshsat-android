@@ -28,7 +28,7 @@ ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/
 type(scope): description [MESHSAT-XX]
 ```
 
-`type` ∈ `feat`, `fix`, `docs`, `chore`, `refactor`, `test`, `perf`. `scope` is the affected package (e.g. `crypto`, `engine`, `ui/screens`). `[MESHSAT-XX]` references YouTrack issue per CubeOS convention.
+`type` ∈ `feat`, `fix`, `docs`, `chore`, `refactor`, `test`, `perf`. `scope` is the affected package (e.g. `crypto`, `engine`, `ui/screens`). `[MESHSAT-XX]` references the YouTrack issue in project MESHSAT.
 
 Operator identity:
 
@@ -44,12 +44,12 @@ git -c user.name="Kyriakos Papadopoulos" -c user.email="ncpjfuzl@mxmx.email" com
     build.gradle.kts            ← versionCode, dependencies
     src/main/
       AndroidManifest.xml
-      java/com/cubeos/meshsat/
+      java/net/meshsat/android/
         MainActivity.kt
         MeshSatApp.kt
         <29 top-level packages>/
     src/test/
-      java/com/cubeos/meshsat/
+      java/net/meshsat/android/
         <FLAT — 45 *Test.kt files>
   build.gradle.kts              ← top-level Gradle config
   settings.gradle.kts

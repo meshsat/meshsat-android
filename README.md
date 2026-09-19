@@ -30,6 +30,8 @@ The phone IS the gateway. No companion app, no server dependency, no internet re
 4. If Google Play Protect warns about an unknown developer, tap **Install anyway** -- the APK is signed (see [Release Signing](#release-signing) below)
 5. Open MeshSat and grant the requested permissions (Bluetooth, Location, SMS, Notifications)
 
+**Upgrading from v2.8.x or older:** from v2.9.0 the app's package name is `net.meshsat.android` (it was `com.cubeos.meshsat`). Android installs it as a separate app, and nothing carries over. Uninstall the old MeshSat, install the new one, and connect it to the Hub again with a provisioning QR code.
+
 ### Developers -- Build from Source
 
 Requires Android SDK (compileSdk 35) and JDK 17.
@@ -438,7 +440,6 @@ DataStore for all settings including encryption keys, transport config, routing 
 - [MeshSat Bridge](https://github.com/meshsat/meshsat) -- Go gateway for Raspberry Pi / Linux (same transport suite, USB devices)
 - [MeshSat Hub](https://hub.meshsat.net) -- Multi-tenant SaaS fleet management platform
 - [MeshSat Website](https://meshsat.net) -- Documentation, install scripts, getting started guide
-- [CubeOS](https://cubeos.app) -- Self-hosted OS for SBCs and edge devices
 
 ## Community
 

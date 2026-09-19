@@ -7,7 +7,7 @@ Retrospective spec. All file paths + line numbers CGC-verified 2026-05-18.
 ```
 operator scans QR
        │
-       ▼  cubeos-meshsat://import/<base64>
+       ▼  meshsat://key/<base64>
 +------------------+
 | KeyBundleImporter|   crypto/KeyBundleImporter.kt
 | .parse(uri)      |
@@ -54,12 +54,12 @@ ImportResult   ▼
 
 | File | Real path | Purpose |
 |---|---|---|
-| KeyBundleImporter | `app/src/main/java/com/cubeos/meshsat/crypto/KeyBundleImporter.kt` | Parse + verify + apply |
+| KeyBundleImporter | `app/src/main/java/net/meshsat/android/crypto/KeyBundleImporter.kt` | Parse + verify + apply |
 | ImportResult | INLINE at `crypto/KeyBundleImporter.kt:95` | sealed class of variants |
-| BridgeTrustEntity | `app/src/main/java/com/cubeos/meshsat/data/BridgeTrustEntity.kt` | Room entity |
-| BridgeTrustDao | `app/src/main/java/com/cubeos/meshsat/data/BridgeTrustDao.kt` | DAO interface |
-| AppDatabase | `app/src/main/java/com/cubeos/meshsat/data/AppDatabase.kt` | Room DB (version=14; MIGRATION_12_13 adds bridge_trust) |
-| KeyBundleImporterTest | `app/src/test/java/com/cubeos/meshsat/KeyBundleImporterTest.kt` | Tests at flat layout per Article C-VIII |
+| BridgeTrustEntity | `app/src/main/java/net/meshsat/android/data/BridgeTrustEntity.kt` | Room entity |
+| BridgeTrustDao | `app/src/main/java/net/meshsat/android/data/BridgeTrustDao.kt` | DAO interface |
+| AppDatabase | `app/src/main/java/net/meshsat/android/data/AppDatabase.kt` | Room DB (version=14; MIGRATION_12_13 adds bridge_trust) |
+| KeyBundleImporterTest | `app/src/test/java/net/meshsat/android/KeyBundleImporterTest.kt` | Tests at flat layout per Article C-VIII |
 
 ## Schema (MIGRATION_12_13)
 

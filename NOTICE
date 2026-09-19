@@ -34,7 +34,7 @@ TAK protobuf definitions
             terms before the next release, and record the result here.
 
 JSPR protocol implementation for the RockBLOCK 9704
-  Location: app/src/main/java/com/cubeos/meshsat/bt/Iridium9704Spp.kt
+  Location: app/src/main/java/net/meshsat/android/bt/Iridium9704Spp.kt
   Derived from Ground Control's reference C library (MIT licence).
   Attribution is recorded here; the file itself carries no header.
 

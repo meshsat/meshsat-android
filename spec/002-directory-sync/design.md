@@ -28,19 +28,19 @@ Bridge (meshsat)                              Android (meshsat-android)
 
 | File | Path | Status |
 |---|---|---|
-| MIGRATION_14_15 | `app/src/main/java/com/cubeos/meshsat/data/AppDatabase.kt` | edit existing |
-| PairedBridgeContactEntity | `app/src/main/java/com/cubeos/meshsat/data/PairedBridgeContactEntity.kt` | new |
-| PairedBridgeAddressEntity | `app/src/main/java/com/cubeos/meshsat/data/PairedBridgeAddressEntity.kt` | new |
-| PairedBridgeGroupEntity | `app/src/main/java/com/cubeos/meshsat/data/PairedBridgeGroupEntity.kt` | new |
-| PairedBridgeDispatchPolicyEntity | `app/src/main/java/com/cubeos/meshsat/data/PairedBridgeDispatchPolicyEntity.kt` | new |
-| PairedBridgeDirectoryDao | `app/src/main/java/com/cubeos/meshsat/data/PairedBridgeDirectoryDao.kt` | new |
-| DirectorySyncService | `app/src/main/java/com/cubeos/meshsat/service/DirectorySyncService.kt` | new alongside `GatewayService.kt` + `TransportRegistry.kt` |
-| PeopleScreen | `app/src/main/java/com/cubeos/meshsat/ui/screens/PeopleScreen.kt` | new alongside the 17 existing screens |
-| ContactDetailScreen | `app/src/main/java/com/cubeos/meshsat/ui/screens/ContactDetailScreen.kt` | new |
-| ContactQRDisplay | `app/src/main/java/com/cubeos/meshsat/ui/components/ContactQRDisplay.kt` | new alongside `StatusCard.kt` |
-| ContactQRScanner | `app/src/main/java/com/cubeos/meshsat/ui/components/ContactQRScanner.kt` | new |
-| ContactCardImporter | `app/src/main/java/com/cubeos/meshsat/crypto/ContactCardImporter.kt` | new alongside `KeyBundleImporter.kt`, same shape |
-| Tests | `app/src/test/java/com/cubeos/meshsat/PairedBridgeDirectoryDaoTest.kt`, `DirectorySyncServiceTest.kt`, `ContactCardImporterTest.kt` | new at FLAT layout per Article C-VIII |
+| MIGRATION_14_15 | `app/src/main/java/net/meshsat/android/data/AppDatabase.kt` | edit existing |
+| PairedBridgeContactEntity | `app/src/main/java/net/meshsat/android/data/PairedBridgeContactEntity.kt` | new |
+| PairedBridgeAddressEntity | `app/src/main/java/net/meshsat/android/data/PairedBridgeAddressEntity.kt` | new |
+| PairedBridgeGroupEntity | `app/src/main/java/net/meshsat/android/data/PairedBridgeGroupEntity.kt` | new |
+| PairedBridgeDispatchPolicyEntity | `app/src/main/java/net/meshsat/android/data/PairedBridgeDispatchPolicyEntity.kt` | new |
+| PairedBridgeDirectoryDao | `app/src/main/java/net/meshsat/android/data/PairedBridgeDirectoryDao.kt` | new |
+| DirectorySyncService | `app/src/main/java/net/meshsat/android/service/DirectorySyncService.kt` | new alongside `GatewayService.kt` + `TransportRegistry.kt` |
+| PeopleScreen | `app/src/main/java/net/meshsat/android/ui/screens/PeopleScreen.kt` | new alongside the 17 existing screens |
+| ContactDetailScreen | `app/src/main/java/net/meshsat/android/ui/screens/ContactDetailScreen.kt` | new |
+| ContactQRDisplay | `app/src/main/java/net/meshsat/android/ui/components/ContactQRDisplay.kt` | new alongside `StatusCard.kt` |
+| ContactQRScanner | `app/src/main/java/net/meshsat/android/ui/components/ContactQRScanner.kt` | new |
+| ContactCardImporter | `app/src/main/java/net/meshsat/android/crypto/ContactCardImporter.kt` | new alongside `KeyBundleImporter.kt`, same shape |
+| Tests | `app/src/test/java/net/meshsat/android/PairedBridgeDirectoryDaoTest.kt`, `DirectorySyncServiceTest.kt`, `ContactCardImporterTest.kt` | new at FLAT layout per Article C-VIII |
 
 ## Schema (Room v14→v15)
 

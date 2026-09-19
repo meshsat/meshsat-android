@@ -27,17 +27,17 @@
     "id": "T-001",
     "status": "pending",
     "title": "Room MIGRATION_14_15 + 4 paired_bridge_* entities + PairedBridgeDirectoryDao",
-    "prompt": "FIRST: read spec/002-directory-sync/{requirements.md, design.md, acceptance/directory-sync.feature}. SECOND: add MIGRATION_14_15 to data/AppDatabase.kt (append to existing list per Article C-IV; current last is MIGRATION_13_14). Add 4 new Entity classes + the DAO interface. Schema per design.md. JVM test at FLAT path app/src/test/java/com/cubeos/meshsat/PairedBridgeDirectoryDaoTest.kt per Article C-VIII.",
+    "prompt": "FIRST: read spec/002-directory-sync/{requirements.md, design.md, acceptance/directory-sync.feature}. SECOND: add MIGRATION_14_15 to data/AppDatabase.kt (append to existing list per Article C-IV; current last is MIGRATION_13_14). Add 4 new Entity classes + the DAO interface. Schema per design.md. JVM test at FLAT path app/src/test/java/net/meshsat/android/PairedBridgeDirectoryDaoTest.kt per Article C-VIII.",
     "files_owned": [
-      "app/src/main/java/com/cubeos/meshsat/data/AppDatabase.kt",
-      "app/src/main/java/com/cubeos/meshsat/data/PairedBridgeContactEntity.kt",
-      "app/src/main/java/com/cubeos/meshsat/data/PairedBridgeAddressEntity.kt",
-      "app/src/main/java/com/cubeos/meshsat/data/PairedBridgeGroupEntity.kt",
-      "app/src/main/java/com/cubeos/meshsat/data/PairedBridgeDispatchPolicyEntity.kt",
-      "app/src/main/java/com/cubeos/meshsat/data/PairedBridgeDirectoryDao.kt",
-      "app/src/test/java/com/cubeos/meshsat/PairedBridgeDirectoryDaoTest.kt"
+      "app/src/main/java/net/meshsat/android/data/AppDatabase.kt",
+      "app/src/main/java/net/meshsat/android/data/PairedBridgeContactEntity.kt",
+      "app/src/main/java/net/meshsat/android/data/PairedBridgeAddressEntity.kt",
+      "app/src/main/java/net/meshsat/android/data/PairedBridgeGroupEntity.kt",
+      "app/src/main/java/net/meshsat/android/data/PairedBridgeDispatchPolicyEntity.kt",
+      "app/src/main/java/net/meshsat/android/data/PairedBridgeDirectoryDao.kt",
+      "app/src/test/java/net/meshsat/android/PairedBridgeDirectoryDaoTest.kt"
     ],
-    "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:testDebugUnitTest --tests com.cubeos.meshsat.PairedBridgeDirectoryDaoTest'",
+    "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:testDebugUnitTest --tests net.meshsat.android.PairedBridgeDirectoryDaoTest'",
     "dependencies": [],
     "parallelizable": true,
     "bounded_context": "data",
@@ -81,7 +81,7 @@
     },
     {
       "id": "REQ-118",
-      "body": "The system shall add a JVM-runnable test `app/src/test/java/com/cubeos/meshsat/PairedBridgeDirectoryDaoTest.kt` covering insert + query + foreign-key cascade for the four new entities (flat layout per Article C-VIII)."
+      "body": "The system shall add a JVM-runnable test `app/src/test/java/net/meshsat/android/PairedBridgeDirectoryDaoTest.kt` covering insert + query + foreign-key cascade for the four new entities (flat layout per Article C-VIII)."
     }
   ],
   "acceptance": [
@@ -108,7 +108,7 @@
         "REQ-118"
       ],
       "status": "present",
-      "test_file": "app/src/test/java/com/cubeos/meshsat/RnsTransportNodeTest.kt",
+      "test_file": "app/src/test/java/net/meshsat/android/RnsTransportNodeTest.kt",
       "test_function": "learn_doesNotUpdateHigherHopCount"
     },
     {
@@ -186,7 +186,7 @@
         "REQ-118"
       ],
       "status": "present",
-      "test_file": "app/src/test/java/com/cubeos/meshsat/RnsTransportNodeTest.kt",
+      "test_file": "app/src/test/java/net/meshsat/android/RnsTransportNodeTest.kt",
       "test_function": "learn_doesNotUpdateHigherHopCount"
     }
   ],

@@ -32,7 +32,7 @@ The system shall expose every Room DAO as an `interface` with abstract methods (
 
 ## Article C-VIII — Flat test layout
 
-The system's unit tests shall live FLAT at `app/src/test/java/com/cubeos/meshsat/<TestName>Test.kt`. NO nested test packages (no `app/src/test/.../crypto/<TestName>Test.kt`, no `.../data/<TestName>Test.kt`). Mirrors the 45 existing tests (BirthSigner, RnsHdlc, KeyBundleImporter, CreditTracker, HembBonder, BurstQueue, etc.).
+The system's unit tests shall live FLAT at `app/src/test/java/net/meshsat/android/<TestName>Test.kt`. NO nested test packages (no `app/src/test/.../crypto/<TestName>Test.kt`, no `.../data/<TestName>Test.kt`). Mirrors the 45 existing tests (BirthSigner, RnsHdlc, KeyBundleImporter, CreditTracker, HembBonder, BurstQueue, etc.).
 
 ## Article C-IX — Compose Material 3 + Kotlin coroutines
 

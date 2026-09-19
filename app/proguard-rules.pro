@@ -2,7 +2,7 @@
 -keep class * extends androidx.room.RoomDatabase
 -keep @androidx.room.Entity class *
 -keep @androidx.room.Dao interface *
--keep class com.cubeos.meshsat.data.*_Impl { *; }
+-keep class net.meshsat.android.data.*_Impl { *; }
 
 # DataStore
 -keep class androidx.datastore.** { *; }
@@ -26,7 +26,7 @@
 
 # AndroidX Security — EncryptedSharedPreferences (MESHSAT-194)
 -keep class androidx.security.crypto.** { *; }
--keep class com.cubeos.meshsat.crypto.SecureKeyStore { *; }
+-keep class net.meshsat.android.crypto.SecureKeyStore { *; }
 
 # Google Tink annotations (compile-time only, not needed at runtime)
 -dontwarn com.google.errorprone.annotations.**
@@ -34,8 +34,8 @@
 -dontwarn javax.annotation.concurrent.**
 
 # MSVQ-SC crypto classes (accessed via reflection in ONNX pipeline)
--keep class com.cubeos.meshsat.crypto.MsvqscEncoder { *; }
--keep class com.cubeos.meshsat.crypto.MsvqscCodebook { *; }
+-keep class net.meshsat.android.crypto.MsvqscEncoder { *; }
+-keep class net.meshsat.android.crypto.MsvqscCodebook { *; }
 
 # Eclipse Paho MQTT (Hub reporter, MQTT transport, relay) — MESHSAT-1235
 # Paho loads its logger with Class.forName and its tcp/ssl/ws/wss network modules through
@@ -56,26 +56,26 @@
 -dontwarn org.osmdroid.**
 
 # Phase F: signing + config + API
--keepnames class com.cubeos.meshsat.engine.SigningService { *; }
--keepnames class com.cubeos.meshsat.config.ConfigManager { *; }
--keepnames class com.cubeos.meshsat.config.DiffResult { *; }
--keepnames class com.cubeos.meshsat.config.DiffCounts { *; }
+-keepnames class net.meshsat.android.engine.SigningService { *; }
+-keepnames class net.meshsat.android.config.ConfigManager { *; }
+-keepnames class net.meshsat.android.config.DiffResult { *; }
+-keepnames class net.meshsat.android.config.DiffCounts { *; }
 
 # Hub Reporter protocol types (MESHSAT-292)
--keepnames class com.cubeos.meshsat.hub.HubProtocol { *; }
--keepnames class com.cubeos.meshsat.hub.HubReporter { *; }
--keepnames class com.cubeos.meshsat.hub.HubReporterConfig { *; }
--keepnames class com.cubeos.meshsat.hub.BridgeBirth { *; }
--keepnames class com.cubeos.meshsat.hub.BridgeDeath { *; }
--keepnames class com.cubeos.meshsat.hub.BridgeHealth { *; }
--keepnames class com.cubeos.meshsat.hub.DeviceBirth { *; }
--keepnames class com.cubeos.meshsat.hub.DeviceDeath { *; }
--keepnames class com.cubeos.meshsat.hub.DevicePosition { *; }
--keepnames class com.cubeos.meshsat.hub.DeviceTelemetry { *; }
+-keepnames class net.meshsat.android.hub.HubProtocol { *; }
+-keepnames class net.meshsat.android.hub.HubReporter { *; }
+-keepnames class net.meshsat.android.hub.HubReporterConfig { *; }
+-keepnames class net.meshsat.android.hub.BridgeBirth { *; }
+-keepnames class net.meshsat.android.hub.BridgeDeath { *; }
+-keepnames class net.meshsat.android.hub.BridgeHealth { *; }
+-keepnames class net.meshsat.android.hub.DeviceBirth { *; }
+-keepnames class net.meshsat.android.hub.DeviceDeath { *; }
+-keepnames class net.meshsat.android.hub.DevicePosition { *; }
+-keepnames class net.meshsat.android.hub.DeviceTelemetry { *; }
 
 # Data classes used in rules/transports
--keepnames class com.cubeos.meshsat.rules.ForwardingRule { *; }
--keepnames class com.cubeos.meshsat.bt.IridiumSpp$SbdixResult { *; }
--keepnames class com.cubeos.meshsat.bt.IridiumSpp$SbdsxResult { *; }
--keepnames class com.cubeos.meshsat.bt.IridiumSpp$ModemInfo { *; }
--keepnames class com.cubeos.meshsat.ble.MeshtasticProtocol$MeshTextMessage { *; }
+-keepnames class net.meshsat.android.rules.ForwardingRule { *; }
+-keepnames class net.meshsat.android.bt.IridiumSpp$SbdixResult { *; }
+-keepnames class net.meshsat.android.bt.IridiumSpp$SbdsxResult { *; }
+-keepnames class net.meshsat.android.bt.IridiumSpp$ModemInfo { *; }
+-keepnames class net.meshsat.android.ble.MeshtasticProtocol$MeshTextMessage { *; }

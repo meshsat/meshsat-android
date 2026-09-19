@@ -29,10 +29,10 @@
     "title": "PeopleScreen + ContactDetailScreen + Contact QR display/scanner components",
     "prompt": "FIRST: read spec/002-directory-sync/{requirements.md, design.md, acceptance/directory-sync.feature}. SECOND: add ui/screens/PeopleScreen.kt + ContactDetailScreen.kt (alongside the 17 existing *Screen.kt files) and ui/components/ContactQRDisplay.kt + ContactQRScanner.kt (alongside the existing StatusCard.kt). Compose Material 3 per Article C-IX. Wire to PairedBridgeDirectoryDao (T-001) + ContactCardImporter (T-002). Stale-data banner threshold 24h per REQ-111.",
     "files_owned": [
-      "app/src/main/java/com/cubeos/meshsat/ui/screens/PeopleScreen.kt",
-      "app/src/main/java/com/cubeos/meshsat/ui/screens/ContactDetailScreen.kt",
-      "app/src/main/java/com/cubeos/meshsat/ui/components/ContactQRDisplay.kt",
-      "app/src/main/java/com/cubeos/meshsat/ui/components/ContactQRScanner.kt"
+      "app/src/main/java/net/meshsat/android/ui/screens/PeopleScreen.kt",
+      "app/src/main/java/net/meshsat/android/ui/screens/ContactDetailScreen.kt",
+      "app/src/main/java/net/meshsat/android/ui/components/ContactQRDisplay.kt",
+      "app/src/main/java/net/meshsat/android/ui/components/ContactQRScanner.kt"
     ],
     "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:assembleDebug'",
     "dependencies": [
@@ -115,7 +115,7 @@
         "REQ-113"
       ],
       "status": "present",
-      "test_file": "app/src/test/java/com/cubeos/meshsat/RnsTransportNodeTest.kt",
+      "test_file": "app/src/test/java/net/meshsat/android/RnsTransportNodeTest.kt",
       "test_function": "learn_doesNotUpdateHigherHopCount"
     },
     {
@@ -199,7 +199,7 @@
         "REQ-113"
       ],
       "status": "present",
-      "test_file": "app/src/test/java/com/cubeos/meshsat/RnsTransportNodeTest.kt",
+      "test_file": "app/src/test/java/net/meshsat/android/RnsTransportNodeTest.kt",
       "test_function": "learn_doesNotUpdateHigherHopCount"
     }
   ],

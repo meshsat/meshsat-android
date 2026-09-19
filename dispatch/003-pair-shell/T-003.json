@@ -29,15 +29,15 @@
     "title": "HybridShell + SourceSwitcher + PinnedWebViewClient + per-source notifications + remove-pairing",
     "prompt": "FIRST: read spec/003-pair-shell/{requirements.md, design.md, acceptance/pair-shell.feature}. SECOND: implement ui/HybridShell.kt + ui/SourceSwitcher.kt + ui/SourceStore.kt + ui/web/PinnedWebViewClient.kt as new top-level files under ui/ (alongside existing ui/MeshSatUI.kt). Implement service/PerSourceNotifications.kt alongside existing service/GatewayService.kt. Implement data/RemovePairedBridge.kt that deletes Keystore alias + paired_bridges row + cascades paired_bridge_* rows. Compose Material 3 per Article C-IX. SourceStore is Kotlin shared store (Compose-state-friendly). WebView Authorization Bearer injection + SPKI pin verification per REQ-217/218.",
     "files_owned": [
-      "app/src/main/java/com/cubeos/meshsat/ui/HybridShell.kt",
-      "app/src/main/java/com/cubeos/meshsat/ui/SourceSwitcher.kt",
-      "app/src/main/java/com/cubeos/meshsat/ui/SourceStore.kt",
-      "app/src/main/java/com/cubeos/meshsat/ui/web/PinnedWebViewClient.kt",
-      "app/src/main/java/com/cubeos/meshsat/service/PerSourceNotifications.kt",
-      "app/src/main/java/com/cubeos/meshsat/data/RemovePairedBridge.kt",
-      "app/src/test/java/com/cubeos/meshsat/HybridShellTest.kt"
+      "app/src/main/java/net/meshsat/android/ui/HybridShell.kt",
+      "app/src/main/java/net/meshsat/android/ui/SourceSwitcher.kt",
+      "app/src/main/java/net/meshsat/android/ui/SourceStore.kt",
+      "app/src/main/java/net/meshsat/android/ui/web/PinnedWebViewClient.kt",
+      "app/src/main/java/net/meshsat/android/service/PerSourceNotifications.kt",
+      "app/src/main/java/net/meshsat/android/data/RemovePairedBridge.kt",
+      "app/src/test/java/net/meshsat/android/HybridShellTest.kt"
     ],
-    "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:testDebugUnitTest --tests com.cubeos.meshsat.HybridShellTest'",
+    "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:testDebugUnitTest --tests net.meshsat.android.HybridShellTest'",
     "dependencies": [
       "T-002"
     ],

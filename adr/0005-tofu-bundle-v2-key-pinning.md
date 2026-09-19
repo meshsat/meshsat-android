@@ -18,7 +18,7 @@ Operators provision the Android app by scanning a QR code from the Bridge contai
 
 Implement `crypto/KeyBundleImporter.kt` as the canonical importer with:
 
-- `parse(uri)` → decodes `cubeos-meshsat://import/<base64-v1-or-v2-payload>`
+- `parse(uri)` → decodes `meshsat://key/<base64-v1-or-v2-payload>`
 - v2: Ed25519 signature covers bytes 0..53 + 118..end (the holes are the bridge-hash + signature fields themselves)
 - TOFU: first import for a bridge-hash → store the pubkey in `data/bridge_trust` table (added in `MIGRATION_12_13`) + return `NEW_TRUSTED`
 - Matching pubkey on subsequent import → `EXISTING_TRUSTED` + touch `last_seen_at`
