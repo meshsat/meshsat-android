@@ -10,7 +10,7 @@ mappings:
   status: pending
   _note: test to be written during task execution
 - scenario: Signature mismatch logs WARN and does not apply
-  test_file: app/src/test/java/com/cubeos/meshsat/RnsTransportNodeTest.kt
+  test_file: app/src/test/java/net/meshsat/android/RnsTransportNodeTest.kt
   test_function: learn_doesNotUpdateHigherHopCount
   status: present
   _match_score: 2
@@ -40,7 +40,7 @@ mappings:
   status: pending
   _note: test to be written during task execution
 - scenario: Adding ContactCardImporter does not modify KeyBundleImporter
-  test_file: app/src/test/java/com/cubeos/meshsat/RnsTransportNodeTest.kt
+  test_file: app/src/test/java/net/meshsat/android/RnsTransportNodeTest.kt
   test_function: learn_doesNotUpdateHigherHopCount
   status: present
   _match_score: 2

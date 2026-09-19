@@ -29,13 +29,13 @@
     "title": "PairScannerScreen + ECDH/CSR/HMAC pair-claim + Android Keystore storage",
     "prompt": "FIRST: read spec/003-pair-shell/{requirements.md, design.md, acceptance/pair-shell.feature} AND meshsat/spec/001-pair-protocol/ for the bridge-side protocol contract. SECOND: implement ui/screens/PairScannerScreen.kt + crypto/PairClaimClient.kt + crypto/PairedClientKeystore.kt. Camera via CameraX + ZXing. Ed25519 sig verify with explicit \"BC\" provider per Article C-II. X25519 + Ed25519 keypairs generated in Android Keystore per Article C-V. TLS 1.3 via OkHttp with CertificatePinner pinning QR.fp. POST /api/v2/pair/claim per design.md contract. Persist cert + JWT + bridge metadata per Articles C-V + C-VI. Tests at FLAT layout per Article C-VIII.",
     "files_owned": [
-      "app/src/main/java/com/cubeos/meshsat/ui/screens/PairScannerScreen.kt",
-      "app/src/main/java/com/cubeos/meshsat/crypto/PairClaimClient.kt",
-      "app/src/main/java/com/cubeos/meshsat/crypto/PairedClientKeystore.kt",
-      "app/src/test/java/com/cubeos/meshsat/PairClaimClientTest.kt",
-      "app/src/test/java/com/cubeos/meshsat/PairedClientKeystoreTest.kt"
+      "app/src/main/java/net/meshsat/android/ui/screens/PairScannerScreen.kt",
+      "app/src/main/java/net/meshsat/android/crypto/PairClaimClient.kt",
+      "app/src/main/java/net/meshsat/android/crypto/PairedClientKeystore.kt",
+      "app/src/test/java/net/meshsat/android/PairClaimClientTest.kt",
+      "app/src/test/java/net/meshsat/android/PairedClientKeystoreTest.kt"
     ],
-    "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:testDebugUnitTest --tests com.cubeos.meshsat.PairClaimClientTest --tests com.cubeos.meshsat.PairedClientKeystoreTest'",
+    "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:testDebugUnitTest --tests net.meshsat.android.PairClaimClientTest --tests net.meshsat.android.PairedClientKeystoreTest'",
     "dependencies": [
       "T-001"
     ],

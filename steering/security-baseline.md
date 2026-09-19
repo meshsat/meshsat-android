@@ -30,7 +30,7 @@ Per ADR-0005 + spec/001 (retrospective): every key-bundle import verifies the v2
 
 - Android Keystore aliases (already excluded by platform).
 - `EncryptedSharedPreferences` file.
-- Room database file (`/data/data/.../databases/cubeos-meshsat.db`).
+- Room database file (`/data/data/.../databases/meshsat.db`).
 - `/data/data/.../files/key-bundle-cache/`.
 
 Reason: backup-to-Google-account would exfiltrate credentials + bridge identities even if Keystore itself is safe.
@@ -40,7 +40,7 @@ Reason: backup-to-Google-account would exfiltrate credentials + bridge identitie
 `res/xml/network_security_config.xml`:
 
 - `cleartextTrafficPermitted="false"` for production.
-- Domain-pinned cert chains for `*.cubeos.cube` (when configured) + bridge SPKI pins.
+- Domain-pinned cert chains (when configured) + bridge SPKI pins.
 - Debug build allows cleartext to `127.0.0.1` (for LocalApiServer testing only).
 
 ## Forbidden patterns

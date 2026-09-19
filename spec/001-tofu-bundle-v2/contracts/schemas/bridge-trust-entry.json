@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://cubeos.app/schemas/meshsat-android/bridge-trust-entry.json",
+  "$id": "https://meshsat.net/schemas/meshsat-android/bridge-trust-entry.json",
   "title": "BridgeTrustEntry",
   "description": "One row of the bridge_trust Room table (introduced in MIGRATION_12_13). Persisted in data/BridgeTrustEntity.kt; this schema serialises the row for export / debugging / cross-process IPC.",
   "type": "object",

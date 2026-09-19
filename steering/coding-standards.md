@@ -4,7 +4,7 @@ CGC-verified against the 269 source files / 9,993 functions / 680 classes / 18 R
 
 ## Package conventions
 
-Source: `app/src/main/java/com/cubeos/meshsat/<pkg>/<File>.kt`.
+Source: `app/src/main/java/net/meshsat/android/<pkg>/<File>.kt`.
 
 29 top-level packages exist + root (MainActivity + MeshSatApp). New code MUST go in an existing package OR justify a new one in the commit message.
 
@@ -27,7 +27,7 @@ Source: `app/src/main/java/com/cubeos/meshsat/<pkg>/<File>.kt`.
 - Repositories: `<Name>Repository.kt` (e.g. `ConversationKeyRepository.kt`)
 - Composable screens: `<Name>Screen.kt` under `ui/screens/`
 - Composable components: `<Name>.kt` under `ui/components/`
-- Tests: `<Name>Test.kt` FLAT at `app/src/test/java/com/cubeos/meshsat/`
+- Tests: `<Name>Test.kt` FLAT at `app/src/test/java/net/meshsat/android/`
 
 ## Coroutines
 

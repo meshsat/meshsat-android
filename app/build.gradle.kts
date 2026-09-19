@@ -7,11 +7,11 @@ plugins {
 }
 
 android {
-    namespace = "com.cubeos.meshsat"
+    namespace = "net.meshsat.android"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.cubeos.meshsat"
+        applicationId = "net.meshsat.android"
         minSdk = 26
         targetSdk = 35
         versionCode = 52

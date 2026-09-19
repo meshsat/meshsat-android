@@ -8,17 +8,17 @@
       "id": "T-001",
       "status": "pending",
       "title": "Room MIGRATION_14_15 + 4 paired_bridge_* entities + PairedBridgeDirectoryDao",
-      "prompt": "FIRST: read spec/002-directory-sync/{requirements.md, design.md, acceptance/directory-sync.feature}. SECOND: add MIGRATION_14_15 to data/AppDatabase.kt (append to existing list per Article C-IV; current last is MIGRATION_13_14). Add 4 new Entity classes + the DAO interface. Schema per design.md. JVM test at FLAT path app/src/test/java/com/cubeos/meshsat/PairedBridgeDirectoryDaoTest.kt per Article C-VIII.",
+      "prompt": "FIRST: read spec/002-directory-sync/{requirements.md, design.md, acceptance/directory-sync.feature}. SECOND: add MIGRATION_14_15 to data/AppDatabase.kt (append to existing list per Article C-IV; current last is MIGRATION_13_14). Add 4 new Entity classes + the DAO interface. Schema per design.md. JVM test at FLAT path app/src/test/java/net/meshsat/android/PairedBridgeDirectoryDaoTest.kt per Article C-VIII.",
       "files_owned": [
-        "app/src/main/java/com/cubeos/meshsat/data/AppDatabase.kt",
-        "app/src/main/java/com/cubeos/meshsat/data/PairedBridgeContactEntity.kt",
-        "app/src/main/java/com/cubeos/meshsat/data/PairedBridgeAddressEntity.kt",
-        "app/src/main/java/com/cubeos/meshsat/data/PairedBridgeGroupEntity.kt",
-        "app/src/main/java/com/cubeos/meshsat/data/PairedBridgeDispatchPolicyEntity.kt",
-        "app/src/main/java/com/cubeos/meshsat/data/PairedBridgeDirectoryDao.kt",
-        "app/src/test/java/com/cubeos/meshsat/PairedBridgeDirectoryDaoTest.kt"
+        "app/src/main/java/net/meshsat/android/data/AppDatabase.kt",
+        "app/src/main/java/net/meshsat/android/data/PairedBridgeContactEntity.kt",
+        "app/src/main/java/net/meshsat/android/data/PairedBridgeAddressEntity.kt",
+        "app/src/main/java/net/meshsat/android/data/PairedBridgeGroupEntity.kt",
+        "app/src/main/java/net/meshsat/android/data/PairedBridgeDispatchPolicyEntity.kt",
+        "app/src/main/java/net/meshsat/android/data/PairedBridgeDirectoryDao.kt",
+        "app/src/test/java/net/meshsat/android/PairedBridgeDirectoryDaoTest.kt"
       ],
-      "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:testDebugUnitTest --tests com.cubeos.meshsat.PairedBridgeDirectoryDaoTest'",
+      "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:testDebugUnitTest --tests net.meshsat.android.PairedBridgeDirectoryDaoTest'",
       "dependencies": [],
       "parallelizable": true,
       "bounded_context": "data",
@@ -53,12 +53,12 @@
       "title": "DirectorySyncService + ContactCardImporter",
       "prompt": "FIRST: read spec/002-directory-sync/{requirements.md, design.md, acceptance/directory-sync.feature}. SECOND: add service/DirectorySyncService.kt (alongside existing GatewayService.kt + TransportRegistry.kt) and crypto/ContactCardImporter.kt (alongside KeyBundleImporter.kt \u2014 same shape: sealed class inline, explicit \"BC\" provider per Article C-II). Per-bridge poll + Ed25519 verify against bridge_trust.pubkey + Room transaction apply + MQTT-trigger subscriber. Tests at FLAT layout per Article C-VIII.",
       "files_owned": [
-        "app/src/main/java/com/cubeos/meshsat/service/DirectorySyncService.kt",
-        "app/src/main/java/com/cubeos/meshsat/crypto/ContactCardImporter.kt",
-        "app/src/test/java/com/cubeos/meshsat/DirectorySyncServiceTest.kt",
-        "app/src/test/java/com/cubeos/meshsat/ContactCardImporterTest.kt"
+        "app/src/main/java/net/meshsat/android/service/DirectorySyncService.kt",
+        "app/src/main/java/net/meshsat/android/crypto/ContactCardImporter.kt",
+        "app/src/test/java/net/meshsat/android/DirectorySyncServiceTest.kt",
+        "app/src/test/java/net/meshsat/android/ContactCardImporterTest.kt"
       ],
-      "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:testDebugUnitTest --tests com.cubeos.meshsat.DirectorySyncServiceTest --tests com.cubeos.meshsat.ContactCardImporterTest'",
+      "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:testDebugUnitTest --tests net.meshsat.android.DirectorySyncServiceTest --tests net.meshsat.android.ContactCardImporterTest'",
       "dependencies": [
         "T-001"
       ],
@@ -103,10 +103,10 @@
       "title": "PeopleScreen + ContactDetailScreen + Contact QR display/scanner components",
       "prompt": "FIRST: read spec/002-directory-sync/{requirements.md, design.md, acceptance/directory-sync.feature}. SECOND: add ui/screens/PeopleScreen.kt + ContactDetailScreen.kt (alongside the 17 existing *Screen.kt files) and ui/components/ContactQRDisplay.kt + ContactQRScanner.kt (alongside the existing StatusCard.kt). Compose Material 3 per Article C-IX. Wire to PairedBridgeDirectoryDao (T-001) + ContactCardImporter (T-002). Stale-data banner threshold 24h per REQ-111.",
       "files_owned": [
-        "app/src/main/java/com/cubeos/meshsat/ui/screens/PeopleScreen.kt",
-        "app/src/main/java/com/cubeos/meshsat/ui/screens/ContactDetailScreen.kt",
-        "app/src/main/java/com/cubeos/meshsat/ui/components/ContactQRDisplay.kt",
-        "app/src/main/java/com/cubeos/meshsat/ui/components/ContactQRScanner.kt"
+        "app/src/main/java/net/meshsat/android/ui/screens/PeopleScreen.kt",
+        "app/src/main/java/net/meshsat/android/ui/screens/ContactDetailScreen.kt",
+        "app/src/main/java/net/meshsat/android/ui/components/ContactQRDisplay.kt",
+        "app/src/main/java/net/meshsat/android/ui/components/ContactQRScanner.kt"
       ],
       "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:assembleDebug'",
       "dependencies": [

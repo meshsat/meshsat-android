@@ -10,11 +10,11 @@
       "title": "Room MIGRATION_12_13 + bridge_trust entity + DAO",
       "prompt": "(RETROSPECTIVE \u2014 shipped versionCode 50, 2026-03.) The bridge_trust table + BridgeTrustEntity + BridgeTrustDao + MIGRATION_12_13 are CGC-verified to exist at the listed paths. Current Room DB version is 14; the migration is shipped. This task is documented for the historical record + to anchor the future spec/002 + spec/003 schema bumps.",
       "files_owned": [
-        "app/src/main/java/com/cubeos/meshsat/data/BridgeTrustEntity.kt",
-        "app/src/main/java/com/cubeos/meshsat/data/BridgeTrustDao.kt",
-        "app/src/main/java/com/cubeos/meshsat/data/AppDatabase.kt"
+        "app/src/main/java/net/meshsat/android/data/BridgeTrustEntity.kt",
+        "app/src/main/java/net/meshsat/android/data/BridgeTrustDao.kt",
+        "app/src/main/java/net/meshsat/android/data/AppDatabase.kt"
       ],
-      "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:assembleDebug' && [ -f app/src/main/java/com/cubeos/meshsat/data/BridgeTrustEntity.kt ]",
+      "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:assembleDebug' && [ -f app/src/main/java/net/meshsat/android/data/BridgeTrustEntity.kt ]",
       "dependencies": [],
       "parallelizable": true,
       "bounded_context": "data",
@@ -46,12 +46,12 @@
       "id": "T-002",
       "status": "completed",
       "title": "KeyBundleImporter v1+v2 codec + Ed25519 verify + TOFU + inline ImportResult sealed class",
-      "prompt": "(RETROSPECTIVE \u2014 shipped versionCode 50, 2026-03.) KeyBundleImporter.kt is CGC-verified to exist with the ImportResult sealed class INLINE at line 95. KeyBundleImporterTest.kt exists at the FLAT layout app/src/test/java/com/cubeos/meshsat/KeyBundleImporterTest.kt.",
+      "prompt": "(RETROSPECTIVE \u2014 shipped versionCode 50, 2026-03.) KeyBundleImporter.kt is CGC-verified to exist with the ImportResult sealed class INLINE at line 95. KeyBundleImporterTest.kt exists at the FLAT layout app/src/test/java/net/meshsat/android/KeyBundleImporterTest.kt.",
       "files_owned": [
-        "app/src/main/java/com/cubeos/meshsat/crypto/KeyBundleImporter.kt",
-        "app/src/test/java/com/cubeos/meshsat/KeyBundleImporterTest.kt"
+        "app/src/main/java/net/meshsat/android/crypto/KeyBundleImporter.kt",
+        "app/src/test/java/net/meshsat/android/KeyBundleImporterTest.kt"
       ],
-      "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:testDebugUnitTest --tests com.cubeos.meshsat.KeyBundleImporterTest'",
+      "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:testDebugUnitTest --tests net.meshsat.android.KeyBundleImporterTest'",
       "dependencies": [
         "T-001"
       ],

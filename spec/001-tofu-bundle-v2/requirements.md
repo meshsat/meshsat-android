@@ -7,7 +7,7 @@ Source: ADR-0005 + `crypto/KeyBundleImporter.kt` (CGC-verified 2026-05-18) + `da
 
 ## URI parsing
 
-REQ-001: When the operator scans a QR code, the system shall parse URIs of the form `cubeos-meshsat://import/<base64-payload>` and route to KeyBundleImporter.parse.
+REQ-001: When the operator scans a QR code, the system shall parse URIs of the form `meshsat://key/<base64-payload>` and route to KeyBundleImporter.parse.
 REQ-002: When the URI is malformed, the system shall return `Malformed(reason)` and not apply any state change.
 
 ## v2 signature verification

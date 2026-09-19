@@ -29,12 +29,12 @@
     "title": "DirectorySyncService + ContactCardImporter",
     "prompt": "FIRST: read spec/002-directory-sync/{requirements.md, design.md, acceptance/directory-sync.feature}. SECOND: add service/DirectorySyncService.kt (alongside existing GatewayService.kt + TransportRegistry.kt) and crypto/ContactCardImporter.kt (alongside KeyBundleImporter.kt \u2014 same shape: sealed class inline, explicit \"BC\" provider per Article C-II). Per-bridge poll + Ed25519 verify against bridge_trust.pubkey + Room transaction apply + MQTT-trigger subscriber. Tests at FLAT layout per Article C-VIII.",
     "files_owned": [
-      "app/src/main/java/com/cubeos/meshsat/service/DirectorySyncService.kt",
-      "app/src/main/java/com/cubeos/meshsat/crypto/ContactCardImporter.kt",
-      "app/src/test/java/com/cubeos/meshsat/DirectorySyncServiceTest.kt",
-      "app/src/test/java/com/cubeos/meshsat/ContactCardImporterTest.kt"
+      "app/src/main/java/net/meshsat/android/service/DirectorySyncService.kt",
+      "app/src/main/java/net/meshsat/android/crypto/ContactCardImporter.kt",
+      "app/src/test/java/net/meshsat/android/DirectorySyncServiceTest.kt",
+      "app/src/test/java/net/meshsat/android/ContactCardImporterTest.kt"
     ],
-    "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:testDebugUnitTest --tests com.cubeos.meshsat.DirectorySyncServiceTest --tests com.cubeos.meshsat.ContactCardImporterTest'",
+    "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:testDebugUnitTest --tests net.meshsat.android.DirectorySyncServiceTest --tests net.meshsat.android.ContactCardImporterTest'",
     "dependencies": [
       "T-001"
     ],
@@ -116,11 +116,11 @@
     },
     {
       "id": "REQ-119",
-      "body": "The system shall add a JVM-runnable test `app/src/test/java/com/cubeos/meshsat/DirectorySyncServiceTest.kt` covering: successful sync, signature failure, MQTT-trigger pull, stale-data banner threshold (flat layout per Article C-VIII)."
+      "body": "The system shall add a JVM-runnable test `app/src/test/java/net/meshsat/android/DirectorySyncServiceTest.kt` covering: successful sync, signature failure, MQTT-trigger pull, stale-data banner threshold (flat layout per Article C-VIII)."
     },
     {
       "id": "REQ-120",
-      "body": "The system shall add a JVM-runnable test `app/src/test/java/com/cubeos/meshsat/ContactCardImporterTest.kt` covering: valid QR import, tampered-sig rejection, malformed-payload rejection (flat layout per Article C-VIII)."
+      "body": "The system shall add a JVM-runnable test `app/src/test/java/net/meshsat/android/ContactCardImporterTest.kt` covering: valid QR import, tampered-sig rejection, malformed-payload rejection (flat layout per Article C-VIII)."
     }
   ],
   "acceptance": [
@@ -163,7 +163,7 @@
         "REQ-120"
       ],
       "status": "present",
-      "test_file": "app/src/test/java/com/cubeos/meshsat/RnsTransportNodeTest.kt",
+      "test_file": "app/src/test/java/net/meshsat/android/RnsTransportNodeTest.kt",
       "test_function": "learn_doesNotUpdateHigherHopCount"
     },
     {
@@ -289,7 +289,7 @@
         "REQ-120"
       ],
       "status": "present",
-      "test_file": "app/src/test/java/com/cubeos/meshsat/RnsTransportNodeTest.kt",
+      "test_file": "app/src/test/java/net/meshsat/android/RnsTransportNodeTest.kt",
       "test_function": "learn_doesNotUpdateHigherHopCount"
     }
   ],

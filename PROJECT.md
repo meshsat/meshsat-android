@@ -15,7 +15,7 @@ Inter-node protocol: `meshsat-uplink/v1` (Sparkplug-B-inspired BIRTH/DATA/DEATH 
 ## What this repo owns (CGC-verified scope as of 2026-05-18)
 
 The current shipped feature set spans **28 top-level packages** under
-`app/src/main/java/com/cubeos/meshsat/`, holding **194 Kotlin source files** (239 including
+`app/src/main/java/net/meshsat/android/`, holding **194 Kotlin source files** (239 including
 tests), **1.523 function declarations**, **360 class, object and interface declarations**,
 41.906 lines, and **18 Room entities** (DB v14). Test suite: 519 `@Test` functions.
 
@@ -53,14 +53,14 @@ ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/
 ```
 
 `app/build.gradle.kts`:
-- `applicationId = "com.cubeos.meshsat"`
+- `applicationId = "net.meshsat.android"`
 - `versionName = "2.8.6"` / `versionCode = 51` (2026-05 release line)
 - `minSdk = 26`, `targetSdk = 35`, `compileSdk = 35`
 - Kotlin JDK target = 17
 
 ## Test layout (CGC-verified)
 
-All 45 existing tests live FLAT at `app/src/test/java/com/cubeos/meshsat/<Name>Test.kt`. No nested test packages. New tests for SDD-driven work MUST follow the same flat convention.
+All 45 existing tests live FLAT at `app/src/test/java/net/meshsat/android/<Name>Test.kt`. No nested test packages. New tests for SDD-driven work MUST follow the same flat convention.
 
 ## Source trace
 

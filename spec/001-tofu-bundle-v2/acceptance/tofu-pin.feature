@@ -46,7 +46,7 @@ Feature: TOFU + Bundle v2 key-bundle import (spec/001 — RETROSPECTIVE)
 
   # REQ-002 — malformed URI
   Scenario: Malformed URI returns Malformed result
-    When the operator imports "cubeos-meshsat://import/not-base64"
+    When the operator imports "meshsat://key/not-base64"
     Then the result is Malformed with a non-empty reason
     And no state change occurs
 

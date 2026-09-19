@@ -39,6 +39,6 @@ REQ-117: The system shall NOT modify or replace `crypto/KeyBundleImporter.kt` wh
 
 ## Tests
 
-REQ-118: The system shall add a JVM-runnable test `app/src/test/java/com/cubeos/meshsat/PairedBridgeDirectoryDaoTest.kt` covering insert + query + foreign-key cascade for the four new entities (flat layout per Article C-VIII).
-REQ-119: The system shall add a JVM-runnable test `app/src/test/java/com/cubeos/meshsat/DirectorySyncServiceTest.kt` covering: successful sync, signature failure, MQTT-trigger pull, stale-data banner threshold (flat layout per Article C-VIII).
-REQ-120: The system shall add a JVM-runnable test `app/src/test/java/com/cubeos/meshsat/ContactCardImporterTest.kt` covering: valid QR import, tampered-sig rejection, malformed-payload rejection (flat layout per Article C-VIII).
+REQ-118: The system shall add a JVM-runnable test `app/src/test/java/net/meshsat/android/PairedBridgeDirectoryDaoTest.kt` covering insert + query + foreign-key cascade for the four new entities (flat layout per Article C-VIII).
+REQ-119: The system shall add a JVM-runnable test `app/src/test/java/net/meshsat/android/DirectorySyncServiceTest.kt` covering: successful sync, signature failure, MQTT-trigger pull, stale-data banner threshold (flat layout per Article C-VIII).
+REQ-120: The system shall add a JVM-runnable test `app/src/test/java/net/meshsat/android/ContactCardImporterTest.kt` covering: valid QR import, tampered-sig rejection, malformed-payload rejection (flat layout per Article C-VIII).

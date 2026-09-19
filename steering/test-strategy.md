@@ -2,9 +2,9 @@
 
 ## Layout (per Article C-VIII)
 
-ALL unit tests live FLAT at `app/src/test/java/com/cubeos/meshsat/<TestName>Test.kt`. Currently 45 test files. Examples covering each major package:
+ALL unit tests live FLAT at `app/src/test/java/net/meshsat/android/<TestName>Test.kt`. Currently 45 test files. Examples covering each major package:
 
-| Package | Test file (flat path under app/src/test/java/com/cubeos/meshsat/) |
+| Package | Test file (flat path under app/src/test/java/net/meshsat/android/) |
 |---|---|
 | codec | `Smaz2Test.kt`, `PositionCodecTest.kt`, `CannedCodebookTest.kt` |
 | crypto | `KeyBundleImporterTest.kt`, `AesGcmWireFormatTest.kt`, `NodeIdentityMergeTest.kt` |
@@ -39,7 +39,7 @@ Flat is what the repo already does. Mixing flat + nested would require IDE confi
 ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:testDebugUnitTest'
 
 # Single test class
-ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:testDebugUnitTest --tests com.cubeos.meshsat.KeyBundleImporterTest'
+ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:testDebugUnitTest --tests net.meshsat.android.KeyBundleImporterTest'
 
 # Lint
 ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:lintDebug'

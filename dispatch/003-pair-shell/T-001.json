@@ -29,14 +29,14 @@
     "title": "Room MIGRATION_15_16 + paired_bridges + DAO + WelcomeSplash + config/AppMode + Mode reentry",
     "prompt": "FIRST: read spec/003-pair-shell/{requirements.md, design.md, acceptance/pair-shell.feature}. SECOND: add MIGRATION_15_16 to data/AppDatabase.kt (append per Article C-IV; current last is MIGRATION_14_15 from spec/002). Implement WelcomeSplashScreen alongside the 17 existing *Screen.kt files. Persist app.mode via config/AppMode.kt sibling to existing config/ConfigManager.kt. PairedBridgesDao as interface per Article C-VII (JVM-testable). Tests at FLAT layout per Article C-VIII.",
     "files_owned": [
-      "app/src/main/java/com/cubeos/meshsat/ui/screens/WelcomeSplashScreen.kt",
-      "app/src/main/java/com/cubeos/meshsat/data/PairedBridgesEntity.kt",
-      "app/src/main/java/com/cubeos/meshsat/data/PairedBridgesDao.kt",
-      "app/src/main/java/com/cubeos/meshsat/data/AppDatabase.kt",
-      "app/src/main/java/com/cubeos/meshsat/config/AppMode.kt",
-      "app/src/test/java/com/cubeos/meshsat/PairedBridgesDaoTest.kt"
+      "app/src/main/java/net/meshsat/android/ui/screens/WelcomeSplashScreen.kt",
+      "app/src/main/java/net/meshsat/android/data/PairedBridgesEntity.kt",
+      "app/src/main/java/net/meshsat/android/data/PairedBridgesDao.kt",
+      "app/src/main/java/net/meshsat/android/data/AppDatabase.kt",
+      "app/src/main/java/net/meshsat/android/config/AppMode.kt",
+      "app/src/test/java/net/meshsat/android/PairedBridgesDaoTest.kt"
     ],
-    "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:testDebugUnitTest --tests com.cubeos.meshsat.PairedBridgesDaoTest'",
+    "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:testDebugUnitTest --tests net.meshsat.android.PairedBridgesDaoTest'",
     "dependencies": [],
     "parallelizable": true,
     "bounded_context": "data",

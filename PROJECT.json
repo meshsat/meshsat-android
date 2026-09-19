@@ -47,7 +47,7 @@
     "timesync",
     "ui"
   ],
-  "_bounded_contexts_note": "1:1 with real top-level packages under app/src/main/java/com/cubeos/meshsat/ (CGC-verified 2026-05-18, 29 packages + root). 'root' covers MainActivity.kt + MeshSatApp.kt.",
+  "_bounded_contexts_note": "1:1 with real top-level packages under app/src/main/java/net/meshsat/android/ (CGC-verified 2026-05-18, 29 packages + root). 'root' covers MainActivity.kt + MeshSatApp.kt.",
   "max_parallel_workers": 2,
   "max_loc_per_worker": 500,
   "owners": [
