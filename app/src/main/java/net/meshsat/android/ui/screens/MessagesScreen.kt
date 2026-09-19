@@ -51,6 +51,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -472,6 +473,10 @@ private fun ConversationChatView(
 
     // Detect transport from conversation history
     val primaryTransport = messages.firstOrNull { it.direction == "rx" }?.transport ?: "sms"
+    // A reply goes back the way the conversation came in: an Iridium chat answers over Iridium.
+    LaunchedEffect(primaryTransport) {
+        if (peer != "self") sendTransport = primaryTransport
+    }
     val listState = rememberLazyListState()
 
     Column(
@@ -584,8 +589,8 @@ private fun ConversationChatView(
                     )
                     DropdownMenuItem(
                         text = { Text("IRIDIUM") },
+                        // Always offered: an Iridium message is queued until the modem can send it.
                         onClick = { sendTransport = "iridium"; transportExpanded = false },
-                        enabled = iridiumConnected,
                     )
                 }
             }
@@ -656,16 +661,15 @@ private fun sendMessage(
             Toast.makeText(context, "Sent via MESH", Toast.LENGTH_SHORT).show()
         }
         "iridium" -> {
-            if (!iridiumConnected) {
-                Toast.makeText(context, "Iridium not connected", Toast.LENGTH_SHORT).show()
-                return
-            }
+            // Queued even without the modem: it goes out once a session succeeds (MESHSAT-1243).
             context.startService(
                 Intent(context, GatewayService::class.java)
                     .setAction(GatewayService.ACTION_SEND_IRIDIUM)
                     .putExtra(GatewayService.EXTRA_TEXT, text)
+                    .putExtra(GatewayService.EXTRA_RECIPIENT, peer)
             )
-            Toast.makeText(context, "Sending via IRIDIUM...", Toast.LENGTH_SHORT).show()
+            val note = if (iridiumConnected) "Queued for Iridium" else "Queued for Iridium; it goes out when the modem is back"
+            Toast.makeText(context, note, Toast.LENGTH_SHORT).show()
         }
     }
 }
@@ -984,7 +988,12 @@ private fun MessageCard(msg: Message) {
                 }
                 if (msg.forwarded) {
                     Text(
-                        text = "FWD",
+                        text = when (msg.forwardedTo) {
+                            GatewayService.IRIDIUM_QUEUED -> "QUEUED"
+                            "iridium:sbd" -> "SENT"
+                            "iridium:failed" -> "FAILED"
+                            else -> "FWD"
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = MeshSatTextMuted,
                         modifier = Modifier

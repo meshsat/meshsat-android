@@ -11,6 +11,10 @@ interface MessageDao {
     @Insert
     suspend fun insert(message: Message): Long
 
+    /** Where a sent message went, e.g. "iridium:queued" -> "iridium:sbd" (MESHSAT-1243). */
+    @Query("UPDATE messages SET forwardedTo = :forwardedTo WHERE id = :id")
+    suspend fun setForwardedTo(id: Long, forwardedTo: String)
+
     @Query("SELECT * FROM messages ORDER BY timestamp DESC LIMIT :limit")
     fun getRecent(limit: Int = 100): Flow<List<Message>>
 

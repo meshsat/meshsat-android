@@ -109,6 +109,7 @@ class GatewayService : Service() {
 
         private var service: GatewayService? = null
         private const val IRIDIUM_STATUS_NOTIFICATION_ID = 7603
+        const val IRIDIUM_QUEUED = "iridium:queued"
 
         /** A mailbox check the user asked for (MESHSAT-400): running, or its last outcome. */
         data class MailboxCheck(
@@ -329,7 +330,7 @@ class GatewayService : Service() {
             }
             ACTION_SEND_IRIDIUM -> {
                 val text = intent.getStringExtra(EXTRA_TEXT) ?: return START_STICKY
-                sendIridiumMessage(text)
+                queueIridiumMessage(text, intent.getStringExtra(EXTRA_RECIPIENT) ?: "")
             }
             ACTION_SEND_SMS -> {
                 val text = intent.getStringExtra(EXTRA_TEXT) ?: return START_STICKY
@@ -1091,6 +1092,7 @@ class GatewayService : Service() {
                     val elapsedMs = System.currentTimeMillis() - startMs
                     Log.i("MeshSat", "Pass prediction: ${parsed.size} TLEs (${tleSet.source}, ${tleSet.ageSec() / 3600}h old), ${sorted.size} passes, ${elapsedMs}ms")
                     cachedPasses = sorted
+                    latestPasses = sorted
                     cacheTimestampMs = nowMs
                     sorted
                 } else emptyList()
@@ -2085,6 +2087,26 @@ class GatewayService : Service() {
                     "mqtt_0" to "mqtt",
                     "aprs_0" to "aprs",
                 )
+                // Iridium sends (MESHSAT-1243): mark the chat message sent, or record a
+                // rule-forwarded one; retries wait for the next pass window when one is known.
+                disp.onSent = { del ->
+                    if (del.channel == "iridium_0") {
+                        val msgId = del.msgRef.removePrefix("msg:").toLongOrNull()
+                        if (del.msgRef.startsWith("msg:") && msgId != null) {
+                            db.messageDao().setForwardedTo(msgId, "iridium:sbd")
+                        } else {
+                            db.messageDao().insert(
+                                Message(
+                                    transport = "iridium", direction = "tx", sender = "self",
+                                    text = del.textPreview, forwarded = true, forwardedTo = "iridium:sbd",
+                                )
+                            )
+                        }
+                    }
+                }
+                disp.nextWindowStart = { channelId, afterMs ->
+                    if (channelId.startsWith("iridium")) nextIridiumWindowStart(afterMs) else null
+                }
                 disp.start(interfaces)
                 dispatcher = disp
 
@@ -2138,14 +2160,7 @@ class GatewayService : Service() {
                         val result = spp.sbdix()
                         if (result?.moSuccess != true) return "SBDIX failed (fragment $i/${chunks.size}): mo_status=${result?.moStatus}"
                     }
-                    db.messageDao().insert(
-                        Message(
-                            transport = "iridium", direction = "tx", sender = "self",
-                            text = textPreview, forwarded = true, forwardedTo = "iridium:sbd",
-                            timestamp = System.currentTimeMillis(),
-                        )
-                    )
-                    null // success
+                    null // success: Dispatcher.onSent records it
                 }
                 interfaceId == "iridium9704_0" -> {
                     val spp = iridium9704Spp
@@ -2463,6 +2478,20 @@ class GatewayService : Service() {
                 } catch (_: SecurityException) {}
             }
         }
+    }
+
+    /** The last pass predictions, for timing Iridium retries (MESHSAT-1243). */
+    @Volatile private var latestPasses: List<net.meshsat.android.satellite.PassPrediction> = emptyList()
+
+    /**
+     * The start of the next predicted pass window after [afterMs], in epoch ms; null while a
+     * window is open at [afterMs] or nothing is predicted, so the retry is not delayed.
+     */
+    private fun nextIridiumWindowStart(afterMs: Long): Long? {
+        val passes = latestPasses
+        if (passes.isEmpty()) return null
+        if (passes.any { it.aosUnix * 1000 <= afterMs && afterMs <= it.losUnix * 1000 }) return null
+        return passes.map { it.aosUnix * 1000 }.filter { it > afterMs }.minOrNull()
     }
 
     /** Lets InterfaceManager release the node's modem without changing the saved setting. */
@@ -3058,6 +3087,39 @@ class GatewayService : Service() {
     }
 
     /** Send SBD message via Iridium (called from UI). */
+    /**
+     * A message the user wrote for Iridium: shown in the chat at once as queued, stored in
+     * the delivery queue and retried until it goes out, whether or not the modem is there
+     * right now (MESHSAT-1243). A failed session never drops it.
+     */
+    fun queueIridiumMessage(text: String, recipient: String) {
+        scope.launch {
+            val msgId = db.messageDao().insert(
+                Message(
+                    transport = "iridium", direction = "tx", sender = "self", recipient = recipient,
+                    text = text, forwarded = true, forwardedTo = IRIDIUM_QUEUED,
+                )
+            )
+            val payload = encodeIridiumPayload(text)
+            val queued = dispatcher?.enqueueDirect("iridium_0", payload, text, msgRef = "msg:$msgId")
+            if (queued == null) {
+                db.messageDao().setForwardedTo(msgId, "iridium:failed")
+                postMessageNotification("Iridium message not queued", "The delivery queue is not running.")
+            }
+        }
+    }
+
+    /** What goes into the MO buffer for [text]: MSVQ-SC compressed when enabled. */
+    private suspend fun encodeIridiumPayload(text: String): ByteArray {
+        val compressMode = settings.compressIridium.first()
+        val stages = settings.msvqscStages.first().toIntOrNull() ?: 3
+        if (compressMode == "msvqsc" && msvqscEncoder != null) {
+            val wire = msvqscEncoder!!.encode(text, stages)
+            if (wire != null) return ProtocolVersion.prependVersionByte(wire)
+        }
+        return text.toByteArray(Charsets.UTF_8)
+    }
+
     fun sendIridiumMessage(text: String) {
         scope.launch {
             forwardToIridium(text)
