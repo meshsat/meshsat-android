@@ -1026,8 +1026,30 @@ class GatewayService : Service() {
     }
 
     /** Initialize pass-aware satellite scheduling (MESHSAT-386, MESHSAT-498). */
+    /**
+     * Refresh the orbital elements when the phone happens to be online: the downloaded set is
+     * over a day old, and at most one attempt every 12 hours, which also keeps the app polite
+     * towards Celestrak. A failure keeps the current elements; predictions never wait on this.
+     */
+    private fun startTleRefresh(fetcher: net.meshsat.android.satellite.TleFetcher) {
+        scope.launch {
+            var lastAttemptMs = 0L
+            while (true) {
+                val now = System.currentTimeMillis()
+                if (now - lastAttemptMs >= 12 * 3600_000L && fetcher.isCacheStale()) {
+                    lastAttemptMs = now
+                    fetcher.refreshFromCelestrak()
+                }
+                delay(3600_000L)
+            }
+        }
+    }
+
     private fun initPassScheduler() {
         val iridium = iridiumSpp ?: return
+        // Offline first: the last download or the snapshot shipped in the app, never the network.
+        val tleFetcher = net.meshsat.android.satellite.TleFetcher.forContext(this, db)
+        startTleRefresh(tleFetcher)
         // Cache pass predictions to avoid recomputing SGP4 every 30s (MESHSAT-498)
         var cachedPasses: List<net.meshsat.android.satellite.PassPrediction> = emptyList()
         var cacheTimestampMs = 0L
@@ -1037,13 +1059,12 @@ class GatewayService : Service() {
             if (nowMs - cacheTimestampMs < cacheTtlMs && cachedPasses.isNotEmpty()) {
                 cachedPasses
             } else {
-                val allTles = kotlinx.coroutines.runBlocking { db.tleCacheDao().getAll() }
+                val tleSet = kotlinx.coroutines.runBlocking { tleFetcher.localTles() }
+                val allTles = tleSet.tles
                 val loc = _phoneLocation.value
                 if (allTles.isNotEmpty() && loc != null) {
                     val startMs = System.currentTimeMillis()
-                    val parsed = allTles.mapNotNull { tle ->
-                        net.meshsat.android.satellite.TleParser.parse(tle.satelliteName, tle.line1, tle.line2)
-                    }
+                    val parsed = allTles
                     // PassPredictor expects unix SECONDS. Passing milliseconds would make
                     // the propagation loop iterate 1000x too many steps and OOM the heap (MESHSAT-498).
                     val nowSec = nowMs / 1000
@@ -1065,7 +1086,7 @@ class GatewayService : Service() {
                     // Sort using Comparator to avoid Long autoboxing (MESHSAT-498)
                     val sorted = passes.sortedWith(Comparator { a, b -> a.aosUnix.compareTo(b.aosUnix) })
                     val elapsedMs = System.currentTimeMillis() - startMs
-                    Log.i("MeshSat", "Pass prediction: ${allTles.size} TLEs, ${parsed.size} parsed, ${sorted.size} passes, ${elapsedMs}ms")
+                    Log.i("MeshSat", "Pass prediction: ${parsed.size} TLEs (${tleSet.source}, ${tleSet.ageSec() / 3600}h old), ${sorted.size} passes, ${elapsedMs}ms")
                     cachedPasses = sorted
                     cacheTimestampMs = nowMs
                     sorted
@@ -2251,6 +2272,8 @@ class GatewayService : Service() {
     // --- Phone GPS Location ---
 
     private val locationListener = LocationListener { location ->
+        // A coarse cell fix must not replace a recent GPS fix.
+        if (!net.meshsat.android.location.LocationFixes.isBetter(location, _phoneLocation.value)) return@LocationListener
         _phoneLocation.value = location
         // Store phone position in node_positions with special nodeId=0
         scope.launch {
@@ -2315,9 +2338,17 @@ class GatewayService : Service() {
             )
         } catch (_: Exception) {}
 
-        // Seed with last known
-        val last = lm.getLastKnownLocation(LocationManager.GPS_PROVIDER)
-            ?: lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
+        // The platform's fused provider (Android 12+) combines whatever the phone has.
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+            try {
+                lm.requestLocationUpdates(
+                    LocationManager.FUSED_PROVIDER, 60_000L, 50f, locationListener
+                )
+            } catch (_: Exception) {}
+        }
+
+        // Seed with the freshest last-known fix of any provider
+        val last = net.meshsat.android.location.LocationFixes.freshest(lm)
         if (last != null) {
             _phoneLocation.value = last
         }
@@ -3132,8 +3163,7 @@ class GatewayService : Service() {
         ) return null
 
         val lm = getSystemService(LOCATION_SERVICE) as? LocationManager ?: return null
-        return lm.getLastKnownLocation(LocationManager.GPS_PROVIDER)
-            ?: lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
+        return net.meshsat.android.location.LocationFixes.freshest(lm)
     }
 
     private fun startForegroundNotification() {

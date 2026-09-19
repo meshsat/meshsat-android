@@ -97,13 +97,14 @@ fun PassPredictorScreen() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val db = remember { AppDatabase.getInstance(context) }
-    val fetcher = remember { TleFetcher(db) }
+    val fetcher = remember { TleFetcher.forContext(context, db) }
 
     // State
     var passes by remember { mutableStateOf<List<PassPrediction>>(emptyList()) }
     var loading by remember { mutableStateOf(false) }
     var refreshing by remember { mutableStateOf(false) }
     var cacheAgeSec by remember { mutableLongStateOf(-1L) }
+    var tleSource by remember { mutableStateOf(TleFetcher.Source.None) }
     var windowHours by remember { mutableIntStateOf(24) }
     var minElevDeg by remember { mutableIntStateOf(5) }
     var errorMsg by remember { mutableStateOf<String?>(null) }
@@ -126,13 +127,16 @@ fun PassPredictorScreen() {
         if (hasPerm) {
             try {
                 val lm = context.getSystemService(LocationManager::class.java)
-                val loc = lm?.getLastKnownLocation(LocationManager.GPS_PROVIDER)
-                    ?: lm?.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
+                val loc = lm?.let { net.meshsat.android.location.LocationFixes.freshest(it) }
                 if (loc != null) {
                     lat = loc.latitude
                     lon = loc.longitude
                     hasLocation = true
-                    locationSource = if (loc.provider == LocationManager.GPS_PROVIDER) "GPS" else "Network"
+                    locationSource = when (loc.provider) {
+                        LocationManager.GPS_PROVIDER -> "GPS"
+                        LocationManager.NETWORK_PROVIDER -> "Network"
+                        else -> "Fused"
+                    }
                 }
             } catch (_: SecurityException) { }
         }
@@ -145,9 +149,13 @@ fun PassPredictorScreen() {
             loading = true
             errorMsg = null
             try {
-                val tles = fetcher.getTles()
+                // Offline first: the last download or the snapshot shipped in the app.
+                val set = fetcher.localTles()
+                val tles = set.tles
+                cacheAgeSec = set.ageSec()
+                tleSource = set.source
                 if (tles.isEmpty()) {
-                    errorMsg = "No TLE data available. Tap Refresh TLEs."
+                    errorMsg = "No orbit data. Tap Refresh TLEs when online."
                     loading = false
                     return@launch
                 }
@@ -160,7 +168,6 @@ fun PassPredictorScreen() {
                     )
                 }
                 passes = computed
-                cacheAgeSec = fetcher.cacheAgeSec()
             } catch (e: Exception) {
                 errorMsg = "Prediction failed: ${e.message}"
             }
@@ -210,7 +217,7 @@ fun PassPredictorScreen() {
                 )
                 Column(horizontalAlignment = Alignment.End) {
                     Text(
-                        text = "TLE: ${formatCacheAge(cacheAgeSec)}",
+                        text = "TLE: ${formatTleSource(tleSource, cacheAgeSec)}",
                         style = MaterialTheme.typography.labelSmall,
                         color = MeshSatTextMuted,
                     )
@@ -218,9 +225,15 @@ fun PassPredictorScreen() {
                         onClick = {
                             scope.launch {
                                 refreshing = true
-                                fetcher.refreshFromCelestrak()
-                                cacheAgeSec = fetcher.cacheAgeSec()
+                                val got = fetcher.refreshFromCelestrak()
                                 refreshing = false
+                                if (got == null) {
+                                    android.widget.Toast.makeText(
+                                        context,
+                                        "Could not download new elements; predicting offline with the ones on the phone.",
+                                        android.widget.Toast.LENGTH_LONG,
+                                    ).show()
+                                }
                                 computePasses()
                             }
                         },
@@ -807,7 +820,14 @@ private fun formatDurationMin(min: Double): String {
 
 private fun formatCacheAge(sec: Long): String = when {
     sec < 0 -> "No data"
-    sec < 3600 -> "${sec / 60}m ago"
-    sec < 86400 -> "${sec / 3600}h ago"
-    else -> "${sec / 86400}d ago"
+    sec < 3600 -> "${sec / 60}m old"
+    sec < 86400 -> "${sec / 3600}h old"
+    else -> "${sec / 86400}d old"
+}
+
+/** Where the elements came from and how old the newest one is. */
+private fun formatTleSource(source: TleFetcher.Source, ageSec: Long): String = when (source) {
+    TleFetcher.Source.None -> "No data"
+    TleFetcher.Source.Downloaded -> "downloaded, ${formatCacheAge(ageSec)}"
+    TleFetcher.Source.Bundled -> "built-in, ${formatCacheAge(ageSec)}"
 }
