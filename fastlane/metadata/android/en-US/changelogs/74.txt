@@ -1,0 +1,1 @@
+First release on F-Droid. The app is the same as 2.14.2: the map is dark like the rest of the app, and the mesh and satellite icons come from the MeshSat mark. The build now leaves out a dependency block that F-Droid does not accept.

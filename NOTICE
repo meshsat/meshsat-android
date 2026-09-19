@@ -83,5 +83,8 @@ before any distribution that a third party relies on, and before this file is
 cited as evidence of licence hygiene.
 
 Bundled ML assets (codebook_v1.bin, corpus_index.bin, encoder.onnx, vocab.txt)
-are project-generated artefacts. If any is derived from a third-party model or
-corpus, its provenance and licence must be recorded here.
+are produced by sidecar/msvqsc/train.py in the MeshSat Bridge repository
+(github.com/meshsat/meshsat, GPL-3.0). encoder.onnx and vocab.txt derive from
+sentence-transformers/all-MiniLM-L6-v2 (Apache-2.0); codebook_v1.bin and
+corpus_index.bin are trained by that script on the corpus built into it.
+Details in THIRD_PARTY_NOTICES.md.
