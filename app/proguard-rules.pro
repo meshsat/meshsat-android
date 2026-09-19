@@ -37,6 +37,15 @@
 -keep class com.cubeos.meshsat.crypto.MsvqscEncoder { *; }
 -keep class com.cubeos.meshsat.crypto.MsvqscCodebook { *; }
 
+# Eclipse Paho MQTT (Hub reporter, MQTT transport, relay) — MESHSAT-1235
+# Paho loads its logger with Class.forName and its tcp/ssl/ws/wss network modules through
+# ServiceLoader. v2.8.6 renamed every Paho class, so `new MqttClient(...)` threw
+# "MissingResourceException: Error locating the logging class" and no release build
+# could reach the Hub at all. Debug builds are not minified, which is why it went unseen.
+-keep class org.eclipse.paho.client.mqttv3.** { *; }
+-keep interface org.eclipse.paho.client.mqttv3.** { *; }
+-dontwarn org.eclipse.paho.**
+
 # NanoHTTPD (local REST API server)
 -keep class fi.iki.elonen.** { *; }
 
