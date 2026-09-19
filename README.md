@@ -67,25 +67,25 @@ You need Android 8.0 or later.
 2. **Satellite.** With **Use the node's modem** on (the default), the app uses the node's RockBLOCK while it is connected. Setup > Satellite shows the modem, with **Poll Signal** and **Check Mailbox**. After a restart the app reconnects to the same node and takes the modem back by itself.
 3. **Hub (optional).** Setup > Hub > **Scan Hub Provision QR**, with the QR code from the Hub. That sets the Hub address, credentials and client certificate.
 4. **SMS.** In Setup > SMS, tap **Allow SMS** and fill in the **Kit phone number**. SOS texts go to that number too.
-5. **Send something.** Write a message in Messages. Home shows each way out: a solid line works, a dotted line is not available, and an orange dot is a message on its way.
+5. **Send something.** In Messages, tap **New message** and pick who it is for: a node, everyone on the mesh, a phone number or the satellite. For a satellite message the compose bar shows the bytes and credits before you send. Home shows each way out: a solid line works, a dotted line is not available, and an orange dot is a message on its way.
 
 Routing rules (Setup > Advanced > Routing rules) decide what is forwarded between links automatically, for example mesh messages out by satellite.
 
 ## What it does
 
-- **Mesh.** Meshtastic over Bluetooth LE with the official protobufs: text, positions, telemetry, waypoints, node info, traceroute and more. Region, channels and transmit power are under Setup > Mesh radio settings.
-- **Satellite.** Iridium SBD through the node's RockBLOCK 9603, up to 340 bytes out and 270 bytes in. Messages wait in a queue and are retried until they go out. The app opens a satellite session only when there is something to send, when the modem rings, or when you tap Check Mailbox. It never checks on a timer, because every session costs a credit. Passes are predicted on the phone from orbit data that ships with the app and is refreshed when there is internet, and the signal shows as an icon in Android's status bar.
+- **Mesh.** Meshtastic over Bluetooth LE with the official protobufs: text, positions, telemetry, waypoints, node info, traceroute and more. A reply to a node goes to that node, not to the whole channel. People lists the nodes you hear, with a button to message one or show it on the map, and Mesh topology draws how they are linked from their neighbour info. Region, channels and transmit power are under Setup > Mesh radio settings; the app only sends back values it has read from the radio.
+- **Satellite.** Iridium SBD through the node's RockBLOCK 9603, up to 340 bytes out and 270 bytes in. Messages wait in a queue and are retried until they go out, and a message that arrives during any satellite session is stored straight away. The app opens a satellite session only when there is something to send, when the modem rings, or when you tap Check Mailbox. It never checks on a timer, because every session costs a credit. Passes are predicted on the phone from orbit data that ships with the app and is refreshed when there is internet, and the signal shows as an icon in Android's status bar.
 - **RockBLOCK 9704 (Iridium IMT)** over an HC-05/06 Bluetooth serial adapter, with messages up to 100 KB. The code is there; it has not been tested on hardware.
 - **SMS** through the phone's own SIM, optionally encrypted per conversation with AES-256-GCM. Mesh and SMS messages are compressed with MSVQ-SC by default. It is lossy: what arrives means the same, but may not be word for word what was sent.
 - **APRS** through a KISS TNC over TCP (Direwolf, for example) or directly to APRS-IS, with smart beaconing and acknowledged messages.
 - **Hub.** MQTT with a client certificate. The phone shows up in the Hub's fleet like a field kit, reports health and positions, and takes remote commands: send a message, flush the queue, update config, rotate keys, reboot. When a field kit cannot be reached directly, the app can reach it through a tunnel via the Hub.
 - **TAK.** Positions from the Hub's TAK feed appear on the map. Receive only.
 - **Reticulum.** The phone runs as a Reticulum transport node and relays between the mesh, both Iridium modems, MQTT and TCP peers.
-- **Safety.** SOS sends three alerts 30 seconds apart: over the mesh, by satellite if the modem is connected at that moment, and by SMS to your kit's number. A check-in timer sends SOS if the phone sees no activity for too long, and zones record when a mesh node enters or leaves an area.
+- **Safety.** SOS sends three alerts 30 seconds apart: over the mesh, by satellite if the modem is connected at that moment, and by SMS to your kit's number. A check-in timer sends SOS if the phone sees no activity for too long, and zones, drawn on the map, record when a mesh node enters or leaves an area.
 - **Records.** A message queue with everything waiting, sent or given up, and config export and import in YAML or JSON, in the same format as the Bridge.
 - **Local API** on 127.0.0.1:6051, for testing and automation.
 
-The gateway runs as a foreground service, so the phone keeps relaying with the screen off.
+The map works without internet down to country level, from a world overview built into the app. The gateway runs as a foreground service, so the phone keeps relaying with the screen off.
 
 ## What works, and what does not
 
@@ -94,13 +94,14 @@ The gateway runs as a foreground service, so the phone keeps relaying with the s
 | Mesh through a MeshSat node over Bluetooth | Verified 19 September 2026 on a Pixel 9a |
 | Satellite messages out through the node, landing at the Hub | Verified 19 September 2026, three messages |
 | A satellite message in, picked up by the app | Verified 19 September 2026 |
-| A message that arrives while the app is sending by satellite | **Can be lost in 2.11.1**: two were, on 19 September 2026. Fixed for the next release |
+| A message that arrives while the app is sending by satellite | Stored straight away since 2.12.0. In 2.11.1 it could be lost: two were, on 19 September 2026 |
 | Reconnecting to the node and taking its modem back after an app restart | Verified 19 September 2026 |
 | Pass prediction with no internet | Verified 19 September 2026 |
 | The phone connected to the Hub as a bridge | Verified 19 September 2026 |
 | Recovery when the node drops out mid-session | Same code as a restart, **not exercised yet** |
 | RockBLOCK 9704 | **Not tested on hardware** |
-| SOS rework: hold to send, an emergency contact list, retries | **In progress.** Today's SOS works as described above |
+| SOS rework: hold to send, emergency contacts, retries through the queue, cancel from the notification | **In development.** Today's SOS works as described above |
+| A second tick when the Hub confirms a satellite message arrived | **In development** |
 | Deployment to a real end user | **Never** |
 | Use in an actual emergency | **Never** |
 
@@ -136,7 +137,7 @@ It is Kotlin 2.1 and Jetpack Compose, with Room for storage, ONNX Runtime for th
 Releases are built and signed in CI, with the signing key held in OpenBao, and published on the Releases page. To check an APK before you install it:
 
 ```bash
-apksigner verify --print-certs meshsat-android-2.11.1-release.apk
+apksigner verify --print-certs meshsat-android-2.12.0-release.apk
 ```
 
 Every release since 2.8.0 shows:
@@ -159,7 +160,7 @@ All releases use the same key, so a new version installs over the old one. The o
 
 **A message shows a clock.** It is queued and goes out by itself when it can. A tick means sent, red means it failed.
 
-**The map is blank.** Map tiles come from the internet. In 2.11.1 the offline map setting is saved but not used yet.
+**The map only shows countries.** Detailed tiles come from the internet. Offline, the map falls back to the world overview built into the app, which stops at country level.
 
 **"App not installed".** Usually a signature mismatch with a copy that is already installed, or the old `com.cubeos.meshsat` app from before 2.9. Uninstall it first.
 
