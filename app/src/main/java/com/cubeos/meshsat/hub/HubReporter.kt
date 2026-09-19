@@ -24,7 +24,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import org.eclipse.paho.client.mqttv3.IMqttDeliveryToken
-import org.eclipse.paho.client.mqttv3.MqttCallback
+import org.eclipse.paho.client.mqttv3.MqttCallbackExtended
 import org.eclipse.paho.client.mqttv3.MqttClient
 import org.eclipse.paho.client.mqttv3.MqttConnectOptions
 import org.eclipse.paho.client.mqttv3.MqttMessage
@@ -146,7 +146,24 @@ class HubReporter(
                     }
                 }
 
-                mqttClient.setCallback(object : MqttCallback {
+                mqttClient.setCallback(object : MqttCallbackExtended {
+                    override fun connectComplete(reconnect: Boolean, serverURI: String?) {
+                        if (!reconnect) return
+                        // Automatic reconnect on a clean session: the broker has forgotten
+                        // the subscriptions and the Hub has marked the bridge offline on the
+                        // LWT, so do what the first connect did (MESHSAT-1235). Off the Paho
+                        // callback thread, where a blocking subscribe would deadlock.
+                        _state.value = State.Connected
+                        Log.i(TAG, "Reconnected to Hub, re-subscribing and re-announcing")
+                        scope.launch {
+                            try {
+                                subscribeAndAnnounce(mqttClient)
+                            } catch (e: Exception) {
+                                Log.w(TAG, "Re-announce after reconnect failed: ${e.message}")
+                            }
+                        }
+                    }
+
                     override fun connectionLost(cause: Throwable?) {
                         Log.w(TAG, "Hub connection lost: ${cause?.message}")
                         _state.value = State.Disconnected
@@ -166,17 +183,7 @@ class HubReporter(
                 _state.value = State.Connected
                 Log.i(TAG, "Connected to Hub at ${config.hubUrl}")
 
-                // Subscribe to command topic + TAK broadcast
-                mqttClient.subscribe(
-                    arrayOf(
-                        HubTopics.bridgeCmd(config.bridgeId),
-                        "meshsat/broadcast/tak/cot/in",
-                    ),
-                    intArrayOf(QOS_AT_LEAST_ONCE, QOS_AT_LEAST_ONCE),
-                )
-
-                // Publish birth certificate
-                publishBirth()
+                subscribeAndAnnounce(mqttClient)
 
                 // Start periodic health reporting
                 startHealthLoop()
@@ -297,8 +304,32 @@ class HubReporter(
 
     // --- Internal ---
 
+    /** Subscribe to the command topic and TAK broadcast, then publish the birth. */
+    private fun subscribeAndAnnounce(c: MqttClient) {
+        c.subscribe(
+            arrayOf(
+                HubTopics.bridgeCmd(config.bridgeId),
+                "meshsat/broadcast/tak/cot/in",
+            ),
+            intArrayOf(QOS_AT_LEAST_ONCE, QOS_AT_LEAST_ONCE),
+        )
+        publishBirth()
+    }
+
+    /**
+     * Modem IMEIs the last birth reported. The Hub links a satellite device to this
+     * bridge only from a birth, and a modem is often paired after the Hub connect,
+     * so the health loop re-announces when this set changes (MESHSAT-1235).
+     */
+    @Volatile
+    private var announcedImeis: Set<String> = emptySet()
+
+    private fun modemImeis(interfaces: List<InterfaceInfo>): Set<String> =
+        interfaces.map { it.imei }.filter { it.isNotBlank() }.toSet()
+
     private fun publishBirth() {
         val birth = buildBirthCertificate()
+        announcedImeis = modemImeis(birth.interfaces)
         val birthJson = birth.toJson()
 
         // Sign the birth message with the bridge's mTLS private key
@@ -343,6 +374,10 @@ class HubReporter(
                 delay(config.healthIntervalSec * 1000L)
                 if (!isConnected) continue
                 try {
+                    if (modemImeis(collectInterfaces()) != announcedImeis) {
+                        Log.i(TAG, "Modem set changed, re-publishing birth")
+                        publishBirth()
+                    }
                     publishHealth()
                 } catch (e: Exception) {
                     Log.w(TAG, "Health publish failed: ${e.message}")
@@ -475,6 +510,7 @@ class HubReporter(
                 name = "iridium_spp_0",
                 type = "iridium_sbd",
                 status = status,
+                imei = spp.modemInfo.value.imei,
             ))
         }
 
@@ -489,6 +525,7 @@ class HubReporter(
                 name = "iridium_imt_0",
                 type = "iridium_imt",
                 status = status,
+                imei = spp.modemInfo.value.imei,
             ))
         }
 
