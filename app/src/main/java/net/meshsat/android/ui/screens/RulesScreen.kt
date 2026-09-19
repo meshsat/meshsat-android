@@ -13,14 +13,13 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -53,43 +52,56 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
 import net.meshsat.android.data.AccessRuleEntity
 import net.meshsat.android.data.AppDatabase
 import net.meshsat.android.data.MessageDeliveryEntity
 import net.meshsat.android.service.GatewayService
-import net.meshsat.android.ui.theme.ColorCellular
-import net.meshsat.android.ui.theme.ColorIridium
-import net.meshsat.android.ui.theme.ColorMesh
-import net.meshsat.android.ui.theme.ColorSMS
-import net.meshsat.android.ui.theme.MeshSatAmber
-import net.meshsat.android.ui.theme.MeshSatBlue
+import net.meshsat.android.ui.Words
 import net.meshsat.android.ui.theme.MeshSatBorder
-import net.meshsat.android.ui.theme.MeshSatGreen
 import net.meshsat.android.ui.theme.MeshSatRed
 import net.meshsat.android.ui.theme.MeshSatSurface
+import net.meshsat.android.ui.theme.MeshSatSurfaceLight
 import net.meshsat.android.ui.theme.MeshSatTeal
 import net.meshsat.android.ui.theme.MeshSatTextMuted
+import net.meshsat.android.ui.theme.MeshSatTextPrimary
 import net.meshsat.android.ui.theme.MeshSatTextSecondary
-import kotlinx.coroutines.launch
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
-import net.meshsat.android.ui.theme.PlexMono
+import org.json.JSONArray
+import org.json.JSONObject
 
 // ═══════════════════════════════════════════════════════════════════════
-// Bridge Rules Management — Phase H
-// Tabbed UI for outbound/inbound/cross-bridge access rules + DLQ
+// Routing rules: which messages pass from one link to another, plus the
+// messages those rules put in the queue (MESHSAT-1249)
 // ═══════════════════════════════════════════════════════════════════════
 
 private enum class BridgeTab(val label: String) {
-    Outbound("Outbound"),
-    Inbound("Inbound"),
-    CrossBridge("Cross-Bridge"),
+    Outbound("From mesh"),
+    Inbound("Into mesh"),
+    CrossBridge("Between links"),
     Deliveries("Deliveries"),
     Queue("Queue"),
+}
+
+/**
+ * The tab a rule is listed under. Every rule lands on exactly one tab, whatever its action or
+ * direction: before, only forward rules with a target were listed, so a Drop or Log only rule
+ * vanished from the screen once saved (B10).
+ */
+private fun ruleTab(rule: AccessRuleEntity): BridgeTab = when {
+    rule.interfaceId.startsWith("mesh") -> BridgeTab.Outbound
+    rule.forwardTo.startsWith("mesh") -> BridgeTab.Inbound
+    else -> BridgeTab.CrossBridge
 }
 
 // Android interface IDs used by the gateway
@@ -102,6 +114,14 @@ private fun getAvailableInterfaces(): List<String> {
     return listOf("mesh_0", "iridium_0", "sms_0") // fallback
 }
 
+/** A rule's action, as the user reads it: Forward, Drop, Log only. */
+internal fun ruleActionLabel(action: String): String = when (action.lowercase()) {
+    "forward" -> "Forward"
+    "drop" -> "Drop"
+    "log" -> "Log only"
+    else -> action.replaceFirstChar { it.uppercase() }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RulesScreen() {
@@ -110,48 +130,31 @@ fun RulesScreen() {
     val db = AppDatabase.getInstance(context)
     val allRules by db.accessRuleDao().getAll().collectAsState(initial = emptyList())
     val deliveries by db.messageDeliveryDao().getRecent(200).collectAsState(initial = emptyList())
+    val now = rememberTickingNow()
 
     var activeTab by remember { mutableStateOf(BridgeTab.Outbound) }
     var showAddDialog by remember { mutableStateOf(false) }
     var editRule by remember { mutableStateOf<AccessRuleEntity?>(null) }
-    var selectedDelivery by remember { mutableStateOf<MessageDeliveryEntity?>(null) }
+    var ruleToDelete by remember { mutableStateOf<AccessRuleEntity?>(null) }
+    var selectedDeliveryId by remember { mutableStateOf<Long?>(null) }
+    var queueRequest by remember { mutableStateOf<QueueRequest?>(null) }
 
-    // Categorize rules (matching BridgeView.vue logic)
-    val outboundRules = remember(allRules) {
-        allRules.filter { r ->
-            r.interfaceId.startsWith("mesh") && r.direction == "ingress" &&
-                    r.action == "forward" && r.forwardTo.isNotEmpty() &&
-                    !r.forwardTo.startsWith("mesh")
-        }
-    }
-    val inboundRules = remember(allRules) {
-        allRules.filter { r ->
-            !r.interfaceId.startsWith("mesh") && r.direction == "ingress" &&
-                    r.action == "forward" && r.forwardTo.startsWith("mesh")
-        }
-    }
-    val crossRules = remember(allRules) {
-        allRules.filter { r ->
-            !r.interfaceId.startsWith("mesh") && r.direction == "ingress" &&
-                    r.action == "forward" && r.forwardTo.isNotEmpty() &&
-                    !r.forwardTo.startsWith("mesh")
-        }
-    }
-
-    // DLQ = dead/failed/expired deliveries
-    val queueItems = remember(deliveries) {
-        deliveries.filter { it.status in listOf("dead", "failed", "expired", "denied") }
-    }
-
-    // Delivery counts for tab badges
-    val activeDeliveryCount = remember(deliveries) {
-        deliveries.count { it.status in listOf("queued", "sending", "retry", "held") }
+    val rulesByTab = remember(allRules) { allRules.groupBy { ruleTab(it) } }
+    val queueCount = remember(deliveries) {
+        deliveries.count { it.status in QUEUE_WAITING_STATUSES || it.status in QUEUE_GAVE_UP_STATUSES }
     }
 
     // Reload access evaluator after DB changes
     fun reloadEvaluator() {
         scope.launch {
             GatewayService.accessEval?.reloadFromDb()
+        }
+    }
+
+    val onToggle: (AccessRuleEntity, Boolean) -> Unit = { rule, enabled ->
+        scope.launch {
+            db.accessRuleDao().update(rule.copy(enabled = enabled))
+            reloadEvaluator()
         }
     }
 
@@ -162,10 +165,10 @@ fun RulesScreen() {
                 .padding(16.dp),
         ) {
             Text(
-                text = "Manage message routing rules between transports",
-                style = MaterialTheme.typography.bodySmall,
-                color = MeshSatTextMuted,
-                modifier = Modifier.padding(bottom = 12.dp),
+                text = "Rules decide which messages are passed from one link to another.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MeshSatTextSecondary,
+                modifier = Modifier.padding(bottom = 8.dp),
             )
 
             // Tab bar
@@ -178,145 +181,99 @@ fun RulesScreen() {
                 BridgeTab.entries.forEach { tab ->
                     val selected = activeTab == tab
                     val badgeCount = when (tab) {
-                        BridgeTab.CrossBridge -> crossRules.size
-                        BridgeTab.Deliveries -> activeDeliveryCount
-                        BridgeTab.Queue -> queueItems.size
-                        else -> 0
+                        BridgeTab.Outbound, BridgeTab.Inbound, BridgeTab.CrossBridge -> rulesByTab[tab]?.size ?: 0
+                        BridgeTab.Queue -> queueCount
+                        BridgeTab.Deliveries -> 0
                     }
                     Row(
                         modifier = Modifier
+                            .heightIn(min = 48.dp)
                             .background(
-                                if (selected) MeshSatTeal.copy(alpha = 0.12f) else Color.Transparent,
+                                if (selected) MeshSatSurfaceLight else Color.Transparent,
                                 RoundedCornerShape(6.dp),
                             )
                             .clickable { activeTab = tab }
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                            .padding(horizontal = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
                         Text(
                             text = tab.label,
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                            color = if (selected) MeshSatTeal else MeshSatTextMuted,
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                            color = if (selected) MeshSatTextPrimary else MeshSatTextMuted,
                         )
                         if (badgeCount > 0) {
-                            val badgeColor = when (tab) {
-                                BridgeTab.Queue -> MeshSatAmber
-                                BridgeTab.Deliveries -> MeshSatBlue
-                                else -> ColorIridium
-                            }
                             Text(
                                 text = badgeCount.toString(),
                                 style = MaterialTheme.typography.labelSmall,
-                                color = badgeColor,
+                                color = MeshSatTextSecondary,
                                 modifier = Modifier
-                                    .background(badgeColor.copy(alpha = 0.12f), RoundedCornerShape(4.dp))
-                                    .padding(horizontal = 4.dp, vertical = 1.dp),
+                                    .background(MeshSatBorder, RoundedCornerShape(4.dp))
+                                    .padding(horizontal = 6.dp, vertical = 1.dp),
                             )
                         }
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // Divider
+            Spacer(modifier = Modifier.height(4.dp))
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(1.dp)
                     .background(MeshSatBorder),
             )
-
             Spacer(modifier = Modifier.height(12.dp))
 
             // Tab content
             when (activeTab) {
                 BridgeTab.Outbound -> RulesListContent(
-                    rules = outboundRules,
-                    emptyText = "No outbound rules. Mesh messages stay local.",
-                    subtitle = "Mesh messages forwarded to external channels",
-                    badgeColor = MeshSatTeal,
-                    onToggle = { rule, enabled ->
-                        scope.launch {
-                            db.accessRuleDao().update(rule.copy(enabled = enabled))
-                            reloadEvaluator()
-                        }
-                    },
-                    onDelete = { rule ->
-                        scope.launch {
-                            db.accessRuleDao().deleteById(rule.id)
-                            reloadEvaluator()
-                        }
-                        Toast.makeText(context, "Rule deleted", Toast.LENGTH_SHORT).show()
-                    },
+                    rules = rulesByTab[BridgeTab.Outbound].orEmpty(),
+                    now = now,
+                    emptyText = "No rules for mesh messages yet, so they stay on the mesh. Tap + to add one.",
+                    subtitle = "What happens to messages heard on the mesh.",
+                    onToggle = onToggle,
+                    onDelete = { ruleToDelete = it },
                     onEdit = { editRule = it },
                 )
 
                 BridgeTab.Inbound -> RulesListContent(
-                    rules = inboundRules,
-                    emptyText = "No inbound rules. External messages are not routed to mesh.",
-                    subtitle = "External messages routed back to the mesh network",
-                    badgeColor = MeshSatBlue,
-                    onToggle = { rule, enabled ->
-                        scope.launch {
-                            db.accessRuleDao().update(rule.copy(enabled = enabled))
-                            reloadEvaluator()
-                        }
-                    },
-                    onDelete = { rule ->
-                        scope.launch {
-                            db.accessRuleDao().deleteById(rule.id)
-                            reloadEvaluator()
-                        }
-                        Toast.makeText(context, "Rule deleted", Toast.LENGTH_SHORT).show()
-                    },
+                    rules = rulesByTab[BridgeTab.Inbound].orEmpty(),
+                    now = now,
+                    emptyText = "No rules pass messages into the mesh yet. Tap + to add one.",
+                    subtitle = "Messages from satellite, SMS or the Hub that are passed into the mesh.",
+                    onToggle = onToggle,
+                    onDelete = { ruleToDelete = it },
                     onEdit = { editRule = it },
                 )
 
                 BridgeTab.CrossBridge -> RulesListContent(
-                    rules = crossRules,
-                    emptyText = "No cross-bridge rules. External channels operate independently.",
-                    subtitle = "Inter-channel bridging (e.g. Iridium \u2194 SMS)",
-                    badgeColor = ColorIridium,
-                    onToggle = { rule, enabled ->
-                        scope.launch {
-                            db.accessRuleDao().update(rule.copy(enabled = enabled))
-                            reloadEvaluator()
-                        }
-                    },
-                    onDelete = { rule ->
-                        scope.launch {
-                            db.accessRuleDao().deleteById(rule.id)
-                            reloadEvaluator()
-                        }
-                        Toast.makeText(context, "Rule deleted", Toast.LENGTH_SHORT).show()
-                    },
+                    rules = rulesByTab[BridgeTab.CrossBridge].orEmpty(),
+                    now = now,
+                    emptyText = "No rules between the other links yet. Tap + to add one.",
+                    subtitle = "Messages from satellite, SMS or the Hub that go to another link, or are stopped or only logged.",
+                    onToggle = onToggle,
+                    onDelete = { ruleToDelete = it },
                     onEdit = { editRule = it },
                 )
 
-                BridgeTab.Deliveries -> DeliveriesTabContent(
+                BridgeTab.Deliveries -> DeliveryLedger(
                     deliveries = deliveries,
-                    onSelect = { selectedDelivery = it },
+                    onSelect = { selectedDeliveryId = it.id },
+                    modifier = Modifier.fillMaxSize(),
                 )
 
                 BridgeTab.Queue -> QueueTabContent(
-                    items = queueItems,
-                    onRetry = { item ->
-                        scope.launch { db.messageDeliveryDao().retryNow(item.id) }
-                        Toast.makeText(context, "Queued for retry", Toast.LENGTH_SHORT).show()
-                    },
-                    onCancel = { item ->
-                        scope.launch { db.messageDeliveryDao().cancel(item.id) }
-                        Toast.makeText(context, "Cancelled", Toast.LENGTH_SHORT).show()
-                    },
-                    onSelect = { selectedDelivery = it },
+                    deliveries = deliveries,
+                    now = now,
+                    onSelect = { selectedDeliveryId = it.id },
+                    onRequest = { queueRequest = it },
                 )
             }
         }
 
-        // FAB — only show on rule tabs
+        // FAB, only on the rule tabs
         if (activeTab in listOf(BridgeTab.Outbound, BridgeTab.Inbound, BridgeTab.CrossBridge)) {
             FloatingActionButton(
                 onClick = { showAddDialog = true },
@@ -342,6 +299,8 @@ fun RulesScreen() {
                     reloadEvaluator()
                 }
                 showAddDialog = false
+                // Show the tab the rule is listed under, so it never seems to disappear.
+                activeTab = ruleTab(rule)
                 Toast.makeText(context, "Rule added", Toast.LENGTH_SHORT).show()
             },
         )
@@ -359,30 +318,79 @@ fun RulesScreen() {
                     reloadEvaluator()
                 }
                 editRule = null
-                Toast.makeText(context, "Rule updated", Toast.LENGTH_SHORT).show()
+                activeTab = ruleTab(updated)
+                Toast.makeText(context, "Rule saved", Toast.LENGTH_SHORT).show()
             },
         )
     }
 
-    // Delivery detail dialog
-    selectedDelivery?.let { delivery ->
-        DeliveryDetailDialogBridge(
-            delivery = delivery,
-            onDismiss = { selectedDelivery = null },
+    // Delete, after the user has read what it changes
+    ruleToDelete?.let { rule ->
+        AlertDialog(
+            onDismissRequest = { ruleToDelete = null },
+            containerColor = MeshSatSurface,
+            title = { Text("Delete this rule?") },
+            text = {
+                Text(
+                    text = ruleDeleteConsequence(rule) + " You cannot undo this.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        ruleToDelete = null
+                        scope.launch {
+                            db.accessRuleDao().deleteById(rule.id)
+                            reloadEvaluator()
+                        }
+                        Toast.makeText(context, "Rule deleted", Toast.LENGTH_SHORT).show()
+                    },
+                ) {
+                    Text("Delete", color = MeshSatRed)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { ruleToDelete = null }) {
+                    Text("Keep it", color = MeshSatTextSecondary)
+                }
+            },
         )
     }
+
+    // Delivery details, and the confirmation of a retry or cancel
+    DeliveryDialogs(
+        deliveries = deliveries,
+        selectedId = selectedDeliveryId,
+        onSelectedIdChange = { selectedDeliveryId = it },
+        request = queueRequest,
+        onRequestChange = { queueRequest = it },
+    )
+}
+
+/** What deleting [rule] changes, in one sentence. */
+private fun ruleDeleteConsequence(rule: AccessRuleEntity): String = when (rule.action) {
+    "forward" ->
+        if (rule.forwardTo.isNotBlank()) {
+            "Messages that matched it will no longer be forwarded to ${Words.channel(rule.forwardTo)}."
+        } else {
+            "Messages that matched it will no longer be forwarded."
+        }
+    "drop" -> "Messages it stopped can get through again, if another rule passes them on."
+    "log" -> "Its matches will no longer be counted. Messages are not affected."
+    else -> "Messages that matched it will no longer be handled by it."
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// Rules List Content (shared across Outbound/Inbound/Cross-Bridge tabs)
+// Rules list (the three rule tabs)
 // ═══════════════════════════════════════════════════════════════════════
 
 @Composable
 private fun RulesListContent(
     rules: List<AccessRuleEntity>,
+    now: Long,
     emptyText: String,
     subtitle: String,
-    badgeColor: Color,
     onToggle: (AccessRuleEntity, Boolean) -> Unit,
     onDelete: (AccessRuleEntity) -> Unit,
     onEdit: (AccessRuleEntity) -> Unit,
@@ -406,6 +414,7 @@ private fun RulesListContent(
                     text = emptyText,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MeshSatTextMuted,
+                    textAlign = TextAlign.Center,
                 )
             }
         } else {
@@ -416,12 +425,14 @@ private fun RulesListContent(
                 items(rules, key = { it.id }) { rule ->
                     AccessRuleCard(
                         rule = rule,
-                        badgeColor = badgeColor,
+                        now = now,
                         onToggle = { enabled -> onToggle(rule, enabled) },
                         onDelete = { onDelete(rule) },
                         onEdit = { onEdit(rule) },
                     )
                 }
+                // Room under the last card for the add button
+                item { Spacer(modifier = Modifier.height(72.dp)) }
             }
         }
     }
@@ -434,153 +445,131 @@ private fun RulesListContent(
 @Composable
 private fun AccessRuleCard(
     rule: AccessRuleEntity,
-    badgeColor: Color,
+    now: Long,
     onToggle: (Boolean) -> Unit,
     onDelete: () -> Unit,
     onEdit: () -> Unit,
 ) {
+    val name = rule.name.ifBlank { "Rule ${rule.id}" }
+    val matches = rule.matchCount.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+    val meta = listOfNotNull(
+        if (matches == 0) "No matches yet" else Words.count(matches, "match", "matches"),
+        parseUtcStamp(rule.lastMatchAt)?.let { "last ${Words.ago(it, now)}" },
+        ruleRateLimitText(rule.rateLimitPerMin, rule.rateLimitWindow),
+        queueGuaranteeLabel(rule.qosLevel).takeIf { rule.qosLevel <= 0 },
+        queueUrgencyLabel(rule.priority).takeIf { rule.priority == 0 },
+    ).joinToString(" · ")
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .background(MeshSatSurface, RoundedCornerShape(8.dp))
             .border(1.dp, MeshSatBorder, RoundedCornerShape(8.dp))
             .then(if (!rule.enabled) Modifier.background(Color.Black.copy(alpha = 0.3f)) else Modifier)
-            .padding(12.dp),
+            .padding(start = 12.dp, top = 8.dp, end = 4.dp, bottom = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
-        // Row 1: action badge + name + controls
+        // Name and on/off
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            Text(
+                text = name,
+                style = MaterialTheme.typography.titleSmall,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
-            ) {
-                // Action badge
-                Text(
-                    text = rule.action.uppercase(),
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = badgeColor,
-                    modifier = Modifier
-                        .background(badgeColor.copy(alpha = 0.12f), RoundedCornerShape(4.dp))
-                        .padding(horizontal = 6.dp, vertical = 2.dp),
-                )
-
-                // Rule name
-                Text(
-                    text = rule.name.ifBlank { "Rule #${rule.id}" },
-                    style = MaterialTheme.typography.titleSmall,
-                )
-            }
-
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Switch(
-                    checked = rule.enabled,
-                    onCheckedChange = onToggle,
-                    colors = SwitchDefaults.colors(checkedTrackColor = MeshSatTeal),
-                )
-                IconButton(onClick = onEdit, modifier = Modifier.size(36.dp)) {
-                    Icon(Icons.Default.Edit, contentDescription = "Edit", tint = MeshSatTextMuted, modifier = Modifier.size(18.dp))
-                }
-                IconButton(onClick = onDelete, modifier = Modifier.size(36.dp)) {
-                    Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MeshSatRed, modifier = Modifier.size(18.dp))
-                }
-            }
-        }
-
-        // Row 2: source -> dest interface
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(top = 4.dp),
-        ) {
-            InterfaceBadge(rule.interfaceId)
-            Text(
-                text = "\u2192",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MeshSatTextMuted,
             )
-            InterfaceBadge(rule.forwardTo)
-        }
-
-        // Row 3: match count + QoS + rate limit
-        Row(
-            modifier = Modifier.padding(top = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Text(
-                text = "${rule.matchCount} hits",
-                style = MaterialTheme.typography.labelSmall,
-                color = MeshSatTextMuted,
+            Switch(
+                checked = rule.enabled,
+                onCheckedChange = onToggle,
+                colors = SwitchDefaults.colors(checkedTrackColor = MeshSatTeal),
+                modifier = Modifier
+                    .padding(horizontal = 8.dp)
+                    .semantics { contentDescription = "Rule $name is ${if (rule.enabled) "on" else "off"}" },
             )
-
-            if (rule.qosLevel > 0) {
-                Text(
-                    text = "QoS ${rule.qosLevel}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MeshSatTextMuted,
-                )
-            }
-
-            if (rule.rateLimitPerMin > 0) {
-                Text(
-                    text = "${rule.rateLimitPerMin}/min",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MeshSatAmber,
-                )
-            }
-
-            rule.lastMatchAt?.let { ts ->
-                Text(
-                    text = "last: $ts",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MeshSatTextMuted,
-                )
-            }
         }
 
-        // Row 4: filters summary (if present)
+        // What it does: "Forward: Mesh to Satellite"
+        Text(
+            text = ruleRouteText(rule),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MeshSatTextSecondary,
+            modifier = Modifier.padding(end = 8.dp),
+        )
+
+        Text(
+            text = meta,
+            style = MaterialTheme.typography.bodySmall,
+            color = MeshSatTextMuted,
+            modifier = Modifier.padding(end = 8.dp),
+        )
+
         val filterSummary = buildFilterSummary(rule)
         if (filterSummary.isNotEmpty()) {
             Text(
                 text = filterSummary,
-                style = MaterialTheme.typography.labelSmall,
+                style = MaterialTheme.typography.bodySmall,
                 color = MeshSatTextSecondary,
-                modifier = Modifier.padding(top = 2.dp),
+                modifier = Modifier.padding(end = 8.dp),
             )
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End,
+        ) {
+            IconButton(onClick = onEdit) {
+                Icon(Icons.Default.Edit, contentDescription = "Edit rule $name", tint = MeshSatTextSecondary)
+            }
+            IconButton(onClick = onDelete) {
+                Icon(Icons.Default.Delete, contentDescription = "Delete rule $name", tint = MeshSatTextSecondary)
+            }
         }
     }
 }
 
-@Composable
-private fun InterfaceBadge(interfaceId: String) {
-    val color = interfaceColor(interfaceId)
-    val label = interfaceLabel(interfaceId)
-    Text(
-        text = label,
-        style = MaterialTheme.typography.labelSmall,
-        color = color,
-        modifier = Modifier
-            .background(color.copy(alpha = 0.12f), RoundedCornerShape(4.dp))
-            .padding(horizontal = 6.dp, vertical = 2.dp),
-    )
+private fun AnnotatedString.Builder.appendLink(id: String) {
+    withStyle(SpanStyle(color = Words.channelColor(id))) { append(Words.channel(id)) }
 }
 
-private fun interfaceColor(id: String): Color = when {
-    id.startsWith("mesh") -> ColorMesh
-    id.startsWith("iridium") -> ColorIridium
-    id.startsWith("sms") -> ColorCellular
-    else -> MeshSatTeal
+/** "Forward: Mesh to Satellite", "Drop: messages from SMS", with each link in its colour. */
+private fun ruleRouteText(rule: AccessRuleEntity): AnnotatedString = buildAnnotatedString {
+    withStyle(SpanStyle(fontWeight = FontWeight.SemiBold, color = MeshSatTextPrimary)) {
+        append(ruleActionLabel(rule.action))
+        append(": ")
+    }
+    when {
+        rule.direction == "egress" -> {
+            append("messages leaving by ")
+            appendLink(rule.interfaceId)
+        }
+        rule.action == "forward" && rule.forwardTo.isNotBlank() -> {
+            appendLink(rule.interfaceId)
+            append(" to ")
+            appendLink(rule.forwardTo)
+        }
+        else -> {
+            append("messages from ")
+            appendLink(rule.interfaceId)
+        }
+    }
 }
 
-private fun interfaceLabel(id: String): String = when {
-    id.startsWith("mesh") -> "Mesh"
-    id.startsWith("iridium") -> "Iridium"
-    id.startsWith("sms") -> "SMS"
-    else -> id
+/** "At most 5 messages per minute", or null when the rule has no limit (both numbers are needed). */
+private fun ruleRateLimitText(perWindow: Int, windowSeconds: Int): String? {
+    if (perWindow <= 0 || windowSeconds <= 0) return null
+    val per = if (windowSeconds == 60) "per minute" else "per ${Words.count(windowSeconds, "second")}"
+    return "At most ${Words.count(perWindow, "message")} $per"
+}
+
+/** A JSON array of ids or numbers as "a, b, c"; anything else as it is. */
+private fun jsonListText(raw: String): String = try {
+    val arr = JSONArray(raw)
+    (0 until arr.length()).joinToString(", ") { arr.get(it).toString() }
+} catch (_: Exception) {
+    raw
 }
 
 private fun buildFilterSummary(rule: AccessRuleEntity): String {
@@ -588,248 +577,47 @@ private fun buildFilterSummary(rule: AccessRuleEntity): String {
 
     if (rule.filters.isNotEmpty() && rule.filters != "{}") {
         try {
-            val obj = org.json.JSONObject(rule.filters)
-            obj.optString("keyword", "").takeIf { it.isNotEmpty() }?.let { parts.add("keyword: $it") }
-            obj.optString("channels", "").takeIf { it.isNotEmpty() && it != "[]" }?.let { parts.add("channels: $it") }
-            obj.optString("nodes", "").takeIf { it.isNotEmpty() && it != "[]" }?.let { parts.add("nodes: $it") }
-            obj.optString("portnums", "").takeIf { it.isNotEmpty() && it != "[]" }?.let { parts.add("portnums: $it") }
-        } catch (_: Exception) { /* ignore */ }
+            val obj = JSONObject(rule.filters)
+            obj.optString("keyword", "").takeIf { it.isNotEmpty() }?.let { parts.add("Contains “$it”") }
+            obj.optString("channels", "").takeIf { it.isNotEmpty() && it != "[]" }?.let { parts.add("Mesh channels ${jsonListText(it)}") }
+            obj.optString("nodes", "").takeIf { it.isNotEmpty() && it != "[]" }?.let { parts.add("From nodes ${jsonListText(it)}") }
+            obj.optString("portnums", "").takeIf { it.isNotEmpty() && it != "[]" }?.let { parts.add("Message types ${jsonListText(it)}") }
+        } catch (_: Exception) { /* unreadable filters: the evaluator ignores them too */ }
     }
-    rule.filterNodeGroup?.takeIf { it.isNotEmpty() }?.let { parts.add("node-group: $it") }
-    rule.filterSenderGroup?.takeIf { it.isNotEmpty() }?.let { parts.add("sender-group: $it") }
-    rule.filterPortnumGroup?.takeIf { it.isNotEmpty() }?.let { parts.add("portnum-group: $it") }
+    rule.filterNodeGroup?.takeIf { it.isNotEmpty() }?.let { parts.add("Node group $it") }
+    rule.filterSenderGroup?.takeIf { it.isNotEmpty() }?.let { parts.add("Sender group $it") }
+    rule.filterPortnumGroup?.takeIf { it.isNotEmpty() }?.let { parts.add("Message type group $it") }
 
-    return parts.joinToString(" | ")
+    return parts.joinToString(" · ")
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// Deliveries Tab
+// Queue tab: what is waiting, and what did not go out
 // ═══════════════════════════════════════════════════════════════════════
 
-@Composable
-private fun DeliveriesTabContent(
-    deliveries: List<MessageDeliveryEntity>,
-    onSelect: (MessageDeliveryEntity) -> Unit,
-) {
-    var filterStatus by remember { mutableStateOf<String?>(null) }
-    var filterChannel by remember { mutableStateOf<String?>(null) }
-
-    val filtered = remember(deliveries, filterStatus, filterChannel) {
-        deliveries.filter { d ->
-            (filterStatus == null || d.status == filterStatus) &&
-                    (filterChannel == null || d.channel == filterChannel)
-        }
-    }
-
-    val statusCounts = remember(deliveries) {
-        deliveries.groupBy { it.status }.mapValues { it.value.size }
-    }
-
-    val channels = remember(deliveries) {
-        deliveries.map { it.channel }.distinct().sorted()
-    }
-
-    Column(modifier = Modifier.fillMaxSize()) {
-        // Summary bar
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(MeshSatSurface, RoundedCornerShape(8.dp))
-                .border(1.dp, MeshSatBorder, RoundedCornerShape(8.dp))
-                .padding(8.dp),
-            horizontalArrangement = Arrangement.SpaceEvenly,
-        ) {
-            listOf("queued", "sending", "sent", "failed", "dead").forEach { status ->
-                val count = statusCounts[status] ?: 0
-                val color = deliveryStatusColor(status)
-                val selected = filterStatus == status
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier
-                        .background(
-                            if (selected) color.copy(alpha = 0.15f) else Color.Transparent,
-                            RoundedCornerShape(6.dp),
-                        )
-                        .clickable { filterStatus = if (selected) null else status }
-                        .padding(horizontal = 6.dp, vertical = 4.dp),
-                ) {
-                    Text(
-                        text = count.toString(),
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = color,
-                    )
-                    Text(
-                        text = status,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = if (selected) color else MeshSatTextMuted,
-                    )
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // Channel filter chips
-        if (channels.isNotEmpty()) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                channels.forEach { ch ->
-                    val selected = filterChannel == ch
-                    val color = channelColor(ch)
-                    Text(
-                        text = ch,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = if (selected) color else MeshSatTextMuted,
-                        modifier = Modifier
-                            .background(
-                                if (selected) color.copy(alpha = 0.15f) else MeshSatSurface,
-                                RoundedCornerShape(12.dp),
-                            )
-                            .border(
-                                1.dp,
-                                if (selected) color else MeshSatBorder,
-                                RoundedCornerShape(12.dp),
-                            )
-                            .clickable { filterChannel = if (filterChannel == ch) null else ch }
-                            .padding(horizontal = 10.dp, vertical = 4.dp),
-                    )
-                }
-            }
-            Spacer(modifier = Modifier.height(8.dp))
-        }
-
-        // Delivery list
-        if (filtered.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = if (deliveries.isEmpty()) "No deliveries yet.\nMessages appear when the dispatcher routes them."
-                    else "No deliveries match the current filter.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MeshSatTextMuted,
-                )
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                items(filtered, key = { it.id }) { delivery ->
-                    DeliveryRowBridge(delivery) { onSelect(delivery) }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun DeliveryRowBridge(delivery: MessageDeliveryEntity, onClick: () -> Unit) {
-    val fmt = remember { SimpleDateFormat("HH:mm:ss", Locale.getDefault()) }
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(MeshSatSurface, RoundedCornerShape(6.dp))
-            .border(1.dp, MeshSatBorder, RoundedCornerShape(6.dp))
-            .clickable(onClick = onClick)
-            .padding(10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        // Status dot
-        Box(
-            modifier = Modifier
-                .size(10.dp)
-                .background(deliveryStatusColor(delivery.status), CircleShape),
-        )
-
-        Column(modifier = Modifier.weight(1f)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Text(
-                    text = delivery.channel,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = channelColor(delivery.channel),
-                )
-                Text(
-                    text = delivery.status.uppercase(),
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = deliveryStatusColor(delivery.status),
-                )
-            }
-
-            if (delivery.textPreview.isNotBlank()) {
-                Text(
-                    text = delivery.textPreview.take(80),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MeshSatTextSecondary,
-                    maxLines = 1,
-                    fontFamily = PlexMono,
-                )
-            }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Text(
-                    text = fmt.format(Date(delivery.createdAt)),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MeshSatTextMuted,
-                )
-                delivery.ackStatus?.let { ack ->
-                    Text(
-                        text = "ACK: $ack",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = when (ack) {
-                            "acked" -> MeshSatGreen
-                            "pending" -> MeshSatAmber
-                            else -> MeshSatRed
-                        },
-                    )
-                }
-                if (delivery.retries > 0) {
-                    Text(
-                        text = "retry ${delivery.retries}/${delivery.maxRetries}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MeshSatAmber,
-                    )
-                }
-            }
-        }
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════════
-// Queue Tab (DLQ — dead/failed/expired deliveries)
-// ═══════════════════════════════════════════════════════════════════════
-
+/**
+ * Waiting messages (with Cancel) and messages that gave up (with Retry). The tab used to list
+ * only the ones that gave up while offering Cancel only to waiting ones, so Cancel never showed (B11).
+ */
 @Composable
 private fun QueueTabContent(
-    items: List<MessageDeliveryEntity>,
-    onRetry: (MessageDeliveryEntity) -> Unit,
-    onCancel: (MessageDeliveryEntity) -> Unit,
+    deliveries: List<MessageDeliveryEntity>,
+    now: Long,
     onSelect: (MessageDeliveryEntity) -> Unit,
+    onRequest: (QueueRequest) -> Unit,
 ) {
+    val waiting = remember(deliveries) { deliveries.filter { it.status in QUEUE_WAITING_STATUSES } }
+    val gaveUp = remember(deliveries) { deliveries.filter { it.status in QUEUE_GAVE_UP_STATUSES } }
+
     Column(modifier = Modifier.fillMaxSize()) {
         Text(
-            text = "Dead letter queue \u2014 failed, expired, and denied deliveries",
+            text = "Messages still waiting to go out, and messages that did not. Cancel one that is waiting, or retry one that gave up.",
             style = MaterialTheme.typography.bodySmall,
             color = MeshSatTextMuted,
             modifier = Modifier.padding(bottom = 8.dp),
         )
 
-        if (items.isEmpty()) {
+        if (waiting.isEmpty() && gaveUp.isEmpty()) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -837,9 +625,10 @@ private fun QueueTabContent(
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    text = "Queue is empty. No failed deliveries.",
+                    text = "Nothing is waiting, and nothing has failed.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MeshSatTextMuted,
+                    textAlign = TextAlign.Center,
                 )
             }
         } else {
@@ -847,13 +636,27 @@ private fun QueueTabContent(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                items(items, key = { it.id }) { item ->
-                    DlqItemCard(
-                        item = item,
-                        onRetry = { onRetry(item) },
-                        onCancel = { onCancel(item) },
-                        onClick = { onSelect(item) },
-                    )
+                if (waiting.isNotEmpty()) {
+                    item(key = "waiting-title") { QueueSectionTitle("Waiting to go out (${waiting.size})") }
+                    items(waiting, key = { it.id }) { d ->
+                        DeliveryCard(
+                            delivery = d,
+                            now = now,
+                            onClick = { onSelect(d) },
+                            onCancel = { onRequest(QueueRequest(d, retry = false)) },
+                        )
+                    }
+                }
+                if (gaveUp.isNotEmpty()) {
+                    item(key = "gave-up-title") { QueueSectionTitle("Did not go out (${gaveUp.size})") }
+                    items(gaveUp, key = { it.id }) { d ->
+                        DeliveryCard(
+                            delivery = d,
+                            now = now,
+                            onClick = { onSelect(d) },
+                            onRetry = { onRequest(QueueRequest(d, retry = true)) },
+                        )
+                    }
                 }
             }
         }
@@ -861,134 +664,73 @@ private fun QueueTabContent(
 }
 
 @Composable
-private fun DlqItemCard(
-    item: MessageDeliveryEntity,
-    onRetry: () -> Unit,
-    onCancel: () -> Unit,
-    onClick: () -> Unit,
-) {
-    val fmt = remember { SimpleDateFormat("HH:mm:ss", Locale.getDefault()) }
-    val statusColor = deliveryStatusColor(item.status)
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(MeshSatSurface, RoundedCornerShape(6.dp))
-            .border(1.dp, MeshSatBorder, RoundedCornerShape(6.dp))
-            .clickable(onClick = onClick)
-            .padding(10.dp),
-    ) {
-        // Header: channel + status + time
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = item.channel,
-                style = MaterialTheme.typography.labelSmall,
-                fontFamily = PlexMono,
-                color = channelColor(item.channel),
-                modifier = Modifier
-                    .background(channelColor(item.channel).copy(alpha = 0.1f), RoundedCornerShape(4.dp))
-                    .padding(horizontal = 6.dp, vertical = 2.dp),
-            )
-            Text(
-                text = item.status.uppercase(),
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Bold,
-                fontFamily = PlexMono,
-                color = statusColor,
-                modifier = Modifier
-                    .background(statusColor.copy(alpha = 0.1f), RoundedCornerShape(4.dp))
-                    .padding(horizontal = 6.dp, vertical = 2.dp),
-            )
-            if (item.priority <= 1) {
-                Text(
-                    text = priorityLabel(item.priority),
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = priorityColor(item.priority),
-                )
-            }
-            Spacer(modifier = Modifier.weight(1f))
-            Text(
-                text = fmt.format(Date(item.createdAt)),
-                style = MaterialTheme.typography.labelSmall,
-                color = MeshSatTextMuted,
-            )
-        }
-
-        // Preview
-        if (item.textPreview.isNotBlank()) {
-            Text(
-                text = item.textPreview.take(80),
-                style = MaterialTheme.typography.bodySmall,
-                fontFamily = PlexMono,
-                color = MeshSatTextSecondary,
-                maxLines = 2,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 6.dp)
-                    .background(MeshSatBorder.copy(alpha = 0.2f), RoundedCornerShape(4.dp))
-                    .padding(6.dp),
-            )
-        }
-
-        // Error
-        if (item.lastError.isNotBlank()) {
-            Text(
-                text = item.lastError,
-                style = MaterialTheme.typography.labelSmall,
-                color = MeshSatRed.copy(alpha = 0.8f),
-                maxLines = 2,
-                modifier = Modifier.padding(top = 4.dp),
-            )
-        }
-
-        // Actions
-        Row(
-            modifier = Modifier.padding(top = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = "Retries: ${item.retries}/${item.maxRetries}",
-                style = MaterialTheme.typography.labelSmall,
-                color = MeshSatTextMuted,
-            )
-            Spacer(modifier = Modifier.weight(1f))
-            if (item.status in listOf("failed", "dead")) {
-                Text(
-                    text = "Retry",
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = MeshSatTeal,
-                    modifier = Modifier
-                        .background(MeshSatTeal.copy(alpha = 0.1f), RoundedCornerShape(4.dp))
-                        .clickable(onClick = onRetry)
-                        .padding(horizontal = 8.dp, vertical = 4.dp),
-                )
-            }
-            if (item.status in listOf("queued", "retry")) {
-                Text(
-                    text = "Cancel",
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = MeshSatRed,
-                    modifier = Modifier
-                        .background(MeshSatRed.copy(alpha = 0.1f), RoundedCornerShape(4.dp))
-                        .clickable(onClick = onCancel)
-                        .padding(horizontal = 8.dp, vertical = 4.dp),
-                )
-            }
-        }
-    }
+private fun QueueSectionTitle(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.titleSmall,
+        color = MeshSatTextSecondary,
+        modifier = Modifier.padding(top = 8.dp, bottom = 2.dp),
+    )
 }
 
 // ═══════════════════════════════════════════════════════════════════════
 // Add / Edit Rule Dialog
 // ═══════════════════════════════════════════════════════════════════════
+
+/** The keyword filter of a rule, or "" when it has none. */
+private fun ruleKeyword(rule: AccessRuleEntity?): String {
+    val raw = rule?.filters?.trim().orEmpty()
+    if (raw.isEmpty() || raw == "{}") return ""
+    return try {
+        JSONObject(raw).optString("keyword", "")
+    } catch (_: Exception) {
+        ""
+    }
+}
+
+/**
+ * The rule's filters with the keyword set to [keyword] (removed when blank). Every other filter
+ * (mesh channels, nodes, message types) is kept: saving used to replace them all with the keyword
+ * alone (B9). Filters this code cannot read are kept as they are unless a keyword was typed.
+ */
+private fun mergeKeywordFilter(existing: String?, keyword: String): String {
+    val raw = existing?.trim().orEmpty()
+    val obj = if (raw.isEmpty()) {
+        JSONObject()
+    } else {
+        try {
+            JSONObject(raw)
+        } catch (_: Exception) {
+            null
+        }
+    }
+    if (obj == null) {
+        return if (keyword.isBlank()) raw else JSONObject().put("keyword", keyword).toString()
+    }
+    if (keyword.isBlank()) obj.remove("keyword") else obj.put("keyword", keyword)
+    return if (obj.length() == 0) "{}" else obj.toString()
+}
+
+/** The settings of [rule] that the editor does not show, which saving keeps. */
+private fun hiddenRuleSettings(rule: AccessRuleEntity?): List<String> {
+    if (rule == null) return emptyList()
+    val hidden = mutableListOf<String>()
+    try {
+        val raw = rule.filters.trim()
+        if (raw.isNotEmpty() && raw != "{}") {
+            val obj = JSONObject(raw)
+            if (obj.optString("channels", "").let { it.isNotEmpty() && it != "[]" }) hidden.add("mesh channels")
+            if (obj.optString("nodes", "").let { it.isNotEmpty() && it != "[]" }) hidden.add("nodes")
+            if (obj.optString("portnums", "").let { it.isNotEmpty() && it != "[]" }) hidden.add("message types")
+        }
+    } catch (_: Exception) {
+        hidden.add("filters this screen cannot read")
+    }
+    if (!rule.filterPortnumGroup.isNullOrEmpty()) hidden.add("a message type group")
+    val options = rule.forwardOptions.trim()
+    if (options.isNotEmpty() && options != "{}") hidden.add("forwarding options")
+    return hidden
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -1014,83 +756,97 @@ private fun AddEditRuleDialog(
         else -> "iridium_0"
     }
 
-    var name by remember { mutableStateOf(rule?.name ?: "") }
-    var interfaceId by remember { mutableStateOf(rule?.interfaceId ?: defaultInterface) }
-    var forwardTo by remember { mutableStateOf(rule?.forwardTo ?: defaultForwardTo) }
-    var action by remember { mutableStateOf(rule?.action ?: "forward") }
-    var enabled by remember { mutableStateOf(rule?.enabled ?: true) }
-    var qosLevel by remember { mutableIntStateOf(rule?.qosLevel ?: 1) }
-    var rateLimitPerMin by remember { mutableStateOf((rule?.rateLimitPerMin ?: 0).toString()) }
-    var rateLimitWindow by remember { mutableStateOf((rule?.rateLimitWindow ?: 0).toString()) }
-    var priority by remember { mutableStateOf((rule?.priority ?: 10).toString()) }
+    // The editor reads the rule once, keyed by its id, and from then on holds what the user
+    // types. It used to re-read the keyword on every recomposition, so a typed keyword was
+    // overwritten at once and an existing rule's keyword could not be changed (B9).
+    val key = rule?.id
+    var name by remember(key) { mutableStateOf(rule?.name ?: "") }
+    var interfaceId by remember(key) { mutableStateOf(rule?.interfaceId ?: defaultInterface) }
+    var forwardTo by remember(key) { mutableStateOf(rule?.forwardTo?.takeIf { it.isNotBlank() } ?: defaultForwardTo) }
+    var action by remember(key) { mutableStateOf(rule?.action ?: "forward") }
+    var enabled by remember(key) { mutableStateOf(rule?.enabled ?: true) }
+    var qosLevel by remember(key) { mutableIntStateOf(rule?.qosLevel ?: 1) }
+    var rateLimitPerMin by remember(key) { mutableStateOf((rule?.rateLimitPerMin ?: 0).toString()) }
+    var rateLimitWindow by remember(key) { mutableStateOf((rule?.rateLimitWindow ?: 0).toString()) }
+    var priority by remember(key) { mutableStateOf((rule?.priority ?: 10).toString()) }
+    var filterKeyword by remember(key) { mutableStateOf(ruleKeyword(rule)) }
+    var filterNodeGroup by remember(key) { mutableStateOf(rule?.filterNodeGroup ?: "") }
+    var filterSenderGroup by remember(key) { mutableStateOf(rule?.filterSenderGroup ?: "") }
+    var triedToSave by remember(key) { mutableStateOf(false) }
+    val hiddenSettings = remember(key) { hiddenRuleSettings(rule) }
 
-    // Filter fields
-    var filterKeyword by remember { mutableStateOf("") }
-    var filterNodeGroup by remember { mutableStateOf(rule?.filterNodeGroup ?: "") }
-    var filterSenderGroup by remember { mutableStateOf(rule?.filterSenderGroup ?: "") }
-
-    // Parse existing filters
-    if (rule != null && rule.filters.isNotEmpty() && rule.filters != "{}") {
-        try {
-            val obj = org.json.JSONObject(rule.filters)
-            filterKeyword = obj.optString("keyword", "")
-        } catch (_: Exception) { /* ignore */ }
-    }
+    val isEgress = rule?.direction == "egress"
+    val nameError = triedToSave && name.isBlank()
+    val targetError = triedToSave && action == "forward" && (forwardTo.isBlank() || forwardTo == interfaceId)
+    val priorityValue = priority.toIntOrNull() ?: 10
+    val perWindow = rateLimitPerMin.toIntOrNull() ?: 0
+    val windowSeconds = rateLimitWindow.toIntOrNull() ?: 0
 
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = MeshSatSurface,
-        title = { Text(if (isEdit) "Edit Rule" else "Add Rule") },
+        title = { Text(if (isEdit) "Edit rule" else "New rule") },
         text = {
             Column(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                // Name
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
                     label = { Text("Rule name") },
                     singleLine = true,
+                    isError = nameError,
+                    supportingText = if (nameError) {
+                        { Text("Give the rule a name so you can find it later.") }
+                    } else {
+                        null
+                    },
                     modifier = Modifier.fillMaxWidth(),
                     colors = fieldColors(),
                 )
 
-                // Source interface
                 DropdownField(
-                    label = "Source interface",
+                    label = if (isEgress) "When a message leaves by" else "When a message arrives by",
                     value = interfaceId,
                     options = getAvailableInterfaces(),
-                    displayMapper = { interfaceLabel(it) },
+                    displayMapper = { Words.channel(it) },
                     onSelect = { interfaceId = it },
                 )
 
-                // Action
                 DropdownField(
-                    label = "Action",
+                    label = "Then",
                     value = action,
                     options = listOf("forward", "drop", "log"),
+                    displayMapper = { ruleActionLabel(it) },
+                    supportingText = when (action) {
+                        "forward" -> "Pass it on to another link."
+                        "drop" -> "Stop it. It is not passed on, whatever other rules say."
+                        else -> "Only count the match. Other rules still decide what happens."
+                    },
                     onSelect = { action = it },
                 )
 
-                // Forward to (only for forward action)
                 if (action == "forward") {
                     DropdownField(
-                        label = "Forward to",
+                        label = "Pass it on by",
                         value = forwardTo,
                         options = getAvailableInterfaces().filter { it != interfaceId },
-                        displayMapper = { interfaceLabel(it) },
+                        displayMapper = { Words.channel(it) },
+                        isError = targetError,
+                        supportingText = if (targetError) "Pick a different link from the one it arrives by." else null,
                         onSelect = { forwardTo = it },
                     )
                 }
 
-                // Enabled toggle
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text("Enabled", style = MaterialTheme.typography.bodyMedium)
+                    Text("Rule is on", style = MaterialTheme.typography.bodyMedium)
                     Switch(
                         checked = enabled,
                         onCheckedChange = { enabled = it },
@@ -1098,59 +854,75 @@ private fun AddEditRuleDialog(
                     )
                 }
 
-                // Priority
                 OutlinedTextField(
                     value = priority,
-                    onValueChange = { priority = it.filter { c -> c.isDigit() } },
-                    label = { Text("Priority (lower = higher)") },
+                    onValueChange = { priority = it.filter { c -> c.isDigit() }.take(6) },
+                    label = { Text("Urgency") },
                     singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    supportingText = {
+                        Text("${queueUrgencyLabel(priorityValue)}. Lower numbers go first and are checked first; 0 never expires.")
+                    },
                     modifier = Modifier.fillMaxWidth(),
                     colors = fieldColors(),
                 )
 
-                // QoS
                 DropdownField(
-                    label = "QoS level",
+                    label = "Delivery guarantee",
                     value = qosLevel.toString(),
                     options = listOf("0", "1", "2"),
+                    displayMapper = { queueGuaranteeLabel(it.toIntOrNull() ?: 1) },
+                    supportingText = "Try once gives up after one failed attempt. Keep trying retries until it goes out.",
                     onSelect = { qosLevel = it.toIntOrNull() ?: 1 },
                 )
 
-                // Rate limit
+                Text(
+                    text = "Limit",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MeshSatTextSecondary,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     OutlinedTextField(
                         value = rateLimitPerMin,
-                        onValueChange = { rateLimitPerMin = it.filter { c -> c.isDigit() } },
-                        label = { Text("Rate/min") },
+                        onValueChange = { rateLimitPerMin = it.filter { c -> c.isDigit() }.take(6) },
+                        label = { Text("At most (messages)") },
                         singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         modifier = Modifier.weight(1f),
                         colors = fieldColors(),
                     )
                     OutlinedTextField(
                         value = rateLimitWindow,
-                        onValueChange = { rateLimitWindow = it.filter { c -> c.isDigit() } },
-                        label = { Text("Window (s)") },
+                        onValueChange = { rateLimitWindow = it.filter { c -> c.isDigit() }.take(6) },
+                        label = { Text("Every (seconds)") },
                         singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         modifier = Modifier.weight(1f),
                         colors = fieldColors(),
                     )
                 }
-
-                // Filters section
                 Text(
-                    text = "FILTERS",
-                    style = MaterialTheme.typography.labelSmall,
+                    text = ruleRateLimitText(perWindow, windowSeconds)?.let { "$it. Leave either box at 0 for no limit." }
+                        ?: "No limit. Fill in both boxes to set one, for example 5 messages every 60 seconds.",
+                    style = MaterialTheme.typography.bodySmall,
                     color = MeshSatTextMuted,
+                )
+
+                Text(
+                    text = "Only messages that match",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MeshSatTextSecondary,
                     modifier = Modifier.padding(top = 8.dp),
                 )
 
                 OutlinedTextField(
                     value = filterKeyword,
                     onValueChange = { filterKeyword = it },
-                    label = { Text("Keyword filter (optional)") },
+                    label = { Text("Contains the text (optional)") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                     colors = fieldColors(),
@@ -1159,7 +931,7 @@ private fun AddEditRuleDialog(
                 OutlinedTextField(
                     value = filterNodeGroup,
                     onValueChange = { filterNodeGroup = it },
-                    label = { Text("Node group ID (optional)") },
+                    label = { Text("From a node group (group id, optional)") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                     colors = fieldColors(),
@@ -1168,44 +940,45 @@ private fun AddEditRuleDialog(
                 OutlinedTextField(
                     value = filterSenderGroup,
                     onValueChange = { filterSenderGroup = it },
-                    label = { Text("Sender group ID (optional)") },
+                    label = { Text("From a sender group (group id, optional)") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                     colors = fieldColors(),
                 )
+
+                if (hiddenSettings.isNotEmpty()) {
+                    Text(
+                        text = "This rule also has settings this screen does not show (" +
+                            hiddenSettings.joinToString(", ") + "). Saving keeps them.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MeshSatTextMuted,
+                    )
+                }
             }
         },
         confirmButton = {
             TextButton(
                 onClick = {
-                    if (name.isBlank()) return@TextButton
+                    triedToSave = true
+                    val badTarget = action == "forward" && (forwardTo.isBlank() || forwardTo == interfaceId)
+                    if (name.isBlank() || badTarget) return@TextButton
 
-                    // Build filters JSON
-                    val filtersJson = if (filterKeyword.isNotBlank()) {
-                        org.json.JSONObject().apply {
-                            put("keyword", filterKeyword)
-                        }.toString()
-                    } else "{}"
-
-                    val result = AccessRuleEntity(
-                        id = rule?.id ?: 0,
+                    // Start from the rule itself, so what the editor does not show (direction,
+                    // message type group, forwarding options, match count) survives a save.
+                    val base = rule ?: AccessRuleEntity(interfaceId = interfaceId, direction = "ingress", name = name.trim())
+                    val result = base.copy(
                         interfaceId = interfaceId,
-                        direction = "ingress",
                         priority = priority.toIntOrNull() ?: 10,
-                        name = name,
+                        name = name.trim(),
                         enabled = enabled,
                         action = action,
                         forwardTo = if (action == "forward") forwardTo else "",
-                        filters = filtersJson,
-                        filterNodeGroup = filterNodeGroup.ifBlank { null },
-                        filterSenderGroup = filterSenderGroup.ifBlank { null },
-                        filterPortnumGroup = rule?.filterPortnumGroup,
-                        forwardOptions = rule?.forwardOptions ?: "{}",
+                        filters = mergeKeywordFilter(rule?.filters, filterKeyword),
+                        filterNodeGroup = filterNodeGroup.trim().ifBlank { null },
+                        filterSenderGroup = filterSenderGroup.trim().ifBlank { null },
                         qosLevel = qosLevel,
                         rateLimitPerMin = rateLimitPerMin.toIntOrNull() ?: 0,
                         rateLimitWindow = rateLimitWindow.toIntOrNull() ?: 0,
-                        matchCount = rule?.matchCount ?: 0,
-                        lastMatchAt = rule?.lastMatchAt,
                     )
                     onSave(result)
                 },
@@ -1215,90 +988,10 @@ private fun AddEditRuleDialog(
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel", color = MeshSatTextMuted)
+                Text("Cancel", color = MeshSatTextSecondary)
             }
         },
     )
-}
-
-// ═══════════════════════════════════════════════════════════════════════
-// Delivery Detail Dialog (shared by Deliveries + Queue tabs)
-// ═══════════════════════════════════════════════════════════════════════
-
-@Composable
-private fun DeliveryDetailDialogBridge(
-    delivery: MessageDeliveryEntity,
-    onDismiss: () -> Unit,
-) {
-    val fmt = remember { SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor = MeshSatSurface,
-        title = {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(12.dp)
-                        .background(deliveryStatusColor(delivery.status), CircleShape),
-                )
-                Text("Delivery #${delivery.id}")
-            }
-        },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                DetailRow("Channel", delivery.channel)
-                DetailRow("Status", delivery.status.uppercase())
-                DetailRow("Priority", priorityLabel(delivery.priority))
-                DetailRow("Created", fmt.format(Date(delivery.createdAt)))
-                DetailRow("Updated", fmt.format(Date(delivery.updatedAt)))
-                DetailRow("MsgRef", delivery.msgRef)
-                if (delivery.retries > 0) DetailRow("Retries", "${delivery.retries}/${delivery.maxRetries}")
-                if (delivery.lastError.isNotBlank()) DetailRow("Last Error", delivery.lastError)
-                delivery.ackStatus?.let { DetailRow("ACK Status", it) }
-                if (delivery.seqNum > 0) DetailRow("Seq #", delivery.seqNum.toString())
-                if (delivery.qosLevel > 0) DetailRow("QoS Level", delivery.qosLevel.toString())
-                if (delivery.ttlSeconds > 0) DetailRow("TTL", "${delivery.ttlSeconds}s")
-                delivery.expiresAt?.let { DetailRow("Expires", fmt.format(Date(it))) }
-
-                if (delivery.textPreview.isNotBlank()) {
-                    Text(
-                        text = "Preview",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MeshSatTextMuted,
-                    )
-                    Text(
-                        text = delivery.textPreview,
-                        style = MaterialTheme.typography.bodySmall,
-                        fontFamily = PlexMono,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(MeshSatBorder.copy(alpha = 0.3f), RoundedCornerShape(4.dp))
-                            .padding(8.dp),
-                    )
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Close", color = MeshSatTextMuted)
-            }
-        },
-    )
-}
-
-@Composable
-private fun DetailRow(label: String, value: String) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-    ) {
-        Text(text = label, style = MaterialTheme.typography.bodySmall, color = MeshSatTextMuted)
-        Text(text = value, style = MaterialTheme.typography.bodySmall)
-    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -1312,6 +1005,8 @@ private fun DropdownField(
     value: String,
     options: List<String>,
     displayMapper: ((String) -> String)? = null,
+    supportingText: String? = null,
+    isError: Boolean = false,
     onSelect: (String) -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
@@ -1326,6 +1021,12 @@ private fun DropdownField(
             readOnly = true,
             label = { Text(label) },
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
+            isError = isError,
+            supportingText = if (supportingText != null) {
+                { Text(supportingText) }
+            } else {
+                null
+            },
             modifier = Modifier
                 .fillMaxWidth()
                 .menuAnchor(),
@@ -1353,40 +1054,3 @@ private fun fieldColors() = OutlinedTextFieldDefaults.colors(
     focusedBorderColor = MeshSatTeal,
     unfocusedBorderColor = MeshSatBorder,
 )
-
-// ═══════════════════════════════════════════════════════════════════════
-// Utility functions
-// ═══════════════════════════════════════════════════════════════════════
-
-private fun deliveryStatusColor(status: String): Color = when (status) {
-    "queued" -> MeshSatAmber
-    "sending" -> MeshSatTeal
-    "sent" -> MeshSatGreen
-    "delivered" -> MeshSatGreen
-    "failed" -> MeshSatRed
-    "dead" -> Color(0xFF6B7280)
-    "expired" -> Color(0xFF6B7280)
-    "denied" -> MeshSatRed
-    "held" -> MeshSatAmber
-    "retry" -> MeshSatAmber
-    else -> Color(0xFF6B7280)
-}
-
-private fun channelColor(channel: String): Color = when {
-    channel.startsWith("mesh") -> ColorMesh
-    channel.startsWith("iridium") -> ColorIridium
-    channel.startsWith("sms") -> ColorSMS
-    else -> MeshSatTeal
-}
-
-private fun priorityLabel(priority: Int): String = when (priority) {
-    0 -> "Critical"
-    1 -> "Normal"
-    else -> "Low"
-}
-
-private fun priorityColor(priority: Int): Color = when (priority) {
-    0 -> MeshSatRed
-    1 -> MeshSatAmber
-    else -> MeshSatTextMuted
-}

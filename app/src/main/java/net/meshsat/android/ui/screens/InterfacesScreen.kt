@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -20,80 +21,80 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import net.meshsat.android.data.AccessRuleEntity
 import net.meshsat.android.data.AppDatabase
 import net.meshsat.android.data.FailoverGroupEntity
-import net.meshsat.android.data.FailoverMemberEntity
 import net.meshsat.android.data.ObjectGroupEntity
 import net.meshsat.android.engine.HealthScore
 import net.meshsat.android.engine.InterfaceState
 import net.meshsat.android.engine.InterfaceStatus
 import net.meshsat.android.service.GatewayService
+import net.meshsat.android.ui.Words
 import org.json.JSONArray
-import net.meshsat.android.ui.theme.ColorCellular
-import net.meshsat.android.ui.theme.ColorIridium
-import net.meshsat.android.ui.theme.ColorMesh
 import net.meshsat.android.ui.theme.MeshSatAmber
 import net.meshsat.android.ui.theme.MeshSatBorder
 import net.meshsat.android.ui.theme.MeshSatGreen
 import net.meshsat.android.ui.theme.MeshSatRed
 import net.meshsat.android.ui.theme.MeshSatSurface
+import net.meshsat.android.ui.theme.MeshSatSurfaceLight
 import net.meshsat.android.ui.theme.MeshSatTeal
 import net.meshsat.android.ui.theme.MeshSatTextMuted
+import net.meshsat.android.ui.theme.MeshSatTextPrimary
 import net.meshsat.android.ui.theme.MeshSatTextSecondary
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 import net.meshsat.android.ui.theme.PlexMono
 
 // ═══════════════════════════════════════════════════════════════════════
-// Interface Management — Phase I
-// Tabbed UI for transport interfaces, channel registry, and health scores
+// Links: each way the phone sends and receives, its rules, groups and health
 // ═══════════════════════════════════════════════════════════════════════
 
 private enum class IfaceTab(val label: String) {
-    Interfaces("Interfaces"),
-    AccessRules("Access Rules"),
-    Channels("Channels"),
-    ObjectGroups("Object Groups"),
-    Failover("Failover"),
+    Interfaces("Links"),
+    AccessRules("Rules"),
+    Channels("Capabilities"),
+    ObjectGroups("Groups"),
+    Failover("Backup links"),
     Health("Health"),
 }
+
+/** How often the groups and backup links tabs re-read the database. */
+private const val GROUPS_REFRESH_MS = 10_000L
 
 @Composable
 fun InterfacesScreen() {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
 
     val ifaceStates by GatewayService.ifaceManager?.states
         ?.collectAsState()
         ?: remember { mutableStateOf<Map<String, InterfaceStatus>>(emptyMap()) }
 
     var activeTab by remember { mutableStateOf(IfaceTab.Interfaces) }
+    var confirmOff by remember { mutableStateOf<String?>(null) }
 
     // Health scores (refreshed periodically)
     var healthScores by remember { mutableStateOf<List<HealthScore>>(emptyList()) }
@@ -112,10 +113,10 @@ fun InterfacesScreen() {
             .padding(16.dp),
     ) {
         Text(
-            text = "Transport configuration and health monitoring",
-            style = MaterialTheme.typography.bodySmall,
-            color = MeshSatTextMuted,
-            modifier = Modifier.padding(bottom = 12.dp),
+            text = "Each way this phone can send and receive messages, and how well it is working.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MeshSatTextSecondary,
+            modifier = Modifier.padding(bottom = 8.dp),
         )
 
         // Tab bar
@@ -134,26 +135,27 @@ fun InterfacesScreen() {
                 }
                 Row(
                     modifier = Modifier
+                        .heightIn(min = 48.dp)
                         .background(
-                            if (selected) MeshSatTeal.copy(alpha = 0.12f) else Color.Transparent,
+                            if (selected) MeshSatSurfaceLight else Color.Transparent,
                             RoundedCornerShape(6.dp),
                         )
                         .clickable { activeTab = tab }
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                        .padding(horizontal = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     Text(
                         text = tab.label,
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                        color = if (selected) MeshSatTeal else MeshSatTextMuted,
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                        color = if (selected) MeshSatTextPrimary else MeshSatTextMuted,
                     )
                     if (badgeCount > 0) {
                         val badgeColor = when (tab) {
                             IfaceTab.Interfaces -> MeshSatGreen
                             IfaceTab.Health -> MeshSatAmber
-                            else -> MeshSatTeal
+                            else -> MeshSatTextSecondary
                         }
                         Text(
                             text = badgeCount.toString(),
@@ -161,14 +163,14 @@ fun InterfacesScreen() {
                             color = badgeColor,
                             modifier = Modifier
                                 .background(badgeColor.copy(alpha = 0.12f), RoundedCornerShape(4.dp))
-                                .padding(horizontal = 4.dp, vertical = 1.dp),
+                                .padding(horizontal = 6.dp, vertical = 1.dp),
                         )
                     }
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(4.dp))
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -183,15 +185,13 @@ fun InterfacesScreen() {
                 interfaces = ifaceStates,
                 onEnable = { id ->
                     GatewayService.ifaceManager?.enable(id)
-                    Toast.makeText(context, "$id enabled", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, "${Words.channel(id)} switched on", Toast.LENGTH_SHORT).show()
                 },
-                onDisable = { id ->
-                    GatewayService.ifaceManager?.disable(id)
-                    Toast.makeText(context, "$id disabled", Toast.LENGTH_SHORT).show()
-                },
+                // Switching a link off is confirmed first: it stops everything that goes by it.
+                onDisable = { id -> confirmOff = id },
                 onReconnect = { id ->
                     GatewayService.ifaceManager?.reconnectNow(id)
-                    Toast.makeText(context, "Reconnecting $id...", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, "Trying to connect ${Words.channel(id)} now", Toast.LENGTH_SHORT).show()
                 },
             )
 
@@ -206,10 +206,47 @@ fun InterfacesScreen() {
             IfaceTab.Health -> HealthTabContent(healthScores = healthScores)
         }
     }
+
+    confirmOff?.let { id ->
+        val link = Words.channel(id)
+        AlertDialog(
+            onDismissRequest = { confirmOff = null },
+            containerColor = MeshSatSurface,
+            title = { Text("Switch off $link?") },
+            text = {
+                Text(
+                    text = if (id.startsWith("iridium")) {
+                        "The phone stops using the satellite modem and stops reconnecting to it. Nothing goes out " +
+                            "or comes in by satellite until you switch it back on. Messages waiting for it stay in the queue."
+                    } else {
+                        "Messages stop going out by $link until you switch it back on. " +
+                            "Messages waiting for it stay in the queue."
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirmOff = null
+                        GatewayService.ifaceManager?.disable(id)
+                        Toast.makeText(context, "$link switched off", Toast.LENGTH_SHORT).show()
+                    },
+                ) {
+                    Text("Switch off", color = MeshSatRed)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmOff = null }) {
+                    Text("Keep it on", color = MeshSatTextSecondary)
+                }
+            },
+        )
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// Interfaces Tab — live transport status with controls
+// Links tab: live status with controls
 // ═══════════════════════════════════════════════════════════════════════
 
 @Composable
@@ -219,7 +256,7 @@ private fun InterfacesTabContent(
     onDisable: (String) -> Unit,
     onReconnect: (String) -> Unit,
 ) {
-    val fmt = remember { SimpleDateFormat("HH:mm:ss", Locale.getDefault()) }
+    val now = rememberTickingNow()
 
     Column(
         modifier = Modifier
@@ -227,13 +264,6 @@ private fun InterfacesTabContent(
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Text(
-            text = "Active transport interfaces",
-            style = MaterialTheme.typography.bodySmall,
-            color = MeshSatTextMuted,
-            modifier = Modifier.padding(bottom = 4.dp),
-        )
-
         if (interfaces.isEmpty()) {
             Box(
                 modifier = Modifier
@@ -242,14 +272,15 @@ private fun InterfacesTabContent(
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    text = "No interfaces registered.\nStart the gateway service first.",
+                    text = "No links yet. They appear once the MeshSat service is running.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MeshSatTextMuted,
+                    textAlign = TextAlign.Center,
                 )
             }
         }
 
-        // Sort: mesh first, then iridium, then sms
+        // Sort: mesh first, then satellite, then SMS
         val sorted = interfaces.entries.sortedBy { (id, _) ->
             when {
                 id.startsWith("mesh") -> 0
@@ -262,7 +293,7 @@ private fun InterfacesTabContent(
         sorted.forEach { (id, status) ->
             InterfaceCard(
                 status = status,
-                fmt = fmt,
+                now = now,
                 onEnable = { onEnable(id) },
                 onDisable = { onDisable(id) },
                 onReconnect = { onReconnect(id) },
@@ -274,13 +305,13 @@ private fun InterfacesTabContent(
 @Composable
 private fun InterfaceCard(
     status: InterfaceStatus,
-    fmt: SimpleDateFormat,
+    now: Long,
     onEnable: () -> Unit,
     onDisable: () -> Unit,
     onReconnect: () -> Unit,
 ) {
     val stateColor = stateColor(status.state)
-    val ifaceColor = interfaceTypeColor(status.channelType)
+    val link = Words.channel(status.id)
     val isDisabled = status.state == InterfaceState.Disabled
 
     Column(
@@ -291,61 +322,43 @@ private fun InterfaceCard(
             .then(if (isDisabled) Modifier.background(Color.Black.copy(alpha = 0.3f)) else Modifier)
             .padding(12.dp),
     ) {
-        // Row 1: state dot + ID + channel type badge + enable toggle
+        // Name and on/off
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            Box(
+                modifier = Modifier
+                    .size(10.dp)
+                    .background(Words.channelColor(status.id), CircleShape),
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = link,
+                style = MaterialTheme.typography.titleSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
-            ) {
-                // State indicator dot
-                Box(
-                    modifier = Modifier
-                        .size(10.dp)
-                        .background(stateColor, CircleShape),
-                )
-
-                // Interface ID
-                Text(
-                    text = status.id,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontFamily = PlexMono,
-                )
-
-                // Channel type badge
-                Text(
-                    text = channelTypeLabel(status.channelType),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = ifaceColor,
-                    modifier = Modifier
-                        .background(ifaceColor.copy(alpha = 0.12f), RoundedCornerShape(4.dp))
-                        .padding(horizontal = 6.dp, vertical = 2.dp),
-                )
-            }
-
+            )
             Switch(
                 checked = !isDisabled,
                 onCheckedChange = { enabled ->
                     if (enabled) onEnable() else onDisable()
                 },
                 colors = SwitchDefaults.colors(checkedTrackColor = MeshSatTeal),
+                modifier = Modifier.semantics { contentDescription = "Use $link" },
             )
         }
 
-        // Row 2: state label + error
+        // State, and what went wrong
         Row(
             modifier = Modifier.padding(top = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = status.state.name.uppercase(),
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Bold,
+                text = Words.linkState(status.state.name),
+                style = MaterialTheme.typography.labelLarge,
                 color = stateColor,
                 modifier = Modifier
                     .background(stateColor.copy(alpha = 0.12f), RoundedCornerShape(4.dp))
@@ -355,57 +368,50 @@ private fun InterfaceCard(
             if (status.error.isNotBlank()) {
                 Text(
                     text = status.error,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MeshSatRed.copy(alpha = 0.8f),
-                    maxLines = 1,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MeshSatRed,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
             }
         }
 
-        // Row 3: timestamps + reconnect info
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            if (status.lastOnline > 0) {
-                Text(
-                    text = "Online: ${fmt.format(Date(status.lastOnline))}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MeshSatTextMuted,
-                )
-            }
-
-            if (status.lastActivity > 0) {
-                Text(
-                    text = "Activity: ${fmt.format(Date(status.lastActivity))}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MeshSatTextMuted,
-                )
-            }
-
-            if (status.reconnectAttempts > 0) {
-                Text(
-                    text = "Retries: ${status.reconnectAttempts}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MeshSatAmber,
-                )
+        // When it last worked and last carried a message
+        val times = listOfNotNull(
+            status.lastOnline.takeIf { it > 0 }?.let { "Last working ${Words.ago(it, now)}" },
+            status.lastActivity.takeIf { it > 0 }?.let { "last message ${Words.ago(it, now)}" },
+        ).joinToString(" · ")
+        if (times.isNotEmpty() || status.reconnectAttempts > 0) {
+            Column(modifier = Modifier.padding(top = 6.dp)) {
+                if (times.isNotEmpty()) {
+                    Text(
+                        text = times,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MeshSatTextMuted,
+                    )
+                }
+                if (status.reconnectAttempts > 0) {
+                    Text(
+                        text = "Tried to reconnect ${Words.count(status.reconnectAttempts, "time")}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MeshSatAmber,
+                    )
+                }
             }
         }
 
-        // Row 4: reconnect button (only when offline/error)
+        // Reconnect (only when off or not working)
         if (status.state in listOf(InterfaceState.Offline, InterfaceState.Error)) {
             Spacer(modifier = Modifier.height(8.dp))
             OutlinedButton(
                 onClick = onReconnect,
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = MeshSatTeal),
-                modifier = Modifier.height(32.dp),
+                modifier = Modifier.heightIn(min = 48.dp),
             ) {
                 Text(
-                    text = "Reconnect Now",
-                    style = MaterialTheme.typography.labelSmall,
+                    text = "Try to connect now",
+                    style = MaterialTheme.typography.labelLarge,
                 )
             }
         }
@@ -413,7 +419,7 @@ private fun InterfaceCard(
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// Channels Tab — read-only channel registry capabilities
+// Capabilities tab: what each link can carry (read-only)
 // ═══════════════════════════════════════════════════════════════════════
 
 @Composable
@@ -427,7 +433,7 @@ private fun ChannelsTabContent() {
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Text(
-            text = "Registered transport channel capabilities",
+            text = "What each link can carry, and how it retries.",
             style = MaterialTheme.typography.bodySmall,
             color = MeshSatTextMuted,
             modifier = Modifier.padding(bottom = 4.dp),
@@ -441,91 +447,63 @@ private fun ChannelsTabContent() {
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    text = "No channels registered.\nStart the gateway service first.",
+                    text = "Nothing to show yet. It appears once the MeshSat service is running.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MeshSatTextMuted,
+                    textAlign = TextAlign.Center,
                 )
             }
         }
 
         channels.forEach { ch ->
-            val color = interfaceTypeColor(ch.id)
-
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(MeshSatSurface, RoundedCornerShape(8.dp))
                     .border(1.dp, MeshSatBorder, RoundedCornerShape(8.dp))
                     .padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                // Header: label + badge
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(10.dp)
+                            .background(Words.channelColor(ch.id), CircleShape),
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = Words.channel(ch.id),
+                        style = MaterialTheme.typography.titleSmall,
+                        modifier = Modifier.weight(1f),
+                    )
                     Text(
                         text = ch.label,
-                        style = MaterialTheme.typography.titleSmall,
-                    )
-                    Text(
-                        text = ch.id,
-                        style = MaterialTheme.typography.labelSmall,
-                        fontFamily = PlexMono,
-                        color = color,
-                        modifier = Modifier
-                            .background(color.copy(alpha = 0.12f), RoundedCornerShape(4.dp))
-                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MeshSatTextMuted,
                     )
                 }
 
-                Spacer(modifier = Modifier.height(8.dp))
+                CapabilityRow("Largest message", if (ch.maxPayload > 0) "${ch.maxPayload} bytes" else "No limit")
+                CapabilityRow("Sends", if (ch.canSend) "Yes" else "No")
+                CapabilityRow("Receives", if (ch.canReceive) "Yes" else "No")
+                CapabilityRow("Carries data, not only text", if (ch.binaryCapable) "Yes" else "No")
+                CapabilityRow("Cost", if (ch.isPaid) "Paid" else "Free")
 
-                // Capability grid
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                ) {
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        CapabilityRow("MTU", "${ch.maxPayload}B")
-                        CapabilityRow("Binary", if (ch.binaryCapable) "Yes" else "No")
-                        CapabilityRow("Paid", if (ch.isPaid) "Yes" else "Free")
-                    }
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        CapabilityRow("Send", if (ch.canSend) "Yes" else "No")
-                        CapabilityRow("Receive", if (ch.canReceive) "Yes" else "No")
-                        CapabilityRow("Satellite", if (ch.isSatellite) "Yes" else "No")
-                    }
-                }
-
-                // Retry config (if enabled)
                 if (ch.retryConfig.enabled) {
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        Text(
-                            text = "Retry: ${ch.retryConfig.backoffFunc}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MeshSatTextSecondary,
-                        )
-                        Text(
-                            text = "Init: ${ch.retryConfig.initialWait.inWholeSeconds}s",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MeshSatTextMuted,
-                        )
-                        Text(
-                            text = "Max: ${ch.retryConfig.maxWait.inWholeSeconds}s",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MeshSatTextMuted,
-                        )
-                        if (ch.retryConfig.maxRetries > 0) {
-                            Text(
-                                text = "x${ch.retryConfig.maxRetries}",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MeshSatTextMuted,
-                            )
-                        }
+                    val first = ch.retryConfig.initialWait.inWholeSeconds
+                    val longest = ch.retryConfig.maxWait.inWholeSeconds
+                    val times = ch.retryConfig.maxRetries
+                    val howOften = if (ch.retryConfig.backoffFunc == "isu") {
+                        "waits for the next satellite pass"
+                    } else {
+                        "first after $first s, then up to $longest s apart"
                     }
+                    Text(
+                        text = "Retries: $howOften" + if (times > 0) ", at most ${Words.count(times, "time")}." else ".",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MeshSatTextSecondary,
+                        modifier = Modifier.padding(top = 2.dp),
+                    )
                 }
             }
         }
@@ -534,27 +512,24 @@ private fun ChannelsTabContent() {
 
 @Composable
 private fun CapabilityRow(label: String, value: String) {
-    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+    Row(modifier = Modifier.fillMaxWidth()) {
         Text(
             text = label,
-            style = MaterialTheme.typography.labelSmall,
+            style = MaterialTheme.typography.bodySmall,
             color = MeshSatTextMuted,
-            modifier = Modifier.width(60.dp),
+            modifier = Modifier.weight(1f),
         )
         Text(
             text = value,
-            style = MaterialTheme.typography.labelSmall,
-            fontFamily = PlexMono,
-            fontWeight = FontWeight.Bold,
-            color = if (value == "Yes") MeshSatGreen
-            else if (value == "No") MeshSatTextMuted
-            else MeshSatTextSecondary,
+            style = MaterialTheme.typography.bodySmall,
+            fontFamily = if (value.firstOrNull()?.isDigit() == true) PlexMono else null,
+            color = if (value == "Yes") MeshSatTextPrimary else MeshSatTextSecondary,
         )
     }
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// Health Tab — composite health scores per interface
+// Health tab: one score per link
 // ═══════════════════════════════════════════════════════════════════════
 
 @Composable
@@ -566,7 +541,7 @@ private fun HealthTabContent(healthScores: List<HealthScore>) {
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Text(
-            text = "Composite health: Signal(30%) + Success(30%) + Latency(20%) + Cost(20%)",
+            text = "A score out of 100 for each link, from its signal, how many messages got through, how fast, and what it costs.",
             style = MaterialTheme.typography.bodySmall,
             color = MeshSatTextMuted,
             modifier = Modifier.padding(bottom = 4.dp),
@@ -580,18 +555,16 @@ private fun HealthTabContent(healthScores: List<HealthScore>) {
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    text = "No health data available.\nStart the gateway service first.",
+                    text = "No scores yet. They appear once the MeshSat service is running.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MeshSatTextMuted,
+                    textAlign = TextAlign.Center,
                 )
             }
         }
 
         healthScores.forEach { hs ->
             val scoreColor = healthScoreColor(hs.score)
-            val ifaceColor = interfaceTypeColor(
-                hs.interfaceId.substringBefore("_")
-            )
 
             Column(
                 modifier = Modifier
@@ -600,39 +573,37 @@ private fun HealthTabContent(healthScores: List<HealthScore>) {
                     .border(1.dp, MeshSatBorder, RoundedCornerShape(8.dp))
                     .padding(12.dp),
             ) {
-                // Header: interface ID + score badge + availability
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Text(
-                            text = hs.interfaceId,
-                            style = MaterialTheme.typography.titleSmall,
-                            fontFamily = PlexMono,
-                        )
-                        if (!hs.available) {
-                            Text(
-                                text = "OFFLINE",
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Bold,
-                                color = MeshSatRed,
-                                modifier = Modifier
-                                    .background(MeshSatRed.copy(alpha = 0.12f), RoundedCornerShape(4.dp))
-                                    .padding(horizontal = 6.dp, vertical = 2.dp),
-                            )
-                        }
-                    }
-
-                    // Score badge
+                    Box(
+                        modifier = Modifier
+                            .size(10.dp)
+                            .background(Words.channelColor(hs.interfaceId), CircleShape),
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "${hs.score}%",
+                        text = Words.channel(hs.interfaceId),
+                        style = MaterialTheme.typography.titleSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (!hs.available) {
+                        Text(
+                            text = "Not connected",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MeshSatTextMuted,
+                            modifier = Modifier
+                                .background(MeshSatTextMuted.copy(alpha = 0.12f), RoundedCornerShape(4.dp))
+                                .padding(horizontal = 6.dp, vertical = 2.dp),
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "${hs.score}",
                         style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
                         fontFamily = PlexMono,
                         color = scoreColor,
                         modifier = Modifier
@@ -652,7 +623,7 @@ private fun HealthTabContent(healthScores: List<HealthScore>) {
                 ) {
                     Box(
                         modifier = Modifier
-                            .fillMaxWidth(hs.score / 100f)
+                            .fillMaxWidth(hs.score.coerceIn(0, 100) / 100f)
                             .height(6.dp)
                             .background(scoreColor, RoundedCornerShape(3.dp)),
                     )
@@ -660,19 +631,18 @@ private fun HealthTabContent(healthScores: List<HealthScore>) {
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // Component scores
+                // The parts of the score, each out of 100
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceEvenly,
                 ) {
-                    ScoreColumn("Signal", hs.signal, MeshSatTeal)
-                    ScoreColumn("Success", (hs.successRate * 100).toInt(), MeshSatGreen)
+                    ScoreColumn("Signal", hs.signal)
+                    ScoreColumn("Got through", (hs.successRate * 100).toInt())
                     ScoreColumn(
-                        "Latency",
+                        "Speed",
                         if (hs.latencyMs > 0) (100 - (hs.latencyMs / 1000).coerceAtMost(100)) else 0,
-                        MeshSatAmber,
                     )
-                    ScoreColumn("Cost", hs.costScore, ColorIridium)
+                    ScoreColumn("Low cost", hs.costScore)
                 }
             }
         }
@@ -680,25 +650,24 @@ private fun HealthTabContent(healthScores: List<HealthScore>) {
 }
 
 @Composable
-private fun ScoreColumn(label: String, value: Int, color: Color) {
+private fun ScoreColumn(label: String, value: Int) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text(
             text = value.toString(),
             style = MaterialTheme.typography.titleSmall,
-            fontWeight = FontWeight.Bold,
             fontFamily = PlexMono,
-            color = color,
+            color = MeshSatTextPrimary,
         )
         Text(
             text = label,
-            style = MaterialTheme.typography.labelSmall,
+            style = MaterialTheme.typography.bodySmall,
             color = MeshSatTextMuted,
         )
     }
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// Access Rules Tab — read-only list of forwarding access rules
+// Rules tab: the routing rules of every link (read-only)
 // ═══════════════════════════════════════════════════════════════════════
 
 @Composable
@@ -714,7 +683,7 @@ private fun AccessRulesTabContent() {
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Text(
-            text = "Access control rules for transport interfaces",
+            text = "The routing rules of every link. Change them in Routing rules.",
             style = MaterialTheme.typography.bodySmall,
             color = MeshSatTextMuted,
             modifier = Modifier.padding(bottom = 4.dp),
@@ -728,9 +697,10 @@ private fun AccessRulesTabContent() {
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    text = "No access rules configured.\nAdd rules in the Rules screen.",
+                    text = "No routing rules yet. Add them in Routing rules.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MeshSatTextMuted,
+                    textAlign = TextAlign.Center,
                 )
             }
         }
@@ -743,17 +713,13 @@ private fun AccessRulesTabContent() {
 
 @Composable
 private fun AccessRuleCard(rule: AccessRuleEntity) {
-    val actionColor = when (rule.action) {
-        "forward" -> MeshSatGreen
-        "drop" -> MeshSatRed
-        "log" -> MeshSatAmber
-        else -> MeshSatTextMuted
+    val route = when {
+        rule.direction == "egress" -> "Messages leaving by ${Words.channel(rule.interfaceId)}"
+        rule.action == "forward" && rule.forwardTo.isNotBlank() ->
+            "${Words.channel(rule.interfaceId)} to ${Words.channel(rule.forwardTo)}"
+        else -> "Messages from ${Words.channel(rule.interfaceId)}"
     }
-    val dirColor = when (rule.direction) {
-        "ingress" -> ColorMesh
-        "egress" -> ColorIridium
-        else -> MeshSatTextMuted
-    }
+    val stateColor = if (rule.enabled) MeshSatGreen else MeshSatTextMuted
 
     Column(
         modifier = Modifier
@@ -762,79 +728,57 @@ private fun AccessRuleCard(rule: AccessRuleEntity) {
             .border(1.dp, MeshSatBorder, RoundedCornerShape(8.dp))
             .then(if (!rule.enabled) Modifier.background(Color.Black.copy(alpha = 0.3f)) else Modifier)
             .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
-        // Row 1: name + enabled indicator
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = rule.name,
+                text = rule.name.ifBlank { "Rule ${rule.id}" },
                 style = MaterialTheme.typography.titleSmall,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
             )
+            Spacer(modifier = Modifier.width(8.dp))
             Text(
-                text = if (rule.enabled) "ENABLED" else "DISABLED",
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Bold,
-                color = if (rule.enabled) MeshSatGreen else MeshSatTextMuted,
+                text = if (rule.enabled) "On" else "Off",
+                style = MaterialTheme.typography.labelLarge,
+                color = stateColor,
                 modifier = Modifier
-                    .background(
-                        (if (rule.enabled) MeshSatGreen else MeshSatTextMuted).copy(alpha = 0.12f),
-                        RoundedCornerShape(4.dp),
-                    )
+                    .background(stateColor.copy(alpha = 0.12f), RoundedCornerShape(4.dp))
                     .padding(horizontal = 6.dp, vertical = 2.dp),
             )
         }
 
-        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            text = "${ruleActionLabel(rule.action)}: $route",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MeshSatTextSecondary,
+        )
 
-        // Row 2: interface + direction + action badges
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = rule.interfaceId,
-                style = MaterialTheme.typography.labelSmall,
-                fontFamily = PlexMono,
-                color = MeshSatTextSecondary,
-            )
-            Text(
-                text = rule.direction.uppercase(),
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Bold,
-                color = dirColor,
-                modifier = Modifier
-                    .background(dirColor.copy(alpha = 0.12f), RoundedCornerShape(4.dp))
-                    .padding(horizontal = 6.dp, vertical = 2.dp),
-            )
-            Text(
-                text = rule.action.uppercase(),
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Bold,
-                color = actionColor,
-                modifier = Modifier
-                    .background(actionColor.copy(alpha = 0.12f), RoundedCornerShape(4.dp))
-                    .padding(horizontal = 6.dp, vertical = 2.dp),
-            )
-        }
-
-        // Row 3: match stats
-        if (rule.matchCount > 0) {
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = "Matches: ${rule.matchCount}",
-                style = MaterialTheme.typography.labelSmall,
-                color = MeshSatTextMuted,
-            )
-        }
+        val matches = rule.matchCount.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+        Text(
+            text = if (matches == 0) "No matches yet" else Words.count(matches, "match", "matches"),
+            style = MaterialTheme.typography.bodySmall,
+            color = MeshSatTextMuted,
+        )
     }
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// Object Groups Tab — read-only list of object groups
+// Groups tab: named groups of nodes, senders or message types (read-only)
 // ═══════════════════════════════════════════════════════════════════════
+
+/** A group's type ("node_group", "sender_group", ...) in plain words. */
+private fun groupTypeLabel(type: String): String = when (type.lowercase().removeSuffix("_group")) {
+    "node" -> "Nodes"
+    "sender" -> "Senders"
+    "portnum" -> "Message types"
+    "contact" -> "Contacts"
+    else -> type.replace('_', ' ').replaceFirstChar { it.uppercase() }
+}
 
 @Composable
 private fun ObjectGroupsTabContent() {
@@ -842,8 +786,17 @@ private fun ObjectGroupsTabContent() {
     val db = AppDatabase.getInstance(context)
     var groups by remember { mutableStateOf<List<ObjectGroupEntity>>(emptyList()) }
 
+    // Re-read now and then, like the other tabs, so a group added through the local API or a
+    // config import shows up without leaving the screen.
     LaunchedEffect(Unit) {
-        groups = db.objectGroupDao().getAll()
+        while (true) {
+            groups = try {
+                db.objectGroupDao().getAll()
+            } catch (_: Exception) {
+                groups
+            }
+            delay(GROUPS_REFRESH_MS)
+        }
     }
 
     Column(
@@ -853,7 +806,7 @@ private fun ObjectGroupsTabContent() {
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Text(
-            text = "Named groups of nodes, portnums, or senders",
+            text = "Named groups of nodes, senders or message types that rules can match.",
             style = MaterialTheme.typography.bodySmall,
             color = MeshSatTextMuted,
             modifier = Modifier.padding(bottom = 4.dp),
@@ -867,7 +820,7 @@ private fun ObjectGroupsTabContent() {
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    text = "No object groups defined.",
+                    text = "No groups yet.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MeshSatTextMuted,
                 )
@@ -880,12 +833,6 @@ private fun ObjectGroupsTabContent() {
             } catch (_: Exception) {
                 0
             }
-            val typeColor = when (group.type) {
-                "node" -> ColorMesh
-                "portnum" -> ColorIridium
-                "sender" -> ColorCellular
-                else -> MeshSatTeal
-            }
 
             Column(
                 modifier = Modifier
@@ -896,41 +843,34 @@ private fun ObjectGroupsTabContent() {
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = group.label,
-                            style = MaterialTheme.typography.titleSmall,
-                        )
-                        Text(
-                            text = group.type.uppercase(),
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = typeColor,
-                            modifier = Modifier
-                                .background(typeColor.copy(alpha = 0.12f), RoundedCornerShape(4.dp))
-                                .padding(horizontal = 6.dp, vertical = 2.dp),
-                        )
-                    }
-
                     Text(
-                        text = "$memberCount members",
-                        style = MaterialTheme.typography.labelSmall,
+                        text = group.label.ifBlank { group.id },
+                        style = MaterialTheme.typography.titleSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = Words.count(memberCount, "member"),
+                        style = MaterialTheme.typography.bodySmall,
                         color = MeshSatTextSecondary,
                     )
                 }
+                Text(
+                    text = groupTypeLabel(group.type),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MeshSatTextMuted,
+                )
             }
         }
     }
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// Failover Tab — read-only list of failover/broadcast groups
+// Backup links tab: failover and broadcast groups (read-only)
 // ═══════════════════════════════════════════════════════════════════════
 
 @Composable
@@ -940,11 +880,19 @@ private fun FailoverTabContent() {
     var groups by remember { mutableStateOf<List<FailoverGroupEntity>>(emptyList()) }
     var memberCounts by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
 
+    // Re-read now and then, like the other tabs.
     LaunchedEffect(Unit) {
-        val allGroups = db.failoverGroupDao().getAllGroups()
-        groups = allGroups
-        memberCounts = allGroups.associate { g ->
-            g.id to db.failoverGroupDao().getMembers(g.id).size
+        while (true) {
+            try {
+                val allGroups = db.failoverGroupDao().getAllGroups()
+                memberCounts = allGroups.associate { g ->
+                    g.id to db.failoverGroupDao().getMembers(g.id).size
+                }
+                groups = allGroups
+            } catch (_: Exception) {
+                // keep what is shown; try again on the next round
+            }
+            delay(GROUPS_REFRESH_MS)
         }
     }
 
@@ -955,7 +903,7 @@ private fun FailoverTabContent() {
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Text(
-            text = "Failover and broadcast interface groups",
+            text = "Groups of links that stand in for each other, or that all carry the same message.",
             style = MaterialTheme.typography.bodySmall,
             color = MeshSatTextMuted,
             modifier = Modifier.padding(bottom = 4.dp),
@@ -969,7 +917,7 @@ private fun FailoverTabContent() {
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    text = "No failover groups configured.",
+                    text = "No backup links set up.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MeshSatTextMuted,
                 )
@@ -977,12 +925,12 @@ private fun FailoverTabContent() {
         }
 
         groups.forEach { group ->
-            val modeColor = when (group.mode) {
-                "failover" -> MeshSatAmber
-                "broadcast" -> ColorMesh
-                else -> MeshSatTeal
-            }
             val count = memberCounts[group.id] ?: 0
+            val mode = when (group.mode) {
+                "failover" -> "Uses the first link that works"
+                "broadcast" -> "Sends on every link"
+                else -> group.mode.replaceFirstChar { it.uppercase() }
+            }
 
             Column(
                 modifier = Modifier
@@ -993,34 +941,27 @@ private fun FailoverTabContent() {
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = group.label,
-                            style = MaterialTheme.typography.titleSmall,
-                        )
-                        Text(
-                            text = group.mode.uppercase(),
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = modeColor,
-                            modifier = Modifier
-                                .background(modeColor.copy(alpha = 0.12f), RoundedCornerShape(4.dp))
-                                .padding(horizontal = 6.dp, vertical = 2.dp),
-                        )
-                    }
-
                     Text(
-                        text = "$count members",
-                        style = MaterialTheme.typography.labelSmall,
+                        text = group.label.ifBlank { group.id },
+                        style = MaterialTheme.typography.titleSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = Words.count(count, "link"),
+                        style = MaterialTheme.typography.bodySmall,
                         color = MeshSatTextSecondary,
                     )
                 }
+                Text(
+                    text = mode,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MeshSatTextMuted,
+                )
             }
         }
     }
@@ -1030,28 +971,13 @@ private fun FailoverTabContent() {
 // Helpers
 // ═══════════════════════════════════════════════════════════════════════
 
+/** Working, trying, failed; a link that is off or switched off is grey, never red. */
 private fun stateColor(state: InterfaceState): Color = when (state) {
     InterfaceState.Online -> MeshSatGreen
     InterfaceState.Connecting -> MeshSatAmber
     InterfaceState.Offline -> MeshSatTextMuted
     InterfaceState.Error -> MeshSatRed
-    InterfaceState.Disabled -> MeshSatBorder
-}
-
-private fun interfaceTypeColor(channelType: String): Color = when (channelType) {
-    "mesh" -> ColorMesh
-    "iridium", "iridium9704" -> ColorIridium
-    "sms", "cellular" -> ColorCellular
-    else -> MeshSatTeal
-}
-
-private fun channelTypeLabel(channelType: String): String = when (channelType) {
-    "mesh" -> "Mesh"
-    "iridium" -> "Iridium 9603"
-    "iridium9704" -> "Iridium 9704"
-    "sms" -> "SMS"
-    "cellular" -> "Cellular"
-    else -> channelType
+    InterfaceState.Disabled -> MeshSatTextMuted
 }
 
 private fun healthScoreColor(score: Int): Color = when {
