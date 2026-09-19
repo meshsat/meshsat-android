@@ -552,6 +552,8 @@ fun SettingsScreen(navController: NavController? = null) {
                 ) {
                     Text("Poll Signal", style = MaterialTheme.typography.bodySmall)
                 }
+                Spacer(modifier = Modifier.height(8.dp))
+                net.meshsat.android.ui.components.CheckMailboxButton()
             } else if (iridiumPipe == null) {
                 Text(
                     text = "The RockBLOCK 9603 is reached through a MeshSat node. Connect the node under Meshtastic; its modem appears here.",

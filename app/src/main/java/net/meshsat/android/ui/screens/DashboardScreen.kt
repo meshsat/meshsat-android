@@ -300,6 +300,15 @@ fun DashboardScreen() {
             }
         }
 
+        // ====== Iridium mailbox, on request only: each check is billed (MESHSAT-400) ======
+        if (iridiumConnected) {
+            item {
+                DashboardCard(title = "Iridium Mailbox") {
+                    net.meshsat.android.ui.components.CheckMailboxButton()
+                }
+            }
+        }
+
         // ====== 2. Signal History Charts ======
         if (iridiumHistory.isNotEmpty()) {
             item {

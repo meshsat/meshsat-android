@@ -369,6 +369,48 @@ class IridiumSpp(private val clock: () -> Long = System::currentTimeMillis) {
         throw IOException("SBDRB timed out")
     }
 
+    /** The outcome of a mailbox check the user asked for. */
+    sealed class MailboxResult {
+        object NotConnected : MailboxResult()
+
+        /** No session was started: the hold after a failed one runs for [seconds] more. */
+        data class Held(val seconds: Long) : MailboxResult()
+
+        /** The session failed, e.g. status 32: the modem sees no satellite. */
+        data class SessionFailed(val moStatus: Int) : MailboxResult()
+
+        object NoAnswer : MailboxResult()
+
+        /**
+         * The session ran. [received] messages were handed over, [stillQueued] more wait at
+         * the gateway, and [sentOutgoing] says a waiting MO left in the same session.
+         */
+        data class Checked(val received: Int, val stillQueued: Int, val sentOutgoing: Boolean) : MailboxResult()
+    }
+
+    /**
+     * Check the satellite mailbox on request. This is billed: one SBDIX, at least one credit
+     * even when nothing waits. A message already in the MT buffer is read first, for free,
+     * and an MO waiting in the MO buffer goes out in the same session. Every MT message is
+     * handed to [onMessage].
+     */
+    suspend fun checkMailbox(onMessage: suspend (ByteArray) -> Unit): MailboxResult {
+        if (!isWireReady()) return MailboxResult.NotConnected
+        sbdixHoldRemainingMs().let { if (it > 0) return MailboxResult.Held((it + 999) / 1000) }
+
+        val status = sbdStatus()
+        var received = 0
+        if (status?.mtFlag == true) {
+            readMtBinary()?.takeIf { it.isNotEmpty() }?.let { onMessage(it); received++ }
+        }
+        val result = sbdix() ?: return MailboxResult.NoAnswer
+        if (!result.moSuccess) return MailboxResult.SessionFailed(result.moStatus)
+        if (result.mtAvailable) {
+            readMtBinary()?.takeIf { it.isNotEmpty() }?.let { onMessage(it); received++ }
+        }
+        return MailboxResult.Checked(received, result.mtQueued, sentOutgoing = status?.moFlag == true)
+    }
+
     /**
      * Free end-to-end check of the link and the modem, with no satellite session: write
      * [size] bytes (CR, LF and 0x00 included) to the MO buffer, copy them to the MT buffer
