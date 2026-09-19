@@ -88,7 +88,10 @@ object SmsSender {
                 (if (!encryptionKey.isNullOrEmpty()) " [encrypted]" else ""))
 
         // Step 5: Send via Android SMS API
-        val smsManager = context.getSystemService(SmsManager::class.java)
+        val smsManager = SmsCapability.manager(context) ?: run {
+            Log.w(TAG, "No SmsManager on this device")
+            return
+        }
         if (finalText.length > 160) {
             val parts = smsManager.divideMessage(finalText)
             smsManager.sendMultipartTextMessage(to, null, parts, null, null)

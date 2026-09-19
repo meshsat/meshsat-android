@@ -178,7 +178,7 @@ fun HomeLanes(navigate: (String) -> Unit) {
     }
 
     // --- SMS ---
-    val canText = context.packageManager.hasSystemFeature(PackageManager.FEATURE_TELEPHONY_MESSAGING)
+    val canText = net.meshsat.android.sms.SmsCapability.canSend(context)
     val smsAllowed = ContextCompat.checkSelfPermission(context, Manifest.permission.SEND_SMS) == PackageManager.PERMISSION_GRANTED
     val (smsLane, smsDetail) = when {
         !canText -> LaneState.Off to "This phone cannot send SMS."
