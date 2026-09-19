@@ -13,21 +13,27 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -39,72 +45,91 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
+import com.geeksville.mesh.ChannelProtos
+import com.geeksville.mesh.ConfigProtos
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import net.meshsat.android.ble.MeshtasticBle
 import net.meshsat.android.ble.MeshtasticProtocol
 import net.meshsat.android.service.GatewayService
+import net.meshsat.android.ui.components.RegionCheck
 import net.meshsat.android.ui.theme.MeshSatAmber
+import net.meshsat.android.ui.theme.MeshSatBg
 import net.meshsat.android.ui.theme.MeshSatBorder
-import net.meshsat.android.ui.theme.MeshSatGreen
 import net.meshsat.android.ui.theme.MeshSatRed
 import net.meshsat.android.ui.theme.MeshSatSurface
-import net.meshsat.android.ui.theme.MeshSatTeal
+import net.meshsat.android.ui.theme.MeshSatSurfaceLight
 import net.meshsat.android.ui.theme.MeshSatTextMuted
+import net.meshsat.android.ui.theme.MeshSatTextPrimary
 import net.meshsat.android.ui.theme.MeshSatTextSecondary
-import com.geeksville.mesh.ChannelProtos
-import com.geeksville.mesh.ConfigProtos
-import kotlinx.coroutines.launch
 import net.meshsat.android.ui.theme.PlexMono
 
 // ═══════════════════════════════════════════════════════════════════════
-// Radio Configuration — MESHSAT-243
-// Full Meshtastic radio config: Identity, LoRa, Channels, Position,
-// Bluetooth, Network, Power, Display, Device Admin
+// Radio Configuration: MESHSAT-243, revamped in MESHSAT-1249
+//
+// Every section is edited on top of what the radio reported (toBuilder of the loaded config): a
+// field the user did not see loaded is never sent, and nothing can be applied before the radio's
+// own settings have arrived. Built-in defaults once sent region US, Long Fast, 0 dBm, Bluetooth on
+// with PIN 123456 and WiFi off to a radio whose config had not loaded yet.
+//
+// What the firmware does with each apply (AdminModule::handleSetConfig in meshsat-firmware):
+// LoRa and channels apply live without a restart (older firmware restarts for LoRa); owner, position,
+// Bluetooth and network changes restart the node about 5 s later, so BLE drops and reconnects.
 // ═══════════════════════════════════════════════════════════════════════
 
 private enum class RadioTab(val label: String) {
-    Identity("Identity"),
-    RadioConfig("LoRa"),
+    Identity("Name"),
+    RadioConfig("Radio"),
     Channels("Channels"),
     Position("Position"),
     Bluetooth("Bluetooth"),
-    Network("Network"),
-    DeviceAdmin("Admin"),
+    Network("WiFi"),
+    DeviceAdmin("Restart and reset"),
 }
 
+private const val READING = "Reading the radio's settings..."
+private const val RESTARTS = "Sent to the radio. It restarts to apply the change."
+
 @Composable
-fun RadioConfigScreen() {
-    val context = LocalContext.current
+fun RadioConfigScreen(onConnect: () -> Unit = {}) {
     val scope = rememberCoroutineScope()
 
     val ble = GatewayService.meshtasticBle
-    val meshState = ble?.state?.collectAsState()
-    val myInfo = ble?.myInfo?.collectAsState()
-    val connected = meshState?.value == MeshtasticBle.State.Connected
-    val myNodeNum = myInfo?.value?.myNodeNum ?: 0L
+    val connected = ble?.state?.collectAsState()?.value == MeshtasticBle.State.Connected
+    val myNodeNum = ble?.myInfo?.collectAsState()?.value?.myNodeNum ?: 0L
+    // Admin messages are addressed to our own node number; without it nothing can be sent.
+    val canSend = connected && myNodeNum != 0L
 
     var activeTab by remember { mutableStateOf(RadioTab.Identity) }
 
-    // Auto-request all config sections on first connect
+    // The radio sends its settings with want_config on every connect (MeshtasticBle.startSession).
+    // If they have not arrived a few seconds later, ask once more for the settings alone.
     LaunchedEffect(connected) {
-        if (connected && myNodeNum != 0L) {
-            val ble = GatewayService.meshtasticBle ?: return@LaunchedEffect
-            // Request all 8 config sections
-            for (configType in 0..7) {
-                ble.sendToRadio(MeshtasticProtocol.buildAdminGetConfig(myNodeNum, configType))
-                kotlinx.coroutines.delay(100)
-            }
-            // Request all 8 channels
-            for (i in 0..7) {
-                ble.sendToRadio(MeshtasticProtocol.buildAdminGetChannel(myNodeNum, i))
-                kotlinx.coroutines.delay(100)
-            }
-            // Request device metadata
-            ble.sendToRadio(MeshtasticProtocol.buildAdminGetDeviceMetadata(myNodeNum))
+        if (!connected) return@LaunchedEffect
+        delay(5_000)
+        val b = GatewayService.meshtasticBle ?: return@LaunchedEffect
+        if (b.loraConfig.value == null || b.channels.value.isEmpty()) {
+            b.sendToRadio(MeshtasticProtocol.encodeWantConfig(MeshtasticProtocol.WANT_CONFIG_ONLY_CONFIG))
+        }
+    }
+
+    // After a change that applies without a restart, read the settings back so this screen shows
+    // what the radio actually holds (it may also correct a value), not what was typed.
+    val readBack: () -> Unit = {
+        scope.launch {
+            delay(2_500)
+            GatewayService.meshtasticBle?.sendToRadio(
+                MeshtasticProtocol.encodeWantConfig(MeshtasticProtocol.WANT_CONFIG_ONLY_CONFIG),
+            )
         }
     }
 
@@ -113,32 +138,31 @@ fun RadioConfigScreen() {
             .fillMaxSize()
             .padding(16.dp),
     ) {
-        Text(
-            text = "Radio settings and device administration",
-            style = MaterialTheme.typography.bodySmall,
-            color = MeshSatTextMuted,
-            modifier = Modifier.padding(bottom = 12.dp),
-        )
-
-        // Connection status banner
         if (!connected) {
-            Box(
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(MeshSatRed.copy(alpha = 0.12f), RoundedCornerShape(6.dp))
-                    .border(1.dp, MeshSatRed.copy(alpha = 0.3f), RoundedCornerShape(6.dp))
+                    .background(MeshSatSurface, RoundedCornerShape(8.dp))
+                    .border(1.dp, MeshSatBorder, RoundedCornerShape(8.dp))
                     .padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Text(
-                    text = "Radio not connected. Connect via BLE in Settings first.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MeshSatRed,
+                    text = "Your phone is not connected to your node, so its settings cannot be read or changed.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MeshSatTextSecondary,
                 )
+                Button(
+                    onClick = onConnect,
+                    modifier = Modifier.heightIn(min = 48.dp),
+                ) {
+                    Text("Connect your node")
+                }
             }
             Spacer(modifier = Modifier.height(12.dp))
         }
 
-        // Tab bar
+        // Tab bar: 48 dp targets.
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -146,21 +170,20 @@ fun RadioConfigScreen() {
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             RadioTab.entries.forEach { tab ->
-                Row(
+                val selected = activeTab == tab
+                Box(
                     modifier = Modifier
-                        .background(
-                            if (activeTab == tab) MeshSatTeal.copy(alpha = 0.12f) else Color.Transparent,
-                            RoundedCornerShape(6.dp),
-                        )
-                        .clickable { activeTab = tab }
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+                        .heightIn(min = 48.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(if (selected) MeshSatSurfaceLight else Color.Transparent)
+                        .selectable(selected = selected, role = Role.Tab, onClick = { activeTab = tab })
+                        .padding(horizontal = 14.dp),
+                    contentAlignment = Alignment.Center,
                 ) {
                     Text(
                         text = tab.label,
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = if (activeTab == tab) FontWeight.Bold else FontWeight.Normal,
-                        color = if (activeTab == tab) MeshSatTeal else MeshSatTextMuted,
+                        style = MaterialTheme.typography.labelLarge,
+                        color = if (selected) MeshSatTextPrimary else MeshSatTextMuted,
                     )
                 }
             }
@@ -175,27 +198,38 @@ fun RadioConfigScreen() {
         )
         Spacer(modifier = Modifier.height(12.dp))
 
-        val onSend: (ByteArray) -> Unit = { data -> ble?.sendToRadio(data) }
+        val onSend: (ByteArray) -> Unit = { data -> GatewayService.meshtasticBle?.sendToRadio(data) }
 
-        // Tab content
         when (activeTab) {
-            RadioTab.Identity -> IdentityTabContent(connected, myNodeNum, onSend)
-            RadioTab.RadioConfig -> RadioConfigTabContent(connected, myNodeNum, onSend)
-            RadioTab.Channels -> ChannelsTabContent(connected, myNodeNum, onSend)
-            RadioTab.Position -> PositionTabContent(connected, myNodeNum, onSend)
-            RadioTab.Bluetooth -> BluetoothTabContent(connected, myNodeNum, onSend)
-            RadioTab.Network -> NetworkTabContent(connected, myNodeNum, onSend)
-            RadioTab.DeviceAdmin -> DeviceAdminTabContent(connected, myNodeNum, onSend)
+            RadioTab.Identity -> IdentityTabContent(canSend, connected, myNodeNum, onSend)
+            RadioTab.RadioConfig -> RadioConfigTabContent(canSend, connected, myNodeNum, onSend, readBack)
+            RadioTab.Channels -> ChannelsTabContent(canSend, connected, myNodeNum, onSend, readBack)
+            RadioTab.Position -> PositionTabContent(canSend, connected, myNodeNum, onSend)
+            RadioTab.Bluetooth -> BluetoothTabContent(canSend, connected, myNodeNum, onSend)
+            RadioTab.Network -> NetworkTabContent(canSend, connected, myNodeNum, onSend)
+            RadioTab.DeviceAdmin -> DeviceAdminTabContent(canSend, myNodeNum, onSend)
         }
     }
 }
 
+/** Shown in place of a section until the radio has reported it. */
+@Composable
+private fun NotLoaded(connected: Boolean) {
+    Text(
+        text = if (connected) READING else "Connect your node to read its settings.",
+        style = MaterialTheme.typography.bodyMedium,
+        color = MeshSatTextSecondary,
+        modifier = Modifier.padding(vertical = 8.dp),
+    )
+}
+
 // ═══════════════════════════════════════════════════════════════════════
-// Identity Tab — Device name, short name, HW model, node ID
+// Name tab: device name, hardware, node ID
 // ═══════════════════════════════════════════════════════════════════════
 
 @Composable
 private fun IdentityTabContent(
+    canSend: Boolean,
     connected: Boolean,
     myNodeNum: Long,
     onSend: (ByteArray) -> Unit,
@@ -203,14 +237,16 @@ private fun IdentityTabContent(
     val context = LocalContext.current
     val ble = GatewayService.meshtasticBle
 
-    val ownerName by ble?.ownerName?.collectAsState() ?: remember { mutableStateOf("") }
-    val ownerShortName by ble?.ownerShortName?.collectAsState() ?: remember { mutableStateOf("") }
-    val metadata by ble?.deviceMetadata?.collectAsState() ?: remember { mutableStateOf(null) }
-    val nodes by ble?.nodes?.collectAsState() ?: remember { mutableStateOf(emptyList()) }
+    val ownerName = ble?.ownerName?.collectAsState()?.value ?: ""
+    val ownerShortName = ble?.ownerShortName?.collectAsState()?.value ?: ""
+    val metadata = ble?.deviceMetadata?.collectAsState()?.value
+    val nodes = ble?.nodes?.collectAsState()?.value ?: emptyList()
     val myNode = nodes.find { it.nodeNum == myNodeNum }
+    val ownerLoaded = ownerName.isNotEmpty() && myNode != null
 
     var editLongName by remember(ownerName) { mutableStateOf(ownerName) }
     var editShortName by remember(ownerShortName) { mutableStateOf(ownerShortName) }
+    val changed = editLongName.trim() != ownerName || editShortName.trim() != ownerShortName
 
     Column(
         modifier = Modifier
@@ -218,109 +254,158 @@ private fun IdentityTabContent(
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        // Read-only info
-        ConfigCard(title = "Device Info") {
-            InfoRow("Node ID", if (myNodeNum != 0L) MeshtasticProtocol.formatNodeId(myNodeNum) else "—")
-            InfoRow("Hardware", myNode?.let { hwModelName(it.hwModel) } ?: "—")
-            InfoRow("Firmware", metadata?.firmwareVersion ?: "—")
-            InfoRow("Capabilities", buildString {
+        ConfigCard(title = "This node") {
+            InfoRow("Node ID", if (myNodeNum != 0L) MeshtasticProtocol.formatNodeId(myNodeNum) else "-", mono = true)
+            val hw = myNode?.hwModel?.takeIf { it != 0 } ?: metadata?.hwModel ?: 0
+            InfoRow("Hardware", if (hw != 0) MeshtasticProtocol.hardwareName(hw) else "-")
+            InfoRow("Firmware", metadata?.firmwareVersion?.ifBlank { null } ?: "-", mono = true)
+            InfoRow(
+                "Has",
                 metadata?.let { md ->
-                    val caps = mutableListOf<String>()
-                    if (md.hasWifi) caps.add("WiFi")
-                    if (md.hasBluetooth) caps.add("BT")
-                    if (md.hasEthernet) caps.add("Eth")
-                    if (md.canShutdown) caps.add("Shutdown")
-                    append(caps.joinToString(", ").ifEmpty { "—" })
-                } ?: append("—")
-            })
+                    buildList {
+                        if (md.hasWifi) add("WiFi")
+                        if (md.hasBluetooth) add("Bluetooth")
+                        if (md.hasEthernet) add("Ethernet")
+                        if (md.canShutdown) add("Power off")
+                    }.joinToString(", ").ifEmpty { "-" }
+                } ?: "-",
+            )
         }
 
-        // Editable name
-        ConfigCard(title = "Device Name") {
-            Text(
-                text = "Long name is shown in the mesh node list. Short name (max 4 chars) is used as a compact identifier.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MeshSatTextMuted,
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            OutlinedTextField(
-                value = editLongName,
-                onValueChange = { editLongName = it.take(40) },
-                label = { Text("Long Name") },
-                singleLine = true,
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = MeshSatTeal,
-                    cursorColor = MeshSatTeal,
-                ),
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            OutlinedTextField(
-                value = editShortName,
-                onValueChange = { editShortName = it.take(4) },
-                label = { Text("Short Name (max 4)") },
-                singleLine = true,
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = MeshSatTeal,
-                    cursorColor = MeshSatTeal,
-                ),
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Button(
-                onClick = {
-                    if (!connected) {
-                        Toast.makeText(context, "Radio not connected", Toast.LENGTH_SHORT).show()
-                        return@Button
-                    }
-                    val toRadio = MeshtasticProtocol.buildAdminSetOwner(
-                        myNodeNum, editLongName, editShortName
-                    )
-                    onSend(toRadio)
-                    Toast.makeText(context, "Device name updated", Toast.LENGTH_SHORT).show()
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = MeshSatTeal),
-                enabled = connected,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text("Save Name")
+        ConfigCard(title = "Name") {
+            Hint("The long name shows in other people's node lists. The short name, up to 4 characters, is used where space is tight.")
+            if (!ownerLoaded) {
+                NotLoaded(connected)
+            } else {
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = editLongName,
+                    onValueChange = { editLongName = it.take(39) },
+                    label = { Text("Long name") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = editShortName,
+                    onValueChange = { editShortName = it.take(4) },
+                    label = { Text("Short name") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Button(
+                    onClick = {
+                        // is_licensed goes back as the radio reported it: sending false would switch
+                        // a licensed (ham) node out of licensed mode and change its keys.
+                        onSend(
+                            MeshtasticProtocol.buildAdminSetOwner(
+                                myNodeNum,
+                                editLongName.trim(),
+                                editShortName.trim(),
+                                isLicensed = myNode?.isLicensed ?: false,
+                            ),
+                        )
+                        Toast.makeText(context, RESTARTS, Toast.LENGTH_LONG).show()
+                    },
+                    enabled = canSend && changed && editLongName.isNotBlank() && editShortName.isNotBlank(),
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                ) {
+                    Text("Save name")
+                }
             }
         }
     }
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// Radio Config Tab — LoRa region, modem preset, TX power, hop limit
+// Radio tab: LoRa region, preset, transmit power, hops
 // ═══════════════════════════════════════════════════════════════════════
+
+private fun regionLabel(code: Int): String = when {
+    code == MeshtasticProtocol.LoRaRegion.Unset.code -> "Not set"
+    else -> MeshtasticProtocol.LoRaRegion.entries.find { it.code == code }?.label ?: "Region code $code"
+}
+
+private fun presetLabel(code: Int): String =
+    MeshtasticProtocol.ModemPreset.entries.find { it.code == code }?.label ?: "Preset code $code"
+
+/** Spreading factor, bandwidth and coding rate of each preset, as the firmware sets them. */
+private fun presetDetails(code: Int): String? = when (code) {
+    0 -> "spreading factor 11, bandwidth 250 kHz, coding rate 4/5"
+    1 -> "spreading factor 12, bandwidth 125 kHz, coding rate 4/8"
+    2 -> "spreading factor 12, bandwidth 62.5 kHz, coding rate 4/8"
+    3 -> "spreading factor 10, bandwidth 250 kHz, coding rate 4/5"
+    4 -> "spreading factor 9, bandwidth 250 kHz, coding rate 4/5"
+    5 -> "spreading factor 8, bandwidth 250 kHz, coding rate 4/5"
+    6 -> "spreading factor 7, bandwidth 250 kHz, coding rate 4/5"
+    7 -> "spreading factor 11, bandwidth 125 kHz, coding rate 4/8"
+    8 -> "spreading factor 7, bandwidth 500 kHz, coding rate 4/5"
+    else -> null
+}
 
 @Composable
 private fun RadioConfigTabContent(
+    canSend: Boolean,
     connected: Boolean,
     myNodeNum: Long,
     onSend: (ByteArray) -> Unit,
+    readBack: () -> Unit,
 ) {
     val context = LocalContext.current
     val ble = GatewayService.meshtasticBle
-    val loraConfig by ble?.loraConfig?.collectAsState() ?: remember { mutableStateOf(null) }
+    val loaded = ble?.loraConfig?.collectAsState()?.value
+    if (loaded == null) {
+        NotLoaded(connected)
+        return
+    }
+    val phoneCountry = remember { RegionCheck.phoneCountry(context) }
 
-    var selectedRegion by remember(loraConfig) {
-        mutableIntStateOf(loraConfig?.region?.number ?: MeshtasticProtocol.LoRaRegion.US.code)
-    }
-    var selectedPreset by remember(loraConfig) {
-        mutableIntStateOf(loraConfig?.modemPreset?.number ?: MeshtasticProtocol.ModemPreset.LongFast.code)
-    }
-    var txPower by remember(loraConfig) {
-        mutableStateOf(loraConfig?.txPower?.toString() ?: "0")
-    }
-    var hopLimit by remember(loraConfig) {
-        mutableStateOf(loraConfig?.hopLimit?.toString() ?: "3")
-    }
-    var txEnabled by remember(loraConfig) {
-        mutableStateOf(loraConfig?.txEnabled ?: true)
-    }
+    // Enum values are read and written as numbers: a region or preset newer than the bundled
+    // proto would throw on .number and must survive an apply untouched.
+    var region by remember(loaded) { mutableIntStateOf(loaded.regionValue) }
+    var preset by remember(loaded) { mutableIntStateOf(loaded.modemPresetValue) }
+    var presetPicked by remember(loaded) { mutableStateOf(false) }
+    var txPower by remember(loaded) { mutableStateOf(loaded.txPower.toString()) }
+    var hopLimit by remember(loaded) { mutableStateOf(loaded.hopLimit.toString()) }
+    var txEnabled by remember(loaded) { mutableStateOf(loaded.txEnabled) }
 
     var showRegionPicker by remember { mutableStateOf(false) }
     var showPresetPicker by remember { mutableStateOf(false) }
+    var showDetails by remember { mutableStateOf(false) }
+    var showConfirm by remember { mutableStateOf(false) }
+
+    val power = txPower.toIntOrNull()
+    val hops = hopLimit.toIntOrNull()
+    // Whatever the radio reported is accepted as it is; a new value must be in range.
+    val powerOk = power != null && (power in 0..30 || power == loaded.txPower)
+    val hopsOk = hops != null && (hops in 1..7 || hops == loaded.hopLimit)
+    val regionChanged = region != loaded.regionValue
+    val presetChanged = presetPicked && (preset != loaded.modemPresetValue || !loaded.usePreset)
+    val powerChanged = powerOk && power != loaded.txPower
+    val hopsChanged = hopsOk && hops != loaded.hopLimit
+    val txChanged = txEnabled != loaded.txEnabled
+    val changed = regionChanged || presetChanged || powerChanged || hopsChanged || txChanged
+
+    fun applyNow() {
+        val b = loaded.toBuilder()
+        if (regionChanged) b.setRegionValue(region)
+        if (presetChanged) {
+            b.setModemPresetValue(preset)
+            b.setUsePreset(true)
+        }
+        if (powerChanged && power != null) b.setTxPower(power)
+        if (hopsChanged && hops != null) b.setHopLimit(hops)
+        if (txChanged) b.setTxEnabled(txEnabled)
+        val config = ConfigProtos.Config.newBuilder().setLora(b.build()).build()
+        onSend(MeshtasticProtocol.buildAdminSetConfig(myNodeNum, config.toByteArray()))
+        Toast.makeText(
+            context,
+            "Sent to the radio. It switches over in a few seconds; older firmware restarts to do it.",
+            Toast.LENGTH_LONG,
+        ).show()
+        readBack()
+    }
 
     Column(
         modifier = Modifier
@@ -328,157 +413,220 @@ private fun RadioConfigTabContent(
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        if (loraConfig != null) {
-            StatusBanner("Config loaded from radio", MeshSatGreen)
-        }
-
-        // Region selector
         ConfigCard(title = "Region") {
-            Text(
-                text = "Defines regulatory frequency band for your country",
-                style = MaterialTheme.typography.bodySmall,
-                color = MeshSatTextMuted,
-            )
+            Hint("The radio band for the country you are in. Every node on your mesh uses the same one.")
             Spacer(modifier = Modifier.height(8.dp))
             OutlinedButton(
                 onClick = { showRegionPicker = true },
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = MeshSatTeal),
-                modifier = Modifier.fillMaxWidth(),
+                enabled = canSend,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
             ) {
-                Text(MeshtasticProtocol.LoRaRegion.fromCode(selectedRegion).label)
+                Text(regionLabel(region))
+            }
+            RegionCheck.warning(region, phoneCountry)?.let { warning ->
+                Spacer(modifier = Modifier.height(8.dp))
+                StatusBanner(warning, MeshSatAmber)
             }
         }
 
-        // Modem preset selector
-        ConfigCard(title = "Modem Preset") {
-            Text(
-                text = "Predefined LoRa modulation settings (SF, BW, CR)",
-                style = MaterialTheme.typography.bodySmall,
-                color = MeshSatTextMuted,
-            )
+        ConfigCard(title = "Preset") {
+            Hint("How far and how fast the radio talks. Every node on your mesh must use the same preset.")
             Spacer(modifier = Modifier.height(8.dp))
+            val custom = !loaded.usePreset && !presetPicked
             OutlinedButton(
                 onClick = { showPresetPicker = true },
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = MeshSatTeal),
-                modifier = Modifier.fillMaxWidth(),
+                enabled = canSend,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
             ) {
-                Text(MeshtasticProtocol.ModemPreset.fromCode(selectedPreset).label)
+                Text(if (custom) "Custom settings" else presetLabel(preset))
+            }
+            TextButton(
+                onClick = { showDetails = !showDetails },
+                modifier = Modifier.heightIn(min = 48.dp),
+            ) {
+                Text(if (showDetails) "Hide details" else "Details")
+            }
+            if (showDetails) {
+                val text = if (custom) {
+                    "Custom: spreading factor ${loaded.spreadFactor}, bandwidth ${loaded.bandwidth} kHz, " +
+                        "coding rate 4/${loaded.codingRate}. Picking a preset replaces these."
+                } else {
+                    presetDetails(preset)?.let { "${presetLabel(preset)}: $it. Radios on 2.4 GHz use wider bandwidths." }
+                        ?: "This app does not know the details of this preset."
+                }
+                Hint(text)
             }
         }
 
-        // TX Power
-        ConfigCard(title = "TX Power (dBm)") {
-            Text(
-                text = "Transmit power. 0 = use region default. Max varies by radio hardware.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MeshSatTextMuted,
-            )
+        ConfigCard(title = "Transmit power") {
+            Hint("In dBm. 0 means the highest power allowed in your region.")
             Spacer(modifier = Modifier.height(8.dp))
             OutlinedTextField(
                 value = txPower,
-                onValueChange = { v -> txPower = v.filter { it.isDigit() || it == '-' }.take(3) },
+                onValueChange = { v -> txPower = v.filter { it.isDigit() }.take(2) },
                 label = { Text("dBm") },
                 singleLine = true,
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = MeshSatTeal,
-                    cursorColor = MeshSatTeal,
-                ),
+                enabled = canSend,
+                isError = !powerOk,
+                supportingText = if (!powerOk) {
+                    { Text("Enter a number from 0 to 30.") }
+                } else {
+                    null
+                },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 modifier = Modifier.fillMaxWidth(),
             )
         }
 
-        // Hop limit
-        ConfigCard(title = "Hop Limit") {
-            Text(
-                text = "Maximum number of mesh relay hops (1-7). Lower = less network load.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MeshSatTextMuted,
-            )
+        ConfigCard(title = "Hops") {
+            Hint("How many times other nodes pass your messages on, 1 to 7. Fewer keeps the mesh quieter.")
             Spacer(modifier = Modifier.height(8.dp))
             OutlinedTextField(
                 value = hopLimit,
                 onValueChange = { v -> hopLimit = v.filter { it.isDigit() }.take(1) },
-                label = { Text("Hops (1-7)") },
+                label = { Text("Hops") },
                 singleLine = true,
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = MeshSatTeal,
-                    cursorColor = MeshSatTeal,
-                ),
+                enabled = canSend,
+                isError = !hopsOk,
+                supportingText = if (!hopsOk) {
+                    { Text("Enter a number from 1 to 7.") }
+                } else {
+                    null
+                },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 modifier = Modifier.fillMaxWidth(),
             )
         }
 
-        // TX enabled toggle
-        ConfigCard(title = "Transmit Enabled") {
-            ToggleRow("Allow radio to transmit", txEnabled) { txEnabled = it }
+        ConfigCard(title = "Transmit") {
+            ToggleRow(
+                label = "Transmit",
+                checked = txEnabled,
+                hint = "Off makes your node listen only: nothing you send leaves it.",
+                enabled = canSend,
+            ) { txEnabled = it }
         }
 
-        // Apply button
         Button(
             onClick = {
-                if (!connected) {
-                    Toast.makeText(context, "Radio not connected", Toast.LENGTH_SHORT).show()
-                    return@Button
-                }
-                val power = txPower.toIntOrNull() ?: 0
-                val hops = hopLimit.toIntOrNull()?.coerceIn(1, 7) ?: 3
-                val configData = MeshtasticProtocol.encodeLoRaConfig(
-                    region = selectedRegion,
-                    modemPreset = selectedPreset,
-                    txPower = power,
-                    hopLimit = hops,
-                    txEnabled = txEnabled,
-                )
-                val toRadio = MeshtasticProtocol.buildAdminSetConfig(myNodeNum, configData)
-                onSend(toRadio)
-                Toast.makeText(context, "LoRa config sent to radio", Toast.LENGTH_SHORT).show()
+                if (regionChanged || presetChanged || (loaded.txEnabled && !txEnabled)) showConfirm = true else applyNow()
             },
-            colors = ButtonDefaults.buttonColors(containerColor = MeshSatTeal),
-            enabled = connected,
-            modifier = Modifier.fillMaxWidth(),
+            enabled = canSend && changed && powerOk && hopsOk,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
         ) {
-            Text("Apply LoRa Config")
+            Text("Apply")
         }
     }
 
-    // Region picker dialog
     if (showRegionPicker) {
         PickerDialog(
-            title = "Select Region",
-            options = MeshtasticProtocol.LoRaRegion.entries.map { it.code to it.label },
-            selected = selectedRegion,
-            onSelect = { selectedRegion = it; showRegionPicker = false },
+            title = "Region",
+            options = MeshtasticProtocol.LoRaRegion.entries
+                .filter { it != MeshtasticProtocol.LoRaRegion.Unset }
+                .map { it.code to it.label },
+            selected = region,
+            onSelect = { region = it; showRegionPicker = false },
             onDismiss = { showRegionPicker = false },
         )
     }
 
-    // Preset picker dialog
     if (showPresetPicker) {
         PickerDialog(
-            title = "Select Modem Preset",
+            title = "Preset",
             options = MeshtasticProtocol.ModemPreset.entries.map { it.code to it.label },
-            selected = selectedPreset,
-            onSelect = { selectedPreset = it; showPresetPicker = false },
+            selected = if (!loaded.usePreset && !presetPicked) -1 else preset,
+            onSelect = { preset = it; presetPicked = true; showPresetPicker = false },
             onDismiss = { showPresetPicker = false },
+        )
+    }
+
+    if (showConfirm) {
+        val consequences = buildList {
+            if (regionChanged || presetChanged) {
+                add("Changing the region or preset can cut you off from other nodes until they change too.")
+            }
+            if (loaded.txEnabled && !txEnabled) {
+                add("With transmit off, nothing you send reaches the mesh, and other nodes stop hearing your node.")
+            }
+        }
+        ConfirmDialog(
+            title = "Apply these radio settings?",
+            message = consequences.joinToString("\n\n"),
+            confirmLabel = "Apply",
+            onConfirm = {
+                showConfirm = false
+                applyNow()
+            },
+            onDismiss = { showConfirm = false },
         )
     }
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// Channels Tab — View/edit all 8 channels
+// Channels tab
 // ═══════════════════════════════════════════════════════════════════════
+
+private fun roleLabel(role: Int): String = when (role) {
+    1 -> "Main channel"
+    2 -> "Extra channel"
+    else -> "Off"
+}
+
+private fun roleHint(role: Int): String = when (role) {
+    1 -> "Every node on this mesh shares it."
+    2 -> "A group channel beside the main one."
+    else -> "Not in use."
+}
+
+/** What the channel key means, in words, and a one-line hint. */
+private fun channelKey(psk: ByteArray, role: Int): Pair<String, String> = when {
+    psk.isEmpty() && role == 2 -> "Channel key: same as the main channel" to "It is as private as the main channel."
+    psk.isEmpty() || (psk.size == 1 && psk[0] == 0.toByte()) ->
+        "Channel key: none (not encrypted)" to "Anyone in range can read it."
+    psk.size == 1 -> "Channel key: default (not private)" to "Every Meshtastic radio knows this key, so anyone can read it."
+    else -> "Channel key: private" to "Only nodes that have this key can read it."
+}
 
 @Composable
 private fun ChannelsTabContent(
+    canSend: Boolean,
     connected: Boolean,
     myNodeNum: Long,
     onSend: (ByteArray) -> Unit,
+    readBack: () -> Unit,
 ) {
     val context = LocalContext.current
     val ble = GatewayService.meshtasticBle
-    val channels by ble?.channels?.collectAsState() ?: remember { mutableStateOf(emptyList()) }
+    val channels = ble?.channels?.collectAsState()?.value ?: emptyList()
 
     var editingChannel by remember { mutableStateOf<MeshtasticProtocol.MeshChannel?>(null) }
+    var pendingSave by remember { mutableStateOf<Pair<MeshtasticProtocol.MeshChannel, MeshtasticProtocol.MeshChannel>?>(null) }
+
+    if (channels.isEmpty()) {
+        NotLoaded(connected)
+        return
+    }
+
+    // Only what the user changed is written over the radio's own ChannelSettings.
+    fun save(original: MeshtasticProtocol.MeshChannel, updated: MeshtasticProtocol.MeshChannel) {
+        val settings = (
+            original.settings
+                ?: ChannelProtos.ChannelSettings.newBuilder()
+                    .setPsk(com.google.protobuf.ByteString.copyFrom(original.psk))
+                    .build()
+            ).toBuilder()
+        if (updated.name != original.name) settings.setName(updated.name)
+        if (updated.uplinkEnabled != original.uplinkEnabled) settings.setUplinkEnabled(updated.uplinkEnabled)
+        if (updated.downlinkEnabled != original.downlinkEnabled) settings.setDownlinkEnabled(updated.downlinkEnabled)
+        val protoChannel = ChannelProtos.Channel.newBuilder()
+            .setIndex(updated.index)
+            .setRoleValue(updated.role)
+            .setSettings(settings.build())
+            .build()
+        onSend(MeshtasticProtocol.buildAdminSetChannel(myNodeNum, protoChannel))
+        Toast.makeText(context, "Sent to the radio.", Toast.LENGTH_SHORT).show()
+        readBack()
+    }
 
     Column(
         modifier = Modifier
@@ -486,76 +634,42 @@ private fun ChannelsTabContent(
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        if (channels.isEmpty()) {
-            Text(
-                text = "No channels loaded. Connect to a radio to see channel configuration.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MeshSatTextMuted,
-            )
-        }
+        Hint("Nodes hear each other on a channel when they share its name and key.")
 
         channels.forEach { ch ->
-            val roleName = when (ch.role) {
-                1 -> "PRIMARY"
-                2 -> "SECONDARY"
-                else -> "DISABLED"
-            }
-            val roleColor = when (ch.role) {
-                1 -> MeshSatGreen
-                2 -> MeshSatTeal
-                else -> MeshSatTextMuted
-            }
-
+            val (keyLabel, keyHint) = channelKey(ch.psk, ch.role)
             ConfigCard(title = "Channel ${ch.index}") {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column {
+                Text(
+                    text = ch.name.ifEmpty { if (ch.role == 1) "Default name" else "No name" },
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MeshSatTextPrimary,
+                )
+                Text(
+                    text = "${roleLabel(ch.role)}. ${roleHint(ch.role)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (ch.role == 0) MeshSatTextMuted else MeshSatTextSecondary,
+                )
+                if (ch.role != 0) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(text = keyLabel, style = MaterialTheme.typography.bodyMedium, color = MeshSatTextSecondary)
+                    Hint(keyHint)
+                    if (ch.uplinkEnabled || ch.downlinkEnabled) {
+                        Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = ch.name.ifEmpty { "(default)" },
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = roleName,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = roleColor,
-                        )
-                    }
-                    Column(horizontalAlignment = Alignment.End) {
-                        Text(
-                            text = "PSK: ${pskHashLetter(ch.psk)}",
+                            text = listOfNotNull(
+                                "Send to MQTT".takeIf { ch.uplinkEnabled },
+                                "Receive from MQTT".takeIf { ch.downlinkEnabled },
+                            ).joinToString(", "),
                             style = MaterialTheme.typography.bodySmall,
-                            fontFamily = PlexMono,
                             color = MeshSatTextSecondary,
                         )
-                        Text(
-                            text = "${ch.psk.size} bytes",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MeshSatTextMuted,
-                        )
                     }
-                }
-                if (ch.uplinkEnabled || ch.downlinkEnabled) {
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = buildString {
-                            if (ch.uplinkEnabled) append("Uplink ")
-                            if (ch.downlinkEnabled) append("Downlink")
-                        }.trim(),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MeshSatAmber,
-                    )
                 }
                 Spacer(modifier = Modifier.height(8.dp))
                 OutlinedButton(
                     onClick = { editingChannel = ch },
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MeshSatTeal),
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = connected,
+                    enabled = canSend,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
                 ) {
                     Text("Edit")
                 }
@@ -563,31 +677,31 @@ private fun ChannelsTabContent(
         }
     }
 
-    // Channel editor dialog
     editingChannel?.let { ch ->
         ChannelEditDialog(
             channel = ch,
-            connected = connected,
-            onSave = { updatedChannel ->
-                val protoChannel = ChannelProtos.Channel.newBuilder()
-                    .setIndex(updatedChannel.index)
-                    .setRole(ChannelProtos.Channel.Role.forNumber(updatedChannel.role)
-                        ?: ChannelProtos.Channel.Role.DISABLED)
-                    .setSettings(
-                        ChannelProtos.ChannelSettings.newBuilder()
-                            .setName(updatedChannel.name)
-                            .setPsk(com.google.protobuf.ByteString.copyFrom(updatedChannel.psk))
-                            .setUplinkEnabled(updatedChannel.uplinkEnabled)
-                            .setDownlinkEnabled(updatedChannel.downlinkEnabled)
-                            .build()
-                    )
-                    .build()
-                val toRadio = MeshtasticProtocol.buildAdminSetChannel(myNodeNum, protoChannel)
-                onSend(toRadio)
-                Toast.makeText(context, "Channel ${updatedChannel.index} updated", Toast.LENGTH_SHORT).show()
+            canSend = canSend,
+            onSave = { updated ->
                 editingChannel = null
+                val roleChanged = updated.role != ch.role
+                val renamedInUse = updated.name != ch.name && ch.role != 0
+                if (roleChanged || renamedInUse) pendingSave = ch to updated else save(ch, updated)
             },
             onDismiss = { editingChannel = null },
+        )
+    }
+
+    pendingSave?.let { (original, updated) ->
+        ConfirmDialog(
+            title = "Change channel ${original.index}?",
+            message = "Changing a channel's name or role can cut you off from nodes that still use the old one " +
+                "until they change too.",
+            confirmLabel = "Change",
+            onConfirm = {
+                pendingSave = null
+                save(original, updated)
+            },
+            onDismiss = { pendingSave = null },
         )
     }
 }
@@ -595,7 +709,7 @@ private fun ChannelsTabContent(
 @Composable
 private fun ChannelEditDialog(
     channel: MeshtasticProtocol.MeshChannel,
-    connected: Boolean,
+    canSend: Boolean,
     onSave: (MeshtasticProtocol.MeshChannel) -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -605,64 +719,79 @@ private fun ChannelEditDialog(
     var downlinkEnabled by remember { mutableStateOf(channel.downlinkEnabled) }
     var showRolePicker by remember { mutableStateOf(false) }
 
+    // Channel 0 is always the main channel, and there is only one: the picker cannot break that.
+    val roleOptions = buildList {
+        if (channel.role == 1) add(1 to roleLabel(1))
+        add(2 to roleLabel(2))
+        add(0 to roleLabel(0))
+    }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = MeshSatSurface,
-        title = { Text("Edit Channel ${channel.index}") },
+        title = { Text("Channel ${channel.index}") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 OutlinedTextField(
                     value = name,
-                    onValueChange = { name = it.take(12) },
-                    label = { Text("Channel Name") },
+                    onValueChange = { name = it.take(11) },
+                    label = { Text("Channel name") },
                     singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = MeshSatTeal,
-                        cursorColor = MeshSatTeal,
-                    ),
                     modifier = Modifier.fillMaxWidth(),
                 )
-                OutlinedButton(
-                    onClick = { showRolePicker = true },
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MeshSatTeal),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(when (role) { 1 -> "PRIMARY"; 2 -> "SECONDARY"; else -> "DISABLED" })
+                if (channel.index == 0) {
+                    Text(roleLabel(1), style = MaterialTheme.typography.bodyMedium)
+                    Hint("Channel 0 is always the main channel.")
+                } else {
+                    OutlinedButton(
+                        onClick = { showRolePicker = true },
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                    ) {
+                        Text(roleLabel(role))
+                    }
+                    Hint(roleHint(role))
                 }
-                ToggleRow("Uplink", uplinkEnabled) { uplinkEnabled = it }
-                ToggleRow("Downlink", downlinkEnabled) { downlinkEnabled = it }
+                ToggleRow(
+                    label = "Send to MQTT",
+                    checked = uplinkEnabled,
+                    hint = "Copies this channel's messages to an internet server when the node has internet.",
+                ) { uplinkEnabled = it }
+                ToggleRow(
+                    label = "Receive from MQTT",
+                    checked = downlinkEnabled,
+                    hint = "Brings messages from that server onto this channel.",
+                ) { downlinkEnabled = it }
             }
         },
         confirmButton = {
             Button(
                 onClick = {
-                    onSave(channel.copy(
-                        name = name,
-                        role = role,
-                        uplinkEnabled = uplinkEnabled,
-                        downlinkEnabled = downlinkEnabled,
-                    ))
+                    onSave(
+                        channel.copy(
+                            name = name.trim(),
+                            role = if (channel.index == 0) channel.role else role,
+                            uplinkEnabled = uplinkEnabled,
+                            downlinkEnabled = downlinkEnabled,
+                        ),
+                    )
                 },
-                colors = ButtonDefaults.buttonColors(containerColor = MeshSatTeal),
-                enabled = connected,
+                enabled = canSend,
             ) {
                 Text("Save")
             }
         },
         dismissButton = {
-            OutlinedButton(
-                onClick = onDismiss,
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = MeshSatTextSecondary),
-            ) {
-                Text("Cancel")
-            }
+            TextButton(onClick = onDismiss) { Text("Cancel") }
         },
     )
 
     if (showRolePicker) {
         PickerDialog(
-            title = "Channel Role",
-            options = listOf(0 to "DISABLED", 1 to "PRIMARY", 2 to "SECONDARY"),
+            title = "Channel role",
+            options = roleOptions,
             selected = role,
             onSelect = { role = it; showRolePicker = false },
             onDismiss = { showRolePicker = false },
@@ -671,27 +800,34 @@ private fun ChannelEditDialog(
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// Position Tab
+// Position tab
 // ═══════════════════════════════════════════════════════════════════════
 
 @Composable
 private fun PositionTabContent(
+    canSend: Boolean,
     connected: Boolean,
     myNodeNum: Long,
     onSend: (ByteArray) -> Unit,
 ) {
     val context = LocalContext.current
     val ble = GatewayService.meshtasticBle
-    val posConfig by ble?.positionConfig?.collectAsState() ?: remember { mutableStateOf(null) }
+    val loaded = ble?.positionConfig?.collectAsState()?.value
+    if (loaded == null) {
+        NotLoaded(connected)
+        return
+    }
 
-    var gpsEnabled by remember(posConfig) { mutableStateOf(posConfig?.gpsEnabled ?: true) }
-    var fixedPosition by remember(posConfig) { mutableStateOf(posConfig?.fixedPosition ?: false) }
-    var broadcastSecs by remember(posConfig) {
-        mutableStateOf(posConfig?.positionBroadcastSecs?.toString() ?: "900")
-    }
-    var smartEnabled by remember(posConfig) {
-        mutableStateOf(posConfig?.positionBroadcastSmartEnabled ?: true)
-    }
+    var gpsEnabled by remember(loaded) { mutableStateOf(loaded.gpsEnabled) }
+    var fixedPosition by remember(loaded) { mutableStateOf(loaded.fixedPosition) }
+    var broadcastSecs by remember(loaded) { mutableStateOf(loaded.positionBroadcastSecs.toString()) }
+    var smartEnabled by remember(loaded) { mutableStateOf(loaded.positionBroadcastSmartEnabled) }
+
+    val secs = broadcastSecs.toIntOrNull()
+    val changed = gpsEnabled != loaded.gpsEnabled ||
+        fixedPosition != loaded.fixedPosition ||
+        (secs != null && secs != loaded.positionBroadcastSecs) ||
+        smartEnabled != loaded.positionBroadcastSmartEnabled
 
     Column(
         modifier = Modifier
@@ -699,83 +835,111 @@ private fun PositionTabContent(
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        if (posConfig != null) {
-            StatusBanner("Config loaded from radio", MeshSatGreen)
-        }
-
         ConfigCard(title = "GPS") {
-            ToggleRow("GPS enabled", gpsEnabled) { gpsEnabled = it }
-            Spacer(modifier = Modifier.height(8.dp))
-            ToggleRow("Fixed position", fixedPosition) { fixedPosition = it }
+            ToggleRow("GPS on", gpsEnabled, enabled = canSend) { gpsEnabled = it }
+            ToggleRow(
+                label = "Fixed position",
+                checked = fixedPosition,
+                hint = "Use a position set by hand instead of the GPS.",
+                enabled = canSend,
+            ) { fixedPosition = it }
         }
 
-        ConfigCard(title = "Broadcast") {
-            Text(
-                text = "How often to broadcast position (seconds). 0 = default.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MeshSatTextMuted,
-            )
+        ConfigCard(title = "Sharing") {
+            Hint("How often the node shares its position, in seconds. 0 uses the default, 15 minutes.")
             Spacer(modifier = Modifier.height(8.dp))
             OutlinedTextField(
                 value = broadcastSecs,
                 onValueChange = { v -> broadcastSecs = v.filter { it.isDigit() }.take(5) },
-                label = { Text("Broadcast interval (sec)") },
+                label = { Text("Every (seconds)") },
                 singleLine = true,
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = MeshSatTeal,
-                    cursorColor = MeshSatTeal,
-                ),
+                enabled = canSend,
+                isError = secs == null,
+                supportingText = if (secs == null) {
+                    { Text("Enter a number of seconds.") }
+                } else {
+                    null
+                },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 modifier = Modifier.fillMaxWidth(),
             )
             Spacer(modifier = Modifier.height(8.dp))
-            ToggleRow("Smart position broadcast", smartEnabled) { smartEnabled = it }
+            ToggleRow(
+                label = "Smart sharing",
+                checked = smartEnabled,
+                hint = "Shares sooner when the node moves.",
+                enabled = canSend,
+            ) { smartEnabled = it }
         }
 
         Button(
             onClick = {
-                if (!connected) return@Button
-                val config = ConfigProtos.Config.newBuilder()
-                    .setPosition(
-                        ConfigProtos.Config.PositionConfig.newBuilder()
-                            .setGpsEnabled(gpsEnabled)
-                            .setFixedPosition(fixedPosition)
-                            .setPositionBroadcastSecs(broadcastSecs.toIntOrNull() ?: 900)
-                            .setPositionBroadcastSmartEnabled(smartEnabled)
-                            .build()
-                    ).build()
+                val b = loaded.toBuilder()
+                if (gpsEnabled != loaded.gpsEnabled) b.setGpsEnabled(gpsEnabled)
+                if (fixedPosition != loaded.fixedPosition) b.setFixedPosition(fixedPosition)
+                if (secs != null && secs != loaded.positionBroadcastSecs) b.setPositionBroadcastSecs(secs)
+                if (smartEnabled != loaded.positionBroadcastSmartEnabled) b.setPositionBroadcastSmartEnabled(smartEnabled)
+                val config = ConfigProtos.Config.newBuilder().setPosition(b.build()).build()
                 onSend(MeshtasticProtocol.buildAdminSetConfig(myNodeNum, config.toByteArray()))
-                Toast.makeText(context, "Position config sent", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, RESTARTS, Toast.LENGTH_LONG).show()
             },
-            colors = ButtonDefaults.buttonColors(containerColor = MeshSatTeal),
-            enabled = connected,
-            modifier = Modifier.fillMaxWidth(),
+            enabled = canSend && changed && secs != null,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
         ) {
-            Text("Apply Position Config")
+            Text("Apply")
         }
+        Hint("Applying restarts the node. The phone reconnects by itself.")
     }
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// Bluetooth Tab
+// Bluetooth tab
 // ═══════════════════════════════════════════════════════════════════════
+
+private fun pairingLabel(mode: Int): String = when (mode) {
+    0 -> "PIN shown on the node's screen"
+    1 -> "Fixed PIN"
+    2 -> "No PIN"
+    else -> "Pairing mode $mode"
+}
 
 @Composable
 private fun BluetoothTabContent(
+    canSend: Boolean,
     connected: Boolean,
     myNodeNum: Long,
     onSend: (ByteArray) -> Unit,
 ) {
     val context = LocalContext.current
     val ble = GatewayService.meshtasticBle
-    val btConfig by ble?.bluetoothConfig?.collectAsState() ?: remember { mutableStateOf(null) }
-
-    var btEnabled by remember(btConfig) { mutableStateOf(btConfig?.enabled ?: true) }
-    var pairingMode by remember(btConfig) { mutableIntStateOf(btConfig?.mode?.number ?: 0) }
-    var fixedPin by remember(btConfig) {
-        mutableStateOf(btConfig?.fixedPin?.toString() ?: "123456")
+    val loaded = ble?.bluetoothConfig?.collectAsState()?.value
+    if (loaded == null) {
+        NotLoaded(connected)
+        return
     }
 
+    var btEnabled by remember(loaded) { mutableStateOf(loaded.enabled) }
+    var pairingMode by remember(loaded) { mutableIntStateOf(loaded.modeValue) }
+    var fixedPin by remember(loaded) {
+        mutableStateOf(if (loaded.fixedPin != 0) "%06d".format(loaded.fixedPin) else "")
+    }
     var showModePicker by remember { mutableStateOf(false) }
+    var showConfirm by remember { mutableStateOf(false) }
+
+    val pin = fixedPin.toIntOrNull()
+    val pinOk = pairingMode != 1 || (fixedPin.length == 6 && pin != null)
+    val pinChanged = pairingMode == 1 && pin != null && pin != loaded.fixedPin
+    val changed = btEnabled != loaded.enabled || pairingMode != loaded.modeValue || pinChanged
+
+    fun applyNow() {
+        val b = loaded.toBuilder()
+        if (btEnabled != loaded.enabled) b.setEnabled(btEnabled)
+        if (pairingMode != loaded.modeValue) b.setModeValue(pairingMode)
+        if (pinChanged && pin != null) b.setFixedPin(pin)
+        val config = ConfigProtos.Config.newBuilder().setBluetooth(b.build()).build()
+        onSend(MeshtasticProtocol.buildAdminSetConfig(myNodeNum, config.toByteArray()))
+        Toast.makeText(context, RESTARTS, Toast.LENGTH_LONG).show()
+    }
 
     Column(
         modifier = Modifier
@@ -783,89 +947,118 @@ private fun BluetoothTabContent(
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        if (btConfig != null) {
-            StatusBanner("Config loaded from radio", MeshSatGreen)
-        }
-
         ConfigCard(title = "Bluetooth") {
-            ToggleRow("Bluetooth enabled", btEnabled) { btEnabled = it }
+            ToggleRow(
+                label = "Bluetooth on",
+                checked = btEnabled,
+                hint = "This is how your phone talks to the node.",
+                enabled = canSend,
+            ) { btEnabled = it }
         }
 
-        ConfigCard(title = "Pairing Mode") {
+        ConfigCard(title = "Pairing") {
             OutlinedButton(
                 onClick = { showModePicker = true },
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = MeshSatTeal),
-                modifier = Modifier.fillMaxWidth(),
+                enabled = canSend,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
             ) {
-                Text(when (pairingMode) { 0 -> "Random PIN"; 1 -> "Fixed PIN"; else -> "No PIN" })
+                Text(pairingLabel(pairingMode))
+            }
+            if (pairingMode == 2) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Hint("Anyone nearby can pair with the node.")
             }
             if (pairingMode == 1) {
                 Spacer(modifier = Modifier.height(8.dp))
                 OutlinedTextField(
                     value = fixedPin,
                     onValueChange = { v -> fixedPin = v.filter { it.isDigit() }.take(6) },
-                    label = { Text("Fixed PIN") },
+                    label = { Text("PIN") },
                     singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = MeshSatTeal,
-                        cursorColor = MeshSatTeal,
-                    ),
+                    enabled = canSend,
+                    isError = !pinOk,
+                    supportingText = if (!pinOk) {
+                        { Text("Enter 6 digits.") }
+                    } else {
+                        null
+                    },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
         }
 
         Button(
-            onClick = {
-                if (!connected) return@Button
-                val config = ConfigProtos.Config.newBuilder()
-                    .setBluetooth(
-                        ConfigProtos.Config.BluetoothConfig.newBuilder()
-                            .setEnabled(btEnabled)
-                            .setMode(ConfigProtos.Config.BluetoothConfig.PairingMode.forNumber(pairingMode)
-                                ?: ConfigProtos.Config.BluetoothConfig.PairingMode.RANDOM_PIN)
-                            .setFixedPin(fixedPin.toIntOrNull() ?: 123456)
-                            .build()
-                    ).build()
-                onSend(MeshtasticProtocol.buildAdminSetConfig(myNodeNum, config.toByteArray()))
-                Toast.makeText(context, "Bluetooth config sent", Toast.LENGTH_SHORT).show()
-            },
-            colors = ButtonDefaults.buttonColors(containerColor = MeshSatTeal),
-            enabled = connected,
-            modifier = Modifier.fillMaxWidth(),
+            onClick = { if (loaded.enabled && !btEnabled) showConfirm = true else applyNow() },
+            enabled = canSend && changed && pinOk,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
         ) {
-            Text("Apply Bluetooth Config")
+            Text("Apply")
         }
+        Hint("Applying restarts the node. The phone reconnects by itself.")
     }
 
     if (showModePicker) {
         PickerDialog(
-            title = "Pairing Mode",
-            options = listOf(0 to "Random PIN", 1 to "Fixed PIN", 2 to "No PIN"),
+            title = "Pairing",
+            options = listOf(0 to pairingLabel(0), 1 to pairingLabel(1), 2 to pairingLabel(2)),
             selected = pairingMode,
             onSelect = { pairingMode = it; showModePicker = false },
             onDismiss = { showModePicker = false },
         )
     }
+
+    if (showConfirm) {
+        ConfirmDialog(
+            title = "Turn off Bluetooth?",
+            message = "You will lose the connection to this node from the phone, and with it the satellite modem. " +
+                "Turning it back on then needs the node itself or a USB cable.",
+            confirmLabel = "Turn off",
+            danger = true,
+            onConfirm = {
+                showConfirm = false
+                applyNow()
+            },
+            onDismiss = { showConfirm = false },
+        )
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// Network Tab
+// WiFi tab
 // ═══════════════════════════════════════════════════════════════════════
 
 @Composable
 private fun NetworkTabContent(
+    canSend: Boolean,
     connected: Boolean,
     myNodeNum: Long,
     onSend: (ByteArray) -> Unit,
 ) {
     val context = LocalContext.current
     val ble = GatewayService.meshtasticBle
-    val netConfig by ble?.networkConfig?.collectAsState() ?: remember { mutableStateOf(null) }
+    val loaded = ble?.networkConfig?.collectAsState()?.value
+    val metadata = ble?.deviceMetadata?.collectAsState()?.value
+    if (loaded == null) {
+        NotLoaded(connected)
+        return
+    }
+    if (metadata != null && !metadata.hasWifi) {
+        Text(
+            text = "This node has no WiFi.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MeshSatTextSecondary,
+            modifier = Modifier.padding(vertical = 8.dp),
+        )
+        return
+    }
 
-    var wifiEnabled by remember(netConfig) { mutableStateOf(netConfig?.wifiEnabled ?: false) }
-    var wifiSsid by remember(netConfig) { mutableStateOf(netConfig?.wifiSsid ?: "") }
-    var wifiPsk by remember(netConfig) { mutableStateOf(netConfig?.wifiPsk ?: "") }
+    var wifiEnabled by remember(loaded) { mutableStateOf(loaded.wifiEnabled) }
+    var wifiSsid by remember(loaded) { mutableStateOf(loaded.wifiSsid) }
+    var wifiPsk by remember(loaded) { mutableStateOf(loaded.wifiPsk) }
+    var showPassword by remember { mutableStateOf(false) }
+
+    val changed = wifiEnabled != loaded.wifiEnabled || wifiSsid != loaded.wifiSsid || wifiPsk != loaded.wifiPsk
 
     Column(
         modifier = Modifier
@@ -873,23 +1066,21 @@ private fun NetworkTabContent(
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        if (netConfig != null) {
-            StatusBanner("Config loaded from radio", MeshSatGreen)
-        }
-
         ConfigCard(title = "WiFi") {
-            ToggleRow("WiFi enabled", wifiEnabled) { wifiEnabled = it }
+            ToggleRow(
+                label = "WiFi on",
+                checked = wifiEnabled,
+                hint = "Lets the node reach the internet, for MQTT, when a network is in range.",
+                enabled = canSend,
+            ) { wifiEnabled = it }
             if (wifiEnabled) {
                 Spacer(modifier = Modifier.height(8.dp))
                 OutlinedTextField(
                     value = wifiSsid,
                     onValueChange = { wifiSsid = it.take(32) },
-                    label = { Text("SSID") },
+                    label = { Text("Network name") },
                     singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = MeshSatTeal,
-                        cursorColor = MeshSatTeal,
-                    ),
+                    enabled = canSend,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Spacer(modifier = Modifier.height(8.dp))
@@ -898,10 +1089,17 @@ private fun NetworkTabContent(
                     onValueChange = { wifiPsk = it.take(64) },
                     label = { Text("Password") },
                     singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = MeshSatTeal,
-                        cursorColor = MeshSatTeal,
-                    ),
+                    enabled = canSend,
+                    visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    trailingIcon = {
+                        IconButton(onClick = { showPassword = !showPassword }) {
+                            Icon(
+                                imageVector = if (showPassword) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                                contentDescription = if (showPassword) "Hide password" else "Show password",
+                            )
+                        }
+                    },
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
@@ -909,42 +1107,40 @@ private fun NetworkTabContent(
 
         Button(
             onClick = {
-                if (!connected) return@Button
-                val config = ConfigProtos.Config.newBuilder()
-                    .setNetwork(
-                        ConfigProtos.Config.NetworkConfig.newBuilder()
-                            .setWifiEnabled(wifiEnabled)
-                            .setWifiSsid(wifiSsid)
-                            .setWifiPsk(wifiPsk)
-                            .build()
-                    ).build()
+                val b = loaded.toBuilder()
+                if (wifiEnabled != loaded.wifiEnabled) b.setWifiEnabled(wifiEnabled)
+                if (wifiSsid != loaded.wifiSsid) b.setWifiSsid(wifiSsid)
+                if (wifiPsk != loaded.wifiPsk) b.setWifiPsk(wifiPsk)
+                val config = ConfigProtos.Config.newBuilder().setNetwork(b.build()).build()
                 onSend(MeshtasticProtocol.buildAdminSetConfig(myNodeNum, config.toByteArray()))
-                Toast.makeText(context, "Network config sent", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, RESTARTS, Toast.LENGTH_LONG).show()
             },
-            colors = ButtonDefaults.buttonColors(containerColor = MeshSatTeal),
-            enabled = connected,
-            modifier = Modifier.fillMaxWidth(),
+            enabled = canSend && changed,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
         ) {
-            Text("Apply Network Config")
+            Text("Apply")
         }
+        Hint("Applying restarts the node. The phone reconnects by itself.")
     }
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// Device Admin Tab — reboot, factory reset, time sync, node DB reset
+// Restart and reset tab
 // ═══════════════════════════════════════════════════════════════════════
 
 @Composable
 private fun DeviceAdminTabContent(
-    connected: Boolean,
+    canSend: Boolean,
     myNodeNum: Long,
     onSend: (ByteArray) -> Unit,
 ) {
     val context = LocalContext.current
+    val metadata = GatewayService.meshtasticBle?.deviceMetadata?.collectAsState()?.value
 
     var rebootDelay by remember { mutableStateOf("5") }
     var showFactoryResetConfirm by remember { mutableStateOf(false) }
     var showRebootConfirm by remember { mutableStateOf(false) }
+    var showShutdownConfirm by remember { mutableStateOf(false) }
     var showNodeDbResetConfirm by remember { mutableStateOf(false) }
 
     Column(
@@ -953,168 +1149,147 @@ private fun DeviceAdminTabContent(
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        // Sync time
-        ConfigCard(title = "Sync Time") {
-            Text(
-                text = "Set the radio's clock to the phone's current UTC time",
-                style = MaterialTheme.typography.bodySmall,
-                color = MeshSatTextMuted,
-            )
+        ConfigCard(title = "Clock") {
+            Hint("Sets the node's clock to the phone's time.")
             Spacer(modifier = Modifier.height(8.dp))
-            Button(
+            OutlinedButton(
                 onClick = {
-                    if (!connected) return@Button
-                    val unixSec = System.currentTimeMillis() / 1000
-                    onSend(MeshtasticProtocol.buildAdminSetTime(myNodeNum, unixSec))
-                    Toast.makeText(context, "Time sync sent", Toast.LENGTH_SHORT).show()
+                    onSend(MeshtasticProtocol.buildAdminSetTime(myNodeNum, System.currentTimeMillis() / 1000))
+                    Toast.makeText(context, "Sent to the radio.", Toast.LENGTH_SHORT).show()
                 },
-                colors = ButtonDefaults.buttonColors(containerColor = MeshSatTeal),
-                enabled = connected,
-                modifier = Modifier.fillMaxWidth(),
+                enabled = canSend,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
             ) {
-                Text("Sync Time Now")
+                Text("Set the clock")
             }
         }
 
-        // Reboot
-        ConfigCard(title = "Reboot Radio") {
-            Text(
-                text = "Reboot the connected Meshtastic radio after a delay",
-                style = MaterialTheme.typography.bodySmall,
-                color = MeshSatTextMuted,
-            )
+        ConfigCard(title = "Restart") {
+            Hint("Restarts the node after a delay. The phone reconnects by itself.")
             Spacer(modifier = Modifier.height(8.dp))
             OutlinedTextField(
                 value = rebootDelay,
                 onValueChange = { v -> rebootDelay = v.filter { it.isDigit() }.take(4) },
                 label = { Text("Delay (seconds)") },
                 singleLine = true,
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = MeshSatAmber,
-                    cursorColor = MeshSatAmber,
-                ),
+                enabled = canSend,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 modifier = Modifier.fillMaxWidth(),
             )
             Spacer(modifier = Modifier.height(8.dp))
-            Button(
-                onClick = {
-                    if (!connected) return@Button
-                    showRebootConfirm = true
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = MeshSatAmber),
-                enabled = connected,
-                modifier = Modifier.fillMaxWidth(),
+            OutlinedButton(
+                onClick = { showRebootConfirm = true },
+                enabled = canSend,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
             ) {
-                Text("Reboot Radio")
+                Text("Restart the node")
             }
         }
 
-        // Shutdown
-        ConfigCard(title = "Shutdown Radio") {
-            Text(
-                text = "Power off the connected radio (if hardware supports it)",
-                style = MaterialTheme.typography.bodySmall,
-                color = MeshSatTextMuted,
+        ConfigCard(title = "Switch off") {
+            val canShutdown = metadata?.canShutdown != false
+            Hint(
+                if (canShutdown) "Switches the node off. Someone has to switch it on again at the node."
+                else "This node cannot switch itself off.",
             )
             Spacer(modifier = Modifier.height(8.dp))
-            Button(
-                onClick = {
-                    if (!connected) return@Button
-                    onSend(MeshtasticProtocol.buildAdminShutdown(myNodeNum, 5))
-                    Toast.makeText(context, "Shutdown command sent (5s delay)", Toast.LENGTH_SHORT).show()
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = MeshSatAmber),
-                enabled = connected,
-                modifier = Modifier.fillMaxWidth(),
+            OutlinedButton(
+                onClick = { showShutdownConfirm = true },
+                enabled = canSend && canShutdown,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
             ) {
-                Text("Shutdown Radio")
+                Text("Switch off the node")
             }
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // Node DB reset
-        ConfigCard(title = "Reset Node Database") {
-            Text(
-                text = "Clear the radio's known node list. Nodes will be rediscovered via mesh.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MeshSatAmber,
-            )
+        ConfigCard(title = "Forget heard nodes") {
+            Hint("Clears the node's list of the nodes it has heard. They come back as they transmit again.")
             Spacer(modifier = Modifier.height(8.dp))
-            Button(
+            OutlinedButton(
                 onClick = { showNodeDbResetConfirm = true },
-                colors = ButtonDefaults.buttonColors(containerColor = MeshSatAmber),
-                enabled = connected,
-                modifier = Modifier.fillMaxWidth(),
+                enabled = canSend,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
             ) {
-                Text("Reset Node DB")
+                Text("Forget heard nodes")
             }
         }
 
-        // Factory reset — danger zone
-        ConfigCard(title = "Factory Reset") {
+        ConfigCard(title = "Factory reset") {
             Text(
-                text = "Erase all settings and restore factory defaults. This cannot be undone.",
+                text = "Erases every setting on the node and restores the factory ones. This cannot be undone.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MeshSatRed,
             )
             Spacer(modifier = Modifier.height(8.dp))
             Button(
                 onClick = { showFactoryResetConfirm = true },
-                colors = ButtonDefaults.buttonColors(containerColor = MeshSatRed),
-                enabled = connected,
-                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = MeshSatRed, contentColor = MeshSatBg),
+                enabled = canSend,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
             ) {
-                Text("Factory Reset")
+                Text("Factory reset")
             }
         }
     }
 
-    // Factory reset confirmation
     if (showFactoryResetConfirm) {
         ConfirmDialog(
-            title = "Confirm Factory Reset",
-            message = "This will erase ALL settings on the connected radio and restore factory defaults. " +
-                "The radio will reboot. This action cannot be undone.",
-            confirmLabel = "Reset",
-            confirmColor = MeshSatRed,
+            title = "Erase every setting on your node?",
+            message = "Its region, channels, keys and name go back to the factory ones and it restarts. " +
+                "It will no longer hear your mesh until it is set up again, and the phone may have to pair " +
+                "with it again. This cannot be undone.",
+            confirmLabel = "Erase",
+            danger = true,
             onConfirm = {
                 showFactoryResetConfirm = false
                 onSend(MeshtasticProtocol.buildAdminFactoryReset(myNodeNum))
-                Toast.makeText(context, "Factory reset command sent", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "Sent to the radio. It erases its settings and restarts.", Toast.LENGTH_LONG).show()
             },
             onDismiss = { showFactoryResetConfirm = false },
         )
     }
 
-    // Reboot confirmation
     if (showRebootConfirm) {
         val secs = rebootDelay.toIntOrNull() ?: 5
         ConfirmDialog(
-            title = "Reboot Radio?",
-            message = "The radio will reboot in $secs seconds. Active connections will be interrupted.",
-            confirmLabel = "Reboot",
-            confirmColor = MeshSatAmber,
+            title = "Restart your node?",
+            message = "In $secs seconds the phone loses the node, the mesh and the satellite modem until the node " +
+                "is back, usually within a minute. The phone reconnects by itself.",
+            confirmLabel = "Restart",
             onConfirm = {
-                onSend(MeshtasticProtocol.buildAdminReboot(myNodeNum, secs))
-                Toast.makeText(context, "Reboot command sent (${secs}s delay)", Toast.LENGTH_SHORT).show()
                 showRebootConfirm = false
+                onSend(MeshtasticProtocol.buildAdminReboot(myNodeNum, secs))
+                Toast.makeText(context, "Sent to the radio. It restarts in $secs seconds.", Toast.LENGTH_SHORT).show()
             },
             onDismiss = { showRebootConfirm = false },
         )
     }
 
-    // Node DB reset confirmation
+    if (showShutdownConfirm) {
+        ConfirmDialog(
+            title = "Switch off your node?",
+            message = "The phone loses the connection to it, and with it the mesh and the satellite modem, " +
+                "until someone switches it on again at the node.",
+            confirmLabel = "Switch off",
+            danger = true,
+            onConfirm = {
+                showShutdownConfirm = false
+                onSend(MeshtasticProtocol.buildAdminShutdown(myNodeNum, 5))
+                Toast.makeText(context, "Sent to the radio. It switches off in 5 seconds.", Toast.LENGTH_SHORT).show()
+            },
+            onDismiss = { showShutdownConfirm = false },
+        )
+    }
+
     if (showNodeDbResetConfirm) {
         ConfirmDialog(
-            title = "Reset Node Database?",
-            message = "This will clear the radio's known node list. Nodes will be rediscovered over time.",
-            confirmLabel = "Reset",
-            confirmColor = MeshSatAmber,
+            title = "Forget heard nodes?",
+            message = "Your node clears its list of the nodes it has heard. They come back as they transmit again.",
+            confirmLabel = "Forget",
             onConfirm = {
                 showNodeDbResetConfirm = false
                 onSend(MeshtasticProtocol.buildAdminNodeDbReset(myNodeNum))
-                Toast.makeText(context, "Node DB reset command sent", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "Sent to the radio.", Toast.LENGTH_SHORT).show()
             },
             onDismiss = { showNodeDbResetConfirm = false },
         )
@@ -1137,7 +1312,7 @@ private fun ConfigCard(title: String, content: @Composable () -> Unit) {
         Text(
             text = title,
             style = MaterialTheme.typography.titleSmall,
-            fontWeight = FontWeight.Bold,
+            color = MeshSatTextPrimary,
             modifier = Modifier.padding(bottom = 4.dp),
         )
         content()
@@ -1145,7 +1320,16 @@ private fun ConfigCard(title: String, content: @Composable () -> Unit) {
 }
 
 @Composable
-private fun InfoRow(label: String, value: String) {
+private fun Hint(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.bodySmall,
+        color = MeshSatTextMuted,
+    )
+}
+
+@Composable
+private fun InfoRow(label: String, value: String, mono: Boolean = false) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1157,30 +1341,37 @@ private fun InfoRow(label: String, value: String) {
             style = MaterialTheme.typography.bodySmall,
             color = MeshSatTextMuted,
         )
+        Spacer(modifier = Modifier.width(12.dp))
         Text(
             text = value,
             style = MaterialTheme.typography.bodySmall,
-            fontFamily = PlexMono,
+            fontFamily = if (mono) PlexMono else null,
+            color = MeshSatTextSecondary,
         )
     }
 }
 
 @Composable
-private fun ToggleRow(label: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+private fun ToggleRow(
+    label: String,
+    checked: Boolean,
+    hint: String? = null,
+    enabled: Boolean = true,
+    onCheckedChange: (Boolean) -> Unit,
+) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 48.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodyMedium,
-        )
-        Switch(
-            checked = checked,
-            onCheckedChange = onCheckedChange,
-            colors = SwitchDefaults.colors(checkedTrackColor = MeshSatTeal),
-        )
+        Column(modifier = Modifier.weight(1f)) {
+            Text(text = label, style = MaterialTheme.typography.bodyMedium)
+            if (hint != null) Hint(hint)
+        }
+        Spacer(modifier = Modifier.width(12.dp))
+        Switch(checked = checked, onCheckedChange = onCheckedChange, enabled = enabled)
     }
 }
 
@@ -1190,8 +1381,8 @@ private fun StatusBanner(text: String, color: Color) {
         modifier = Modifier
             .fillMaxWidth()
             .background(color.copy(alpha = 0.08f), RoundedCornerShape(6.dp))
-            .border(1.dp, color.copy(alpha = 0.2f), RoundedCornerShape(6.dp))
-            .padding(8.dp),
+            .border(1.dp, color.copy(alpha = 0.3f), RoundedCornerShape(6.dp))
+            .padding(10.dp),
     ) {
         Text(
             text = text,
@@ -1206,34 +1397,33 @@ private fun ConfirmDialog(
     title: String,
     message: String,
     confirmLabel: String,
-    confirmColor: Color,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
+    danger: Boolean = false,
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = MeshSatSurface,
         title = {
-            Text(title, style = MaterialTheme.typography.titleMedium, color = confirmColor)
+            Text(title, style = MaterialTheme.typography.titleMedium, color = MeshSatTextPrimary)
         },
         text = {
-            Text(message, style = MaterialTheme.typography.bodyMedium)
+            Text(message, style = MaterialTheme.typography.bodyMedium, color = MeshSatTextSecondary)
         },
         confirmButton = {
             Button(
                 onClick = onConfirm,
-                colors = ButtonDefaults.buttonColors(containerColor = confirmColor),
+                colors = if (danger) {
+                    ButtonDefaults.buttonColors(containerColor = MeshSatRed, contentColor = MeshSatBg)
+                } else {
+                    ButtonDefaults.buttonColors()
+                },
             ) {
                 Text(confirmLabel)
             }
         },
         dismissButton = {
-            OutlinedButton(
-                onClick = onDismiss,
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = MeshSatTextSecondary),
-            ) {
-                Text("Cancel")
-            }
+            TextButton(onClick = onDismiss) { Text("Cancel") }
         },
     )
 }
@@ -1262,19 +1452,17 @@ private fun PickerDialog(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .background(
-                                if (isSelected) MeshSatTeal.copy(alpha = 0.12f) else Color.Transparent,
-                                RoundedCornerShape(6.dp),
-                            )
+                            .heightIn(min = 48.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(if (isSelected) MeshSatSurfaceLight else Color.Transparent)
                             .clickable { onSelect(code) }
-                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                            .padding(horizontal = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
                             text = label,
                             style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                            color = if (isSelected) MeshSatTeal else Color.Unspecified,
+                            color = if (isSelected) MeshSatTextPrimary else MeshSatTextSecondary,
                         )
                     }
                 }
@@ -1282,41 +1470,7 @@ private fun PickerDialog(
         },
         confirmButton = {},
         dismissButton = {
-            OutlinedButton(
-                onClick = onDismiss,
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = MeshSatTextSecondary),
-            ) {
-                Text("Cancel")
-            }
+            TextButton(onClick = onDismiss) { Text("Cancel") }
         },
     )
-}
-
-// ═══════════════════════════════════════════════════════════════════════
-// Utilities
-// ═══════════════════════════════════════════════════════════════════════
-
-/** Compute PSK hash letter (A-Z, like Meshtastic official app). */
-private fun pskHashLetter(psk: ByteArray): String {
-    if (psk.isEmpty()) return "-"
-    if (psk.size == 1 && psk[0] == 0.toByte()) return "—"
-    // Default PSK (single byte 1) gets a special label
-    if (psk.size == 1 && psk[0] == 1.toByte()) return "Default"
-    val hash = psk.fold(0) { acc, b -> acc xor (b.toInt() and 0xFF) }
-    return ('A' + (hash % 26)).toString()
-}
-
-/** Map hardware model code to human-readable name. */
-private fun hwModelName(code: Int): String = when (code) {
-    4 -> "T-Beam"
-    7 -> "T-Echo"
-    9 -> "RAK4631"
-    43 -> "Heltec V3"
-    48 -> "Heltec Wireless Tracker"
-    50 -> "T-Deck"
-    51 -> "T-Watch S3"
-    65 -> "Heltec Capsule Sensor V3"
-    71 -> "Tracker T1000-E"
-    255 -> "Private HW"
-    else -> "Unknown ($code)"
 }

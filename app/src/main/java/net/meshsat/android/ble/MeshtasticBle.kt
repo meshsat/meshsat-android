@@ -24,6 +24,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.util.UUID
 import kotlin.random.Random
@@ -113,6 +114,49 @@ class MeshtasticBle(private val context: Context) {
     private val _deviceMetadata = MutableStateFlow<MeshtasticProtocol.MeshDeviceMetadata?>(null)
     val deviceMetadata: StateFlow<MeshtasticProtocol.MeshDeviceMetadata?> = _deviceMetadata
 
+    // --- Mesh links (MESHSAT-1249): only what was actually heard, never inferred ---
+
+    private val _neighborReports = MutableStateFlow<Map<Long, MeshtasticProtocol.NeighborReport>>(emptyMap())
+
+    /** The latest NeighborInfo each node has sent, by reporting node number. */
+    val neighborReports: StateFlow<Map<Long, MeshtasticProtocol.NeighborReport>> = _neighborReports
+
+    private val _linkSignals = MutableStateFlow<Map<Long, MeshtasticProtocol.MeshLinkSignal>>(emptyMap())
+
+    /** How our radio heard the last over-the-air packet from each node (SNR, RSSI, hops), by node number. */
+    val linkSignals: StateFlow<Map<Long, MeshtasticProtocol.MeshLinkSignal>> = _linkSignals
+
+    init {
+        // A second, read-only look at every frame, for link data the service's dispatch does not keep.
+        // It never writes _nodes, so it cannot race the service's node updates.
+        scope.launch {
+            receivedData.collect { frame ->
+                try {
+                    observeLinks(frame)
+                } catch (e: Exception) {
+                    // A frame that does not parse says nothing about links.
+                }
+            }
+        }
+    }
+
+    private fun observeLinks(frame: ByteArray) {
+        val obs = MeshtasticProtocol.parseLinkObservation(frame) ?: return
+        val me = _myInfo.value?.myNodeNum ?: 0L
+        obs.signal?.let { sig ->
+            if (sig.from != me) _linkSignals.update { it + (sig.from to sig) }
+        }
+        obs.neighborInfo?.let { ni ->
+            val report = MeshtasticProtocol.NeighborReport(
+                nodeId = ni.nodeId,
+                neighbors = ni.neighbors,
+                broadcastIntervalSecs = ni.broadcastIntervalSecs,
+                receivedAt = System.currentTimeMillis(),
+            )
+            _neighborReports.update { it + (ni.nodeId to report) }
+        }
+    }
+
     fun setOwner(longName: String, shortName: String) {
         _ownerName.value = longName
         _ownerShortName.value = shortName
@@ -142,7 +186,12 @@ class MeshtasticBle(private val context: Context) {
         _deviceMetadata.value = metadata
     }
 
-    fun setMyInfo(info: MeshtasticProtocol.MyNodeInfo) { _myInfo.value = info }
+    fun setMyInfo(info: MeshtasticProtocol.MyNodeInfo) {
+        // Signals are what OUR radio heard: another radio's measurements would draw false direct links.
+        val previous = _myInfo.value?.myNodeNum
+        if (previous != null && previous != 0L && previous != info.myNodeNum) _linkSignals.value = emptyMap()
+        _myInfo.value = info
+    }
     fun addNodeInfo(info: MeshtasticProtocol.MeshNodeInfo) {
         val current = _nodes.value.toMutableList()
         val existing = current.find { it.nodeNum == info.nodeNum }
@@ -156,6 +205,9 @@ class MeshtasticBle(private val context: Context) {
             hwModel = if (info.hwModel != 0) info.hwModel else (existing?.hwModel ?: 0),
             batteryLevel = if (info.batteryLevel >= 0) info.batteryLevel else (existing?.batteryLevel ?: -1),
             lastHeard = if (info.lastHeard > 0) info.lastHeard else System.currentTimeMillis(),
+            snr = if (info.snr != 0f) info.snr else (existing?.snr ?: 0f),
+            hopsAway = if (info.hopsAway >= 0) info.hopsAway else (existing?.hopsAway ?: -1),
+            isLicensed = if (info.longName.isNotEmpty()) info.isLicensed else (existing?.isLicensed ?: false),
         )
         current.add(merged)
         _nodes.value = current
