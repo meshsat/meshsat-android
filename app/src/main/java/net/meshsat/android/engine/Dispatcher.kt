@@ -8,9 +8,11 @@ import net.meshsat.android.rules.AccessEvaluator
 import net.meshsat.android.rules.RouteMessage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.security.MessageDigest
@@ -366,17 +368,20 @@ class Dispatcher(
             return
         }
 
-        // Mark as sending
-        deliveryDao.setStatus(del.id, "sending")
+        // A send that has started finishes and records its outcome even when the worker is
+        // stopped meanwhile. Cancelled mid-send, the row stayed 'sending' until the app restarted,
+        // and a satellite session that did go out would have been sent (and billed) again.
+        withContext(NonCancellable) {
+            deliveryDao.setStatus(del.id, "sending")
 
-        // Attempt delivery via callback
-        val payload = del.payload ?: del.textPreview.toByteArray()
-        val error = deliveryCallback.deliver(channelId, payload, del.textPreview)
+            val payload = del.payload ?: del.textPreview.toByteArray()
+            val error = deliveryCallback.deliver(channelId, payload, del.textPreview)
 
-        if (error != null) {
-            handleFailure(channelId, del, error)
-        } else {
-            handleSuccess(channelId, del)
+            if (error != null) {
+                handleFailure(channelId, del, error)
+            } else {
+                handleSuccess(channelId, del)
+            }
         }
     }
 
