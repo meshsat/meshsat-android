@@ -18,6 +18,8 @@ import androidx.compose.material.icons.outlined.SatelliteAlt
 import androidx.compose.material.icons.outlined.SettingsInputAntenna
 import androidx.compose.material.icons.outlined.Sms
 import androidx.compose.material.icons.outlined.SwapVert
+import androidx.compose.material.icons.outlined.NightsStay
+import androidx.compose.material.icons.filled.NightsStay
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -66,7 +68,7 @@ private const val HIGH_PASS_DEG = 40.0
 
 /** The top of Home: the MeshSat lockup (the approved artwork, never re-typeset) and Arrange. */
 @Composable
-fun HomeHeader(onArrange: () -> Unit) {
+fun HomeHeader(onArrange: () -> Unit, nightOn: Boolean = false, onNight: () -> Unit = {}) {
     Row(
         modifier = Modifier.fillMaxWidth().padding(start = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -78,6 +80,13 @@ fun HomeHeader(onArrange: () -> Unit) {
             alignment = Alignment.CenterStart,
             modifier = Modifier.height(26.dp).weight(1f),
         )
+        IconButton(onClick = onNight) {
+            Icon(
+                if (nightOn) Icons.Filled.NightsStay else Icons.Outlined.NightsStay,
+                contentDescription = if (nightOn) "Night mode off" else "Night mode on",
+                tint = MeshSatTextSecondary,
+            )
+        }
         IconButton(onClick = onArrange) {
             Icon(Icons.Outlined.SwapVert, contentDescription = "Arrange Home", tint = MeshSatTextSecondary)
         }

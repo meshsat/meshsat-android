@@ -182,6 +182,8 @@ fun DashboardScreen(navigate: (String) -> Unit = {}) {
     var cardOrder by remember { mutableStateOf(HOME_CARDS) }
     var showReorderDialog by remember { mutableStateOf(false) }
 
+    val nightOn by settings.nightMode.collectAsState(initial = false)
+
     LaunchedEffect(Unit) {
         val saved = settings.dashboardOrder.first()
         cardOrder = homeOrder(saved)
@@ -205,8 +207,15 @@ fun DashboardScreen(navigate: (String) -> Unit = {}) {
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        item { HomeHeader(onArrange = { showReorderDialog = true }) }
+        item {
+            HomeHeader(
+                onArrange = { showReorderDialog = true },
+                nightOn = nightOn,
+                onNight = { scope.launch { settings.setNightMode(!nightOn) } },
+            )
+        }
         item { HomeLanes(navigate) }
+        item { SetupChecklistCard(navigate) }
 
         // The cards below follow the order set with Arrange (MESHSAT-401), which the old layout
         // saved but never applied (MESHSAT-1249).
