@@ -289,7 +289,7 @@ private fun StatusStrip() {
     val myNum = ble?.myInfo?.value?.myNodeNum ?: 0L
     val nodeCount = ble?.nodes?.value.orEmpty().count { it.nodeNum != myNum }
 
-    val canText = context.packageManager.hasSystemFeature(PackageManager.FEATURE_TELEPHONY_MESSAGING)
+    val canText = net.meshsat.android.sms.SmsCapability.canSend(context)
     val smsColor = if (canText && ContextCompat.checkSelfPermission(context, Manifest.permission.SEND_SMS) == PackageManager.PERMISSION_GRANTED) {
         ColorCellular
     } else {
