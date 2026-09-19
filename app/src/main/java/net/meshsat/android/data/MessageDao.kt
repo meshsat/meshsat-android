@@ -28,12 +28,16 @@ interface MessageDao {
      * One row per conversation, keyed by the other party: the recipient of what the phone sent,
      * the sender of what it received (MESHSAT-1249). Grouping by sender filed every sent message
      * under "self".
+     *
+     * text and transport are bare columns: SQLite takes them from the row holding the maximum only
+     * when the query has exactly ONE min() or max(). A second MAX (the encrypted flag, before) made
+     * the preview show the oldest message's text beside the newest time, so encryption is a SUM.
      */
     @Query("""
         SELECT CASE WHEN direction = 'tx' AND recipient != '' THEN recipient ELSE sender END AS sender,
                text AS lastMessage, MAX(timestamp) AS lastTimestamp,
                COUNT(*) AS messageCount, transport,
-               MAX(CASE WHEN encrypted = 1 THEN 1 ELSE 0 END) AS hasEncrypted
+               CASE WHEN SUM(CASE WHEN encrypted = 1 THEN 1 ELSE 0 END) > 0 THEN 1 ELSE 0 END AS hasEncrypted
         FROM messages
         GROUP BY CASE WHEN direction = 'tx' AND recipient != '' THEN recipient ELSE sender END
         ORDER BY lastTimestamp DESC
