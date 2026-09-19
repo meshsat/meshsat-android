@@ -1879,6 +1879,9 @@ class GatewayService : Service() {
                 interfaceId == "iridium_0" -> {
                     // The 9603 arrives with the MeshSat node's BLE link; this only allows taking it.
                     iridiumWanted.value = true
+                    // A modem still connected is simply online again: its state flow will not
+                    // emit Connected a second time, so nothing else would restart the worker.
+                    if (iridiumSpp?.state?.value == IridiumSpp.State.Connected) mgr.setOnline("iridium_0")
                     null
                 }
                 interfaceId == "iridium9704_0" -> {
@@ -1985,10 +1988,13 @@ class GatewayService : Service() {
                 }
             }
         }
+        // The modem's errors never change the interface state: its link state comes from
+        // spp.state above, and most of these are refusals (an SBDIX held after a failed
+        // session), not link failures. As ERROR they stopped the worker and held the queue.
         iridiumSpp?.let { spp ->
             scope.launch {
                 spp.error.collect { err ->
-                    if (err.isNotBlank()) mgr.setError("iridium_0", err)
+                    if (err.isNotBlank()) mgr.noteError("iridium_0", err)
                 }
             }
         }

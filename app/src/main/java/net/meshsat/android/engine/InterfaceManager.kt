@@ -209,6 +209,19 @@ class InterfaceManager(
     }
 
     /**
+     * Record [error] as the interface's last error without changing its state. For a transport
+     * whose link state is reported separately (the Iridium modem), whose errors include refusals
+     * that are not link failures, such as an SBDIX held after a failed session: marking those
+     * ERROR stopped the delivery worker and held the whole queue (MESHSAT-1243).
+     */
+    fun noteError(id: String, error: String) {
+        val rt = runtimes[id] ?: return
+        rt.errorMsg = error
+        publishStates()
+        Log.w(TAG, "$id: $error")
+    }
+
+    /**
      * Mark interface as CONNECTING. Called when a connect attempt starts.
      */
     fun setConnecting(id: String) {
