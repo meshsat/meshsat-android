@@ -15,6 +15,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
@@ -80,6 +81,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
+import net.meshsat.android.ui.theme.PlexMono
 
 private enum class Tab(val route: String, val label: String, val icon: ImageVector) {
     Dashboard("dashboard", "Home", Icons.Default.Dashboard),
@@ -215,12 +217,15 @@ private fun StatusBar() {
         }
     }
 
+    // Drawn edge to edge: the background runs behind Android's status bar, the content sits below
+    // it. Without the inset the strip was painted under the system clock and icons (MESHSAT-1249).
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(32.dp)
             .background(MeshSatSurface)
-            .padding(horizontal = 8.dp),
+            .statusBarsPadding()
+            .height(36.dp)
+            .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
@@ -231,14 +236,14 @@ private fun StatusBar() {
         ) {
             Text(
                 text = "IRD",
-                fontSize = 10.sp,
-                fontFamily = FontFamily.Monospace,
+                fontSize = 12.sp,
+                fontFamily = PlexMono,
                 color = ColorIridium,
             )
             Text(
                 text = signalBars(irdBars),
-                fontSize = 10.sp,
-                fontFamily = FontFamily.Monospace,
+                fontSize = 12.sp,
+                fontFamily = PlexMono,
                 color = if (irdConnected) ColorIridium else MeshSatTextMuted,
             )
             StatusDot(if (irdConnected) ColorIridium else MeshSatTextMuted)
@@ -251,8 +256,8 @@ private fun StatusBar() {
         ) {
             Text(
                 text = "MESH",
-                fontSize = 10.sp,
-                fontFamily = FontFamily.Monospace,
+                fontSize = 12.sp,
+                fontFamily = PlexMono,
                 color = ColorMesh,
             )
             StatusDot(if (meshConnected) ColorMesh else MeshSatTextMuted)
@@ -260,15 +265,15 @@ private fun StatusBar() {
                 val rssiText = if (rssi != 0) "${rssi}dB" else "---"
                 Text(
                     text = "$rssiText $nodeCount",
-                    fontSize = 10.sp,
-                    fontFamily = FontFamily.Monospace,
+                    fontSize = 12.sp,
+                    fontFamily = PlexMono,
                     color = MeshSatTextSecondary,
                 )
             } else {
                 Text(
                     text = "---",
-                    fontSize = 10.sp,
-                    fontFamily = FontFamily.Monospace,
+                    fontSize = 12.sp,
+                    fontFamily = PlexMono,
                     color = MeshSatTextMuted,
                 )
             }
@@ -281,8 +286,8 @@ private fun StatusBar() {
         ) {
             Text(
                 text = "CELL",
-                fontSize = 10.sp,
-                fontFamily = FontFamily.Monospace,
+                fontSize = 12.sp,
+                fontFamily = PlexMono,
                 color = ColorCellular,
             )
             StatusDot(ColorCellular)
@@ -295,8 +300,8 @@ private fun StatusBar() {
         ) {
             Text(
                 text = "GPS",
-                fontSize = 10.sp,
-                fontFamily = FontFamily.Monospace,
+                fontSize = 12.sp,
+                fontFamily = PlexMono,
                 color = if (hasGps) MeshSatGreen else MeshSatTextMuted,
             )
             StatusDot(if (hasGps) MeshSatGreen else MeshSatTextMuted)
@@ -307,8 +312,8 @@ private fun StatusBar() {
         // UTC clock
         Text(
             text = utcTime,
-            fontSize = 10.sp,
-            fontFamily = FontFamily.Monospace,
+            fontSize = 12.sp,
+            fontFamily = PlexMono,
             color = MeshSatTextSecondary,
         )
     }

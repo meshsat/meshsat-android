@@ -54,6 +54,7 @@ import kotlin.math.cos
 import kotlin.math.min
 import kotlin.math.sin
 import kotlin.math.sqrt
+import net.meshsat.android.ui.theme.PlexMono
 
 /**
  * Topology View — force-directed graph visualization of mesh nodes
@@ -498,7 +499,7 @@ private fun TopologyStatItem(label: String, value: String, color: Color) {
         Text(
             text = value,
             style = MaterialTheme.typography.labelSmall,
-            fontFamily = FontFamily.Monospace,
+            fontFamily = PlexMono,
             fontWeight = FontWeight.Bold,
             color = color,
         )

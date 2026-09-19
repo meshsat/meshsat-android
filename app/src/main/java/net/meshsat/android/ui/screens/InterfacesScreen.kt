@@ -68,6 +68,7 @@ import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import net.meshsat.android.ui.theme.PlexMono
 
 // ═══════════════════════════════════════════════════════════════════════
 // Interface Management — Phase I
@@ -317,7 +318,7 @@ private fun InterfaceCard(
                 Text(
                     text = status.id,
                     style = MaterialTheme.typography.titleSmall,
-                    fontFamily = FontFamily.Monospace,
+                    fontFamily = PlexMono,
                 )
 
                 // Channel type badge
@@ -474,7 +475,7 @@ private fun ChannelsTabContent() {
                     Text(
                         text = ch.id,
                         style = MaterialTheme.typography.labelSmall,
-                        fontFamily = FontFamily.Monospace,
+                        fontFamily = PlexMono,
                         color = color,
                         modifier = Modifier
                             .background(color.copy(alpha = 0.12f), RoundedCornerShape(4.dp))
@@ -548,7 +549,7 @@ private fun CapabilityRow(label: String, value: String) {
         Text(
             text = value,
             style = MaterialTheme.typography.labelSmall,
-            fontFamily = FontFamily.Monospace,
+            fontFamily = PlexMono,
             fontWeight = FontWeight.Bold,
             color = if (value == "Yes") MeshSatGreen
             else if (value == "No") MeshSatTextMuted
@@ -617,7 +618,7 @@ private fun HealthTabContent(healthScores: List<HealthScore>) {
                         Text(
                             text = hs.interfaceId,
                             style = MaterialTheme.typography.titleSmall,
-                            fontFamily = FontFamily.Monospace,
+                            fontFamily = PlexMono,
                         )
                         if (!hs.available) {
                             Text(
@@ -637,7 +638,7 @@ private fun HealthTabContent(healthScores: List<HealthScore>) {
                         text = "${hs.score}%",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace,
+                        fontFamily = PlexMono,
                         color = scoreColor,
                         modifier = Modifier
                             .background(scoreColor.copy(alpha = 0.12f), RoundedCornerShape(6.dp))
@@ -690,7 +691,7 @@ private fun ScoreColumn(label: String, value: Int, color: Color) {
             text = value.toString(),
             style = MaterialTheme.typography.titleSmall,
             fontWeight = FontWeight.Bold,
-            fontFamily = FontFamily.Monospace,
+            fontFamily = PlexMono,
             color = color,
         )
         Text(
@@ -801,7 +802,7 @@ private fun AccessRuleCard(rule: AccessRuleEntity) {
             Text(
                 text = rule.interfaceId,
                 style = MaterialTheme.typography.labelSmall,
-                fontFamily = FontFamily.Monospace,
+                fontFamily = PlexMono,
                 color = MeshSatTextSecondary,
             )
             Text(

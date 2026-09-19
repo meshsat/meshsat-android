@@ -39,6 +39,7 @@ import net.meshsat.android.ui.theme.MeshSatSurface
 import net.meshsat.android.ui.theme.MeshSatTeal
 import net.meshsat.android.ui.theme.MeshSatTextMuted
 import net.meshsat.android.ui.theme.MeshSatTextSecondary
+import net.meshsat.android.ui.theme.PlexMono
 
 private enum class PeerSortMode(val label: String) {
     Name("Name"),
@@ -203,7 +204,7 @@ private fun PeerRow(node: MeshtasticProtocol.MeshNodeInfo, now: Long) {
                 Text(
                     text = nodeId,
                     style = MaterialTheme.typography.bodySmall,
-                    fontFamily = FontFamily.Monospace,
+                    fontFamily = PlexMono,
                     color = MeshSatTextMuted,
                 )
             }

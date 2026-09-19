@@ -2,39 +2,50 @@ package net.meshsat.android.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-// MeshSat dark theme — matches the web dashboard
-val MeshSatBg = Color(0xFF111827)         // gray-900
-val MeshSatSurface = Color(0xFF1F2937)    // gray-800
-val MeshSatSurfaceLight = Color(0xFF374151) // gray-700
-val MeshSatBorder = Color(0xFF4B5563)     // gray-600
-val MeshSatTextPrimary = Color(0xFFE5E7EB) // gray-200
-val MeshSatTextSecondary = Color(0xFF9CA3AF) // gray-400
-val MeshSatTextMuted = Color(0xFF6B7280)  // gray-500
+// The MeshSat brand (meshsat-website/brand/, MeshSat_Brand_Guide.pdf page 6) and the Bridge web UI
+// (meshsat/web/tailwind.config.js), in one palette (MESHSAT-1249). Dark only: the brand uses the dark
+// version by default and the Bridge has no light mode.
+//
+// The old token names are kept and repainted, as the Bridge re-skin did with its Tailwind scales, so
+// every screen takes the brand without an edit. Text tokens are chosen for WCAG AA: muted text is at
+// least 4.5:1 on every surface, and nothing is ever drawn in white on Signal Orange (2.9:1).
 
-val MeshSatTeal = Color(0xFF0D9488)       // teal-600
-val MeshSatTealLight = Color(0xFF14B8A6)  // teal-500
-val MeshSatAmber = Color(0xFFF59E0B)      // amber-500
-val MeshSatRed = Color(0xFFEF4444)        // red-500
-val MeshSatGreen = Color(0xFF22C55E)      // green-500
-val MeshSatBlue = Color(0xFF3B82F6)       // blue-500
+// Brand guide colours
+val SpaceBlack = Color(0xFF040406)
+val SignalOrange = Color(0xFFF96118)
+val OffWhite = Color(0xFFF7F7F4)
 
-// MeshSat light theme
-val MeshSatBgLight = Color(0xFFF9FAFB)         // gray-50
-val MeshSatSurfaceLight2 = Color(0xFFFFFFFF)    // white
-val MeshSatSurfaceLightAlt = Color(0xFFF3F4F6)  // gray-100
-val MeshSatBorderLight = Color(0xFFD1D5DB)      // gray-300
-val MeshSatTextPrimaryLight = Color(0xFF111827)  // gray-900
-val MeshSatTextSecondaryLight = Color(0xFF4B5563) // gray-600
-val MeshSatTextMutedLight = Color(0xFF9CA3AF)    // gray-400
+// Surfaces and text (the Bridge's warm near-black scale)
+val MeshSatBg = SpaceBlack                     // page background
+val MeshSatSurface = Color(0xFF15151B)         // cards, bars, sheets
+val MeshSatSurfaceLight = Color(0xFF24242C)    // raised: pressed rows, inputs
+val MeshSatBorder = Color(0xFF24242C)          // hairlines and card borders
+val MeshSatTextPrimary = Color(0xFFEBEBEE)     // body text, 15.3:1 on surface
+val MeshSatTextSecondary = Color(0xFFB4B4BD)   // secondary text, 8.8:1
+val MeshSatTextMuted = Color(0xFF8A8A96)       // captions and hints, 5.3:1 (4.5:1 on raised)
 
-// Signal quality colors
-val SignalExcellent = Color(0xFF22C55E)
-val SignalGood = Color(0xFF84CC16)
-val SignalFair = Color(0xFFF59E0B)
-val SignalPoor = Color(0xFFEF4444)
+// The accent is Signal Orange: the main action and anything live. Text on it is Space Black (6.6:1).
+val MeshSatTeal = SignalOrange
+val MeshSatTealLight = Color(0xFFFF7C3B)       // orange text on raised surfaces
+val MeshSatInk = SpaceBlack                    // text and icons drawn on Signal Orange
 
-// Transport colors
-val ColorMesh = Color(0xFF06B6D4)         // cyan-500
-val ColorIridium = Color(0xFFA855F7)      // purple-500
-val ColorCellular = Color(0xFFF97316)     // orange-500
-val ColorSMS = Color(0xFF22C55E)          // green-500
+// State colours are functional only: working, trying, failed.
+val MeshSatGreen = Color(0xFF34D399)
+val MeshSatAmber = Color(0xFFFBBF24)
+val MeshSatRed = Color(0xFFF87171)
+val MeshSatBlue = Color(0xFF8FB8DE)            // the Hub's colour; kept for existing uses
+
+// Signal quality, from the state colours
+val SignalExcellent = MeshSatGreen
+val SignalGood = MeshSatGreen
+val SignalFair = MeshSatAmber
+val SignalPoor = MeshSatRed
+
+// One colour per way a message travels, from the Bridge booth screen's route lanes (TtcView.vue):
+// designed to read apart from each other and from the state colours.
+val ColorIridium = Color(0xFFB9A7E6)           // satellite, lavender
+val ColorMesh = Color(0xFFC8B89A)              // mesh (LoRa), sand
+val ColorCellular = Color(0xFFE0B458)          // SMS and cellular, gold
+val ColorSMS = ColorCellular
+val ColorHub = Color(0xFF8FB8DE)               // the Hub, blue
+val ColorRadio = OffWhite                      // ham radio (APRS)
