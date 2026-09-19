@@ -12,6 +12,7 @@ class MeshSatApp : Application() {
     companion object {
         const val CHANNEL_GATEWAY = "meshsat_gateway"
         const val CHANNEL_MESSAGES = "meshsat_messages"
+        const val CHANNEL_IRIDIUM_SIGNAL = "meshsat_iridium_signal"
     }
 
     override fun onCreate() {
@@ -57,6 +58,18 @@ class MeshSatApp : Application() {
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
                 description = "Incoming mesh and satellite messages"
+            }
+        )
+
+        // Low importance: the icon shows in the status bar, with no sound or badge (MESHSAT-1241).
+        manager.createNotificationChannel(
+            NotificationChannel(
+                CHANNEL_IRIDIUM_SIGNAL,
+                "Iridium signal",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "Satellite icon with the Iridium signal while the modem is connected"
+                setShowBadge(false)
             }
         )
     }

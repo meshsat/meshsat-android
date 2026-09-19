@@ -108,6 +108,7 @@ class GatewayService : Service() {
             private set
 
         private var service: GatewayService? = null
+        private const val IRIDIUM_STATUS_NOTIFICATION_ID = 7603
 
         /** A mailbox check the user asked for (MESHSAT-400): running, or its last outcome. */
         data class MailboxCheck(
@@ -288,6 +289,7 @@ class GatewayService : Service() {
             initSigningAndApi()
             observeTransports()
             observeIridiumPipe()
+            observeIridiumStatusIcon()
             startSignalPolling()
             startLocationUpdates()
             initMsvqsc()
@@ -390,6 +392,7 @@ class GatewayService : Service() {
         net.meshsat.android.sms.SmsReceiver.relayCallback = null
         scope.cancel()
         if (service === this) service = null
+        NotificationManagerCompat.from(this).cancel(IRIDIUM_STATUS_NOTIFICATION_ID)
         super.onDestroy()
     }
 
@@ -2408,6 +2411,57 @@ class GatewayService : Service() {
         } catch (e: Exception) {
             Log.d("MeshSat", "Cellular signal read failed: ${e.message}")
             null
+        }
+    }
+
+    private val iridiumStatusIcons = intArrayOf(
+        R.drawable.ic_stat_iridium_0,
+        R.drawable.ic_stat_iridium_1,
+        R.drawable.ic_stat_iridium_2,
+        R.drawable.ic_stat_iridium_3,
+        R.drawable.ic_stat_iridium_4,
+        R.drawable.ic_stat_iridium_5,
+    )
+
+    /**
+     * A satellite icon with the Iridium signal bars on the left of the status bar while the
+     * 9603 is connected, gone when it is not (MESHSAT-1241). Android keeps the right-hand
+     * system icons for itself; an ongoing notification is how an app shows one.
+     */
+    private fun observeIridiumStatusIcon() {
+        val spp = iridiumSpp ?: return
+        scope.launch {
+            combine(spp.state, spp.signal) { state, signal -> state to signal }.collect { (state, signal) ->
+                val nm = NotificationManagerCompat.from(this@GatewayService)
+                if (state != IridiumSpp.State.Connected) {
+                    nm.cancel(IRIDIUM_STATUS_NOTIFICATION_ID)
+                    return@collect
+                }
+                if (ContextCompat.checkSelfPermission(this@GatewayService, Manifest.permission.POST_NOTIFICATIONS)
+                    != PackageManager.PERMISSION_GRANTED
+                ) return@collect
+                val bars = signal.coerceIn(0, 5)
+                val imei = spp.modemInfo.value.imei
+                val tap = PendingIntent.getActivity(
+                    this@GatewayService, 1,
+                    Intent(this@GatewayService, MainActivity::class.java).apply { flags = Intent.FLAG_ACTIVITY_SINGLE_TOP },
+                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+                )
+                val notification = NotificationCompat.Builder(this@GatewayService, MeshSatApp.CHANNEL_IRIDIUM_SIGNAL)
+                    .setSmallIcon(iridiumStatusIcons[bars])
+                    .setContentTitle("Iridium signal $bars/5")
+                    .setContentText(if (imei.isNotBlank()) "RockBLOCK ${imei.takeLast(6)} via the MeshSat node" else "Iridium modem connected")
+                    .setOngoing(true)
+                    .setSilent(true)
+                    .setOnlyAlertOnce(true)
+                    .setShowWhen(false)
+                    .setPriority(NotificationCompat.PRIORITY_LOW)
+                    .setContentIntent(tap)
+                    .build()
+                try {
+                    nm.notify(IRIDIUM_STATUS_NOTIFICATION_ID, notification)
+                } catch (_: SecurityException) {}
+            }
         }
     }
 
