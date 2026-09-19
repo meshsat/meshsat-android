@@ -3,6 +3,7 @@ package net.meshsat.android.bt
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -47,6 +48,11 @@ class IridiumSpp(private val clock: () -> Long = System::currentTimeMillis) {
         const val SBDIX_HOLD_MS = 180_000L
         const val MO_MAX_SIZE = 340
         const val MT_MAX_SIZE = 270
+        /** How often a modem that is still powering up is asked again. */
+        const val WAKE_RETRY_MS = 2_000L
+        /** Silent this long, the modem is reported as not answering; the checks go on, slower. */
+        const val WAKE_GRACE_MS = 60_000L
+        const val SILENT_RETRY_MS = 30_000L
     }
 
     enum class State { Disconnected, Connecting, Connected }
@@ -71,6 +77,11 @@ class IridiumSpp(private val clock: () -> Long = System::currentTimeMillis) {
 
     private val _modemInfo = MutableStateFlow(ModemInfo())
     val modemInfo: StateFlow<ModemInfo> = _modemInfo
+
+    private val _modemSilent = MutableStateFlow(false)
+
+    /** The node's pipe is ours but no modem has answered AT for [WAKE_GRACE_MS]: none is fitted, or it has no power. */
+    val modemSilent: StateFlow<Boolean> = _modemSilent
 
     private val _ringAlerts = MutableSharedFlow<Unit>(extraBufferCapacity = 4)
 
@@ -114,15 +125,43 @@ class IridiumSpp(private val clock: () -> Long = System::currentTimeMillis) {
         newLink.setReceiver { watcher.feed(it) }
         _state.value = State.Connecting
         scope.launch {
+            if (!awaitModem(newLink)) return@launch
             probeModem()
             if (link === newLink) _state.value = State.Connected
         }
+    }
+
+    /**
+     * Repeat the probe's first command until the modem answers. A node that has just switched
+     * its modem on gives it about 10 s before it answers AT (the T-Beam node), and a node without
+     * one never does: until then the state stays Connecting, never Connected. False once
+     * [forLink] is no longer in use.
+     */
+    private suspend fun awaitModem(forLink: ModemLink): Boolean {
+        val start = clock()
+        while (link === forLink) {
+            // Flow control off first: the node wires TX/RX/GND only.
+            val resp = runCatching { sendAT("AT&K0") }.getOrDefault("")
+            if (resp.contains("OK") || resp.contains("ERROR")) {
+                _modemSilent.value = false
+                return link === forLink
+            }
+            val silent = clock() - start >= WAKE_GRACE_MS
+            if (silent && !_modemSilent.value) {
+                _modemSilent.value = true
+                _error.emit("The node's modem does not answer AT; still trying")
+            }
+            val until = clock() + if (silent) SILENT_RETRY_MS else WAKE_RETRY_MS
+            while (clock() < until && link === forLink) delay(20)
+        }
+        return false
     }
 
     /** Stop using the link; the node keeps the modem powered. */
     fun detach() {
         link?.setReceiver(null)
         link = null
+        _modemSilent.value = false
         _state.value = State.Disconnected
     }
 
@@ -170,8 +209,7 @@ class IridiumSpp(private val clock: () -> Long = System::currentTimeMillis) {
 
     private suspend fun probeModem() {
         try {
-            // Flow control off first: the node wires TX/RX/GND only.
-            sendAT("AT&K0")
+            // AT&K0 (flow control off) already went out in awaitModem.
             sendAT("ATE0")
             // Unsolicited SBDRING when an MT message waits: the node has no RI wire.
             sendAT("AT+SBDMTA=1")

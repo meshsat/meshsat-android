@@ -201,6 +201,7 @@ fun SettingsScreen(navController: NavController? = null) {
     val meshState = GatewayService.meshtasticBle?.state?.collectAsState()
     val iridiumState = GatewayService.iridiumSpp?.state?.collectAsState()
     val iridiumSignal = GatewayService.iridiumSpp?.signal?.collectAsState()
+    val iridiumSilent = GatewayService.iridiumSpp?.modemSilent?.collectAsState()
     val modemInfo = GatewayService.iridiumSpp?.modemInfo?.collectAsState()
     // The 9603 lives on the MeshSat node, behind its BLE pipe (MESHSAT-1236).
     val iridiumPipe by (GatewayService.meshtasticBle?.iridiumPipe ?: MutableStateFlow(null)).collectAsState()
@@ -510,6 +511,8 @@ fun SettingsScreen(navController: NavController? = null) {
                 connected = state == IridiumSpp.State.Connected,
                 statusText = when {
                     state == IridiumSpp.State.Connected -> "Connected (Signal: ${iridiumSignal?.value ?: 0}/5)"
+                    state == IridiumSpp.State.Connecting && iridiumSilent?.value == true ->
+                        "The node's modem does not answer (still trying)"
                     state == IridiumSpp.State.Connecting -> "Checking the modem..."
                     !nodePipeEnabled -> "Off: the node keeps its modem"
                     iridiumPipe == null -> "No MeshSat node connected"
