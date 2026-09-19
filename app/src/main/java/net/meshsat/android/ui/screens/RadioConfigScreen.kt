@@ -72,6 +72,7 @@ import net.meshsat.android.ui.theme.MeshSatTextMuted
 import net.meshsat.android.ui.theme.MeshSatTextPrimary
 import net.meshsat.android.ui.theme.MeshSatTextSecondary
 import net.meshsat.android.ui.theme.PlexMono
+import net.meshsat.android.ui.components.collectOrNull
 
 // ═══════════════════════════════════════════════════════════════════════
 // Radio Configuration: MESHSAT-243, revamped in MESHSAT-1249
@@ -104,8 +105,8 @@ fun RadioConfigScreen(onConnect: () -> Unit = {}) {
     val scope = rememberCoroutineScope()
 
     val ble = GatewayService.meshtasticBle
-    val connected = ble?.state?.collectAsState()?.value == MeshtasticBle.State.Connected
-    val myNodeNum = ble?.myInfo?.collectAsState()?.value?.myNodeNum ?: 0L
+    val connected = ble?.state.collectOrNull()?.value == MeshtasticBle.State.Connected
+    val myNodeNum = ble?.myInfo.collectOrNull()?.value?.myNodeNum ?: 0L
     // Admin messages are addressed to our own node number; without it nothing can be sent.
     val canSend = connected && myNodeNum != 0L
 
@@ -237,10 +238,10 @@ private fun IdentityTabContent(
     val context = LocalContext.current
     val ble = GatewayService.meshtasticBle
 
-    val ownerName = ble?.ownerName?.collectAsState()?.value ?: ""
-    val ownerShortName = ble?.ownerShortName?.collectAsState()?.value ?: ""
-    val metadata = ble?.deviceMetadata?.collectAsState()?.value
-    val nodes = ble?.nodes?.collectAsState()?.value ?: emptyList()
+    val ownerName = ble?.ownerName.collectOrNull()?.value ?: ""
+    val ownerShortName = ble?.ownerShortName.collectOrNull()?.value ?: ""
+    val metadata = ble?.deviceMetadata.collectOrNull()?.value
+    val nodes = ble?.nodes.collectOrNull()?.value ?: emptyList()
     val myNode = nodes.find { it.nodeNum == myNodeNum }
     val ownerLoaded = ownerName.isNotEmpty() && myNode != null
 
@@ -354,7 +355,7 @@ private fun RadioConfigTabContent(
 ) {
     val context = LocalContext.current
     val ble = GatewayService.meshtasticBle
-    val loaded = ble?.loraConfig?.collectAsState()?.value
+    val loaded = ble?.loraConfig.collectOrNull()?.value
     if (loaded == null) {
         NotLoaded(connected)
         return
@@ -597,7 +598,7 @@ private fun ChannelsTabContent(
 ) {
     val context = LocalContext.current
     val ble = GatewayService.meshtasticBle
-    val channels = ble?.channels?.collectAsState()?.value ?: emptyList()
+    val channels = ble?.channels.collectOrNull()?.value ?: emptyList()
 
     var editingChannel by remember { mutableStateOf<MeshtasticProtocol.MeshChannel?>(null) }
     var pendingSave by remember { mutableStateOf<Pair<MeshtasticProtocol.MeshChannel, MeshtasticProtocol.MeshChannel>?>(null) }
@@ -812,7 +813,7 @@ private fun PositionTabContent(
 ) {
     val context = LocalContext.current
     val ble = GatewayService.meshtasticBle
-    val loaded = ble?.positionConfig?.collectAsState()?.value
+    val loaded = ble?.positionConfig.collectOrNull()?.value
     if (loaded == null) {
         NotLoaded(connected)
         return
@@ -912,7 +913,7 @@ private fun BluetoothTabContent(
 ) {
     val context = LocalContext.current
     val ble = GatewayService.meshtasticBle
-    val loaded = ble?.bluetoothConfig?.collectAsState()?.value
+    val loaded = ble?.bluetoothConfig.collectOrNull()?.value
     if (loaded == null) {
         NotLoaded(connected)
         return
@@ -1037,8 +1038,8 @@ private fun NetworkTabContent(
 ) {
     val context = LocalContext.current
     val ble = GatewayService.meshtasticBle
-    val loaded = ble?.networkConfig?.collectAsState()?.value
-    val metadata = ble?.deviceMetadata?.collectAsState()?.value
+    val loaded = ble?.networkConfig.collectOrNull()?.value
+    val metadata = ble?.deviceMetadata.collectOrNull()?.value
     if (loaded == null) {
         NotLoaded(connected)
         return
@@ -1135,7 +1136,7 @@ private fun DeviceAdminTabContent(
     onSend: (ByteArray) -> Unit,
 ) {
     val context = LocalContext.current
-    val metadata = GatewayService.meshtasticBle?.deviceMetadata?.collectAsState()?.value
+    val metadata = GatewayService.meshtasticBle?.deviceMetadata.collectOrNull()?.value
 
     var rebootDelay by remember { mutableStateOf("5") }
     var showFactoryResetConfirm by remember { mutableStateOf(false) }

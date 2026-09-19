@@ -54,6 +54,7 @@ import net.meshsat.android.ui.theme.MeshSatBorder
 import net.meshsat.android.ui.theme.MeshSatGreen
 import net.meshsat.android.ui.theme.MeshSatRed
 import net.meshsat.android.ui.theme.MeshSatTextMuted
+import net.meshsat.android.ui.components.collectOrNull
 
 /**
  * The Setup tab (MESHSAT-1249): what used to be More plus one 2,276-line Settings scroll, grouped by
@@ -62,10 +63,10 @@ import net.meshsat.android.ui.theme.MeshSatTextMuted
 @Composable
 fun SetupScreen(navigate: (String) -> Unit) {
     val context = LocalContext.current
-    val meshState = GatewayService.meshtasticBle?.state?.collectAsState()?.value ?: MeshtasticBle.State.Disconnected
-    val sppState = GatewayService.iridiumSpp?.state?.collectAsState()?.value ?: IridiumSpp.State.Disconnected
-    val signal = GatewayService.iridiumSpp?.signal?.collectAsState()?.value ?: 0
-    val hubState = GatewayService.hubReporter?.state?.collectAsState()?.value
+    val meshState = GatewayService.meshtasticBle?.state.collectOrNull()?.value ?: MeshtasticBle.State.Disconnected
+    val sppState = GatewayService.iridiumSpp?.state.collectOrNull()?.value ?: IridiumSpp.State.Disconnected
+    val signal = GatewayService.iridiumSpp?.signal.collectOrNull()?.value ?: 0
+    val hubState = GatewayService.hubReporter?.state.collectOrNull()?.value
     val smsAllowed = ContextCompat.checkSelfPermission(context, Manifest.permission.SEND_SMS) == PackageManager.PERMISSION_GRANTED
 
     Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {

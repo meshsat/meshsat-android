@@ -93,6 +93,7 @@ import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import net.meshsat.android.ui.components.collectOrNull
 
 @Composable
 fun DashboardScreen(navigate: (String) -> Unit = {}) {
@@ -100,12 +101,12 @@ fun DashboardScreen(navigate: (String) -> Unit = {}) {
     val db = AppDatabase.getInstance(context)
 
     // --- Transport states ---
-    val meshState = GatewayService.meshtasticBle?.state?.collectAsState()
-    val iridiumState = GatewayService.iridiumSpp?.state?.collectAsState()
-    val iridiumSignal = GatewayService.iridiumSpp?.signal?.collectAsState()
-    val modemInfo = GatewayService.iridiumSpp?.modemInfo?.collectAsState()
-    val meshRssi = GatewayService.meshtasticBle?.rssi?.collectAsState()
-    val meshNodes = GatewayService.meshtasticBle?.nodes?.collectAsState()
+    val meshState = GatewayService.meshtasticBle?.state.collectOrNull()
+    val iridiumState = GatewayService.iridiumSpp?.state.collectOrNull()
+    val iridiumSignal = GatewayService.iridiumSpp?.signal.collectOrNull()
+    val modemInfo = GatewayService.iridiumSpp?.modemInfo.collectOrNull()
+    val meshRssi = GatewayService.meshtasticBle?.rssi.collectOrNull()
+    val meshNodes = GatewayService.meshtasticBle?.nodes.collectOrNull()
 
     val meshConnected = meshState?.value == MeshtasticBle.State.Connected
     val meshConnecting = meshState?.value == MeshtasticBle.State.Connecting

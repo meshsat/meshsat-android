@@ -30,7 +30,7 @@ import net.meshsat.android.ui.theme.MeshSatTextMuted
 @Composable
 fun CheckMailboxButton(modifier: Modifier = Modifier) {
     val check by GatewayService.mailbox.collectAsState()
-    val modemState = GatewayService.iridiumSpp?.state?.collectAsState()?.value ?: IridiumSpp.State.Disconnected
+    val modemState = GatewayService.iridiumSpp?.state.collectOrNull()?.value ?: IridiumSpp.State.Disconnected
     var confirming by remember { mutableStateOf(false) }
 
     Column(modifier = modifier) {

@@ -68,6 +68,7 @@ import net.meshsat.android.ui.theme.MeshSatTextPrimary
 import net.meshsat.android.ui.theme.MeshSatTextSecondary
 import kotlinx.coroutines.delay
 import net.meshsat.android.ui.theme.PlexMono
+import net.meshsat.android.ui.components.collectOrNull
 
 // ═══════════════════════════════════════════════════════════════════════
 // Links: each way the phone sends and receives, its rules, groups and health
@@ -89,9 +90,8 @@ private const val GROUPS_REFRESH_MS = 10_000L
 fun InterfacesScreen() {
     val context = LocalContext.current
 
-    val ifaceStates by GatewayService.ifaceManager?.states
-        ?.collectAsState()
-        ?: remember { mutableStateOf<Map<String, InterfaceStatus>>(emptyMap()) }
+    val ifaceStates: Map<String, InterfaceStatus> =
+        GatewayService.ifaceManager?.states.collectOrNull()?.value ?: emptyMap()
 
     var activeTab by remember { mutableStateOf(IfaceTab.Interfaces) }
     var confirmOff by remember { mutableStateOf<String?>(null) }
