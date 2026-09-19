@@ -33,8 +33,11 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Done
+import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -674,6 +677,30 @@ private fun sendMessage(
     }
 }
 
+/** The delivery badge of a forwarded message: an Iridium send shows where it is in the queue. */
+private fun deliveryLabel(forwardedTo: String): String = when (forwardedTo) {
+    GatewayService.IRIDIUM_QUEUED -> "QUEUED"
+    "iridium:sbd" -> "SENT"
+    "iridium:failed" -> "FAILED"
+    else -> "FWD"
+}
+
+/**
+ * The delivery mark on a message the phone sent, as chat apps show it: a clock while an Iridium
+ * message waits for the modem, one check once it has left the phone (for Iridium: the satellite
+ * network accepted it), a red mark when it failed. There is no second check: nothing confirms
+ * delivery at the far end yet.
+ */
+@Composable
+private fun DeliveryMark(forwardedTo: String) {
+    val (icon, tint, label) = when (forwardedTo) {
+        GatewayService.IRIDIUM_QUEUED -> Triple(Icons.Default.Schedule, MeshSatTextMuted, "Queued")
+        "iridium:failed" -> Triple(Icons.Default.ErrorOutline, MeshSatRed, "Failed")
+        else -> Triple(Icons.Default.Done, MeshSatTeal, "Sent")
+    }
+    Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(14.dp))
+}
+
 /**
  * Chat bubble — decrypts on-the-fly using the active key.
  * If key is deleted/missing, shows ciphertext for encrypted messages.
@@ -756,7 +783,7 @@ private fun ChatBubble(msg: Message, activeKey: String?) {
                             modifier = Modifier.size(12.dp),
                         )
                     }
-                    if (msg.forwarded) {
+                    if (msg.forwarded && !isSelf) {
                         Text(
                             text = "FWD",
                             style = MaterialTheme.typography.labelSmall,
@@ -769,6 +796,7 @@ private fun ChatBubble(msg: Message, activeKey: String?) {
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(text = timeStr, style = MaterialTheme.typography.labelSmall, color = MeshSatTextMuted)
+                    if (isSelf) DeliveryMark(msg.forwardedTo)
                     IconButton(
                         onClick = {
                             val copyText = if (msg.encrypted && msg.rawText.isNotEmpty()) msg.rawText else msg.text
@@ -988,12 +1016,7 @@ private fun MessageCard(msg: Message) {
                 }
                 if (msg.forwarded) {
                     Text(
-                        text = when (msg.forwardedTo) {
-                            GatewayService.IRIDIUM_QUEUED -> "QUEUED"
-                            "iridium:sbd" -> "SENT"
-                            "iridium:failed" -> "FAILED"
-                            else -> "FWD"
-                        },
+                        text = deliveryLabel(msg.forwardedTo),
                         style = MaterialTheme.typography.bodySmall,
                         color = MeshSatTextMuted,
                         modifier = Modifier
