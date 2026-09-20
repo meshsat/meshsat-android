@@ -281,6 +281,65 @@ create-gitlab-release:
           link_type: "package"
 
 # =============================================================================
+# Deploy to the owner's phone (manual, tag pipelines only)
+# =============================================================================
+# The runner cannot reach the phone itself: adb needs a key the phone has
+# authorised, and that prompt cannot be answered headlessly. The Android SDK VM
+# already holds an authorised adb key and a standing connection, so the deploy
+# goes through it. Manual and allow_failure, so a phone that is off or on another
+# network never blocks a release.
+#
+# PHONE_ADB_TARGET is a CI variable because Android picks a new wireless-debugging
+# port whenever it is toggled; the job falls back to whatever adb already sees.
+deploy-to-phone:
+  stage: release
+  image: alpine:latest
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v/'
+      when: manual
+      allow_failure: true
+  needs:
+    - job: build-release
+      artifacts: true
+  variables:
+    DEPLOY_SSH_HOST: "nllei01androidsdk01"
+    DEPLOY_SSH_USER: "ansible"
+    PHONE_ADB_TARGET: "192.168.181.230:37117"
+  script:
+    - apk add --no-cache openssh-client
+    - |
+      set -e
+      if [ -z "${CI_DEPLOY_SSH_KEY:-}" ]; then
+        echo "CI_DEPLOY_SSH_KEY is not set. It is a protected variable, so the tag must be protected (v* is)."
+        exit 1
+      fi
+      mkdir -p ~/.ssh && chmod 700 ~/.ssh
+      printf '%s\n' "$CI_DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519
+      chmod 600 ~/.ssh/id_ed25519
+      ssh-keyscan -H "$DEPLOY_SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+      APK=$(ls meshsat-android-*-arm64-v8a-*.apk | head -1)
+      if [ -z "$APK" ]; then echo "no arm64-v8a APK in the build artifacts"; exit 1; fi
+      echo "Deploying ${APK} through ${DEPLOY_SSH_HOST}"
+      scp -q -o IdentitiesOnly=yes "$APK" "${DEPLOY_SSH_USER}@${DEPLOY_SSH_HOST}:/tmp/${APK}"
+
+      cat > /tmp/remote.sh <<REMOTE
+      set -e
+      ADB=/opt/android-sdk/platform-tools/adb
+      \$ADB connect "${PHONE_ADB_TARGET}" >/dev/null 2>&1 || true
+      T=\$(\$ADB devices | awk '/device\$/ && \$1 != "List" {print \$1; exit}')
+      if [ -z "\$T" ]; then
+        echo "No adb device. Wireless debugging off, phone on another network, or the port changed from ${PHONE_ADB_TARGET}."
+        exit 1
+      fi
+      echo "Installing on \$T"
+      \$ADB -s "\$T" install -r "/tmp/${APK}"
+      \$ADB -s "\$T" shell dumpsys package net.meshsat.android | grep -E "versionName|versionCode=" | head -2
+      rm -f "/tmp/${APK}"
+      REMOTE
+      ssh -o IdentitiesOnly=yes "${DEPLOY_SSH_USER}@${DEPLOY_SSH_HOST}" 'bash -s' < /tmp/remote.sh
+
+# =============================================================================
 # Create GitHub Release with APK + AAB assets (tag push only)
 # =============================================================================
 create-github-release:
