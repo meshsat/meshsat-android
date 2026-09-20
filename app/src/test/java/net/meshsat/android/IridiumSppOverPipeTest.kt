@@ -43,8 +43,14 @@ class IridiumSppOverPipeTest {
 
         override val input = PipeInputStream()
 
+        /** A wedged BLE pipe: attached, answering every write with a failure (MESHSAT-1270). */
+        @Volatile var writesFail = false
+
         override val output: OutputStream = object : OutputStream() {
-            override fun write(b: Int) = onByte(b.toByte())
+            override fun write(b: Int) {
+                if (writesFail) throw java.io.IOException("Iridium pipe write failed")
+                onByte(b.toByte())
+            }
         }
 
         override fun setReceiver(receiver: ((ByteArray) -> Unit)?) {
@@ -156,6 +162,42 @@ class IridiumSppOverPipeTest {
         // The probe reads the modem's last signal reading (AT+CSQF), which answers at once.
         assertTrue(modem.commands.contains("AT+CSQF"))
         assertEquals(modem.csqf, spp.signal.value)
+    }
+
+    @Test
+    fun `a pipe that stops taking writes takes the driver out of Connected`() {
+        val modem = FakeModem()
+        val spp = attached(modem)
+        modem.writesFail = true
+
+        fastClock {
+            runBlocking { repeat(IridiumSpp.LINK_BROKEN_WRITES) { spp.pollSignal() } }
+        }
+
+        // Connected would keep iridium_0 online and Home quoting the next satellite pass
+        // while nothing could leave the phone (MESHSAT-1270).
+        assertEquals(IridiumSpp.State.Disconnected, spp.state.value)
+        assertTrue(spp.linkBroken.value)
+    }
+
+    @Test
+    fun `a write that lands clears a failure before it counts as broken`() {
+        val modem = FakeModem()
+        val spp = attached(modem)
+
+        fastClock {
+            runBlocking {
+                repeat(IridiumSpp.LINK_BROKEN_WRITES - 1) {
+                    modem.writesFail = true
+                    spp.pollSignal()
+                    modem.writesFail = false
+                    spp.pollSignal()
+                }
+            }
+        }
+
+        assertEquals(IridiumSpp.State.Connected, spp.state.value)
+        assertFalse(spp.linkBroken.value)
     }
 
     @Test

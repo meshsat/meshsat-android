@@ -66,6 +66,9 @@ class IridiumSpp(private val clock: () -> Long = System::currentTimeMillis) {
         const val MO_MAX_SIZE = 340
         const val MT_MAX_SIZE = 270
         /** How often a modem that is still powering up is asked again. */
+        /** Failed writes in a row before the link counts as broken (MESHSAT-1270). */
+        const val LINK_BROKEN_WRITES = 3
+
         const val WAKE_RETRY_MS = 2_000L
         /** Silent this long, the modem is reported as not answering; the checks go on, slower. */
         const val WAKE_GRACE_MS = 60_000L
@@ -119,6 +122,26 @@ class IridiumSpp(private val clock: () -> Long = System::currentTimeMillis) {
 
     private val _state = MutableStateFlow(State.Disconnected)
     val state: StateFlow<State> = _state
+
+    /**
+     * Writes to the link that failed in a row. A wedged BLE pipe answers every write with a
+     * failure and stays attached, so before MESHSAT-1270 nothing noticed: the driver held
+     * Connected, iridium_0 stayed online, and Home quoted the next satellite pass while
+     * nothing could leave the phone for thirteen minutes. Three in a row is about fifteen
+     * seconds at the signal poll's cadence, short enough to matter and long enough to ride
+     * out a single dropped notification.
+     */
+    @Volatile private var writeFailures = 0
+
+    private val _linkBroken = MutableStateFlow(false)
+
+    /** The link is attached and will not carry bytes. Cleared by the first write that lands. */
+    val linkBroken: StateFlow<Boolean> = _linkBroken
+
+    private val _linkFaults = MutableSharedFlow<Unit>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+
+    /** One per crossing, so the service can re-establish the link and arm again. */
+    val linkFaults: SharedFlow<Unit> = _linkFaults
 
     private val _signal = MutableStateFlow(0)
     val signal: StateFlow<Int> = _signal
@@ -187,6 +210,9 @@ class IridiumSpp(private val clock: () -> Long = System::currentTimeMillis) {
     fun attach(newLink: ModemLink) {
         detach()
         link = newLink
+        // A fresh link starts with a clean count; linkBroken stays until a write lands, so
+        // the screens keep saying the modem is out of reach while it is (MESHSAT-1270).
+        writeFailures = 0
         val watcher = LineWatcher("SBDRING") { _ringAlerts.tryEmit(Unit) }
         newLink.setReceiver { watcher.feed(it) }
         _state.value = State.Connecting
@@ -244,8 +270,14 @@ class IridiumSpp(private val clock: () -> Long = System::currentTimeMillis) {
         // Drain anything pending; an unsolicited SBDRING in it was already seen by the watcher.
         while (input.available() > 0) input.read()
 
-        os.write("$command\r".toByteArray(Charsets.US_ASCII))
-        os.flush()
+        try {
+            os.write("$command\r".toByteArray(Charsets.US_ASCII))
+            os.flush()
+        } catch (e: IOException) {
+            noteWriteFailed()
+            throw e
+        }
+        noteWriteLanded()
 
         // Read response until OK, ERROR, READY or timeout. The modem may echo the command.
         val buf = StringBuilder()
@@ -267,6 +299,26 @@ class IridiumSpp(private val clock: () -> Long = System::currentTimeMillis) {
         }
 
         return buf.toString().trim()
+    }
+
+    /**
+     * A write did not reach the node. Past [LINK_BROKEN_WRITES] in a row the link counts as
+     * broken: the driver leaves Connected, so every public method gates itself and iridium_0
+     * goes offline, and one fault goes out for the service to act on (MESHSAT-1270).
+     */
+    private fun noteWriteFailed() {
+        writeFailures++
+        if (writeFailures < LINK_BROKEN_WRITES) return
+        writeFailures = 0
+        _linkBroken.value = true
+        _state.value = State.Disconnected
+        _linkFaults.tryEmit(Unit)
+    }
+
+    /** A write reached the node, so whatever was wrong with the link is over. */
+    private fun noteWriteLanded() {
+        writeFailures = 0
+        _linkBroken.value = false
     }
 
     /** The first line of [resp] that is neither the echoed command nor OK. */

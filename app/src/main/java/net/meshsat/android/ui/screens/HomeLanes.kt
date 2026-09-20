@@ -160,6 +160,11 @@ fun HomeLanes(navigate: (String) -> Unit) {
     }
     val satQueueLine = if (iridiumQueue > 0) "${Words.count(iridiumQueue, "message")} waiting to go out. " else ""
     val (satState, satDetail) = when {
+        // Before MESHSAT-1270 a pipe that took no writes still read as Working here, under a
+        // line about the satellite overhead. What a person needs to know first is that the
+        // phone cannot reach the radio at all; the satellite is not the problem.
+        spp?.linkBroken?.value == true ->
+            LaneState.Failed to (satQueueLine + "The phone cannot reach the node's modem. Getting the link back.").trim()
         sppState == IridiumSpp.State.Connected ->
             LaneState.Working to (satQueueLine + (passLine ?: "Modem ready.")).trim()
         sppState == IridiumSpp.State.Connecting && silent ->
