@@ -1,6 +1,8 @@
 package net.meshsat.android.api
 
 import android.util.Log
+import com.geeksville.mesh.ChannelProtos
+import com.google.protobuf.ByteString
 import net.meshsat.android.channel.ChannelRegistry
 import net.meshsat.android.config.ConfigManager
 import net.meshsat.android.data.AuditLogDao
@@ -97,8 +99,14 @@ class LocalApiServer(
             // Iridium 9603 on the MeshSat node (MESHSAT-1236); both are free, no satellite session
             method == Method.GET && uri == "/api/iridium/status" -> handleIridiumStatus()
             method == Method.POST && uri == "/api/iridium/loopback" -> handleIridiumLoopback(session)
+            // A drill: the live pipe stops taking writes, to watch the app recover (MESHSAT-1270)
+            method == Method.POST && uri == "/api/iridium/drill/dead-pipe" -> handleIridiumDeadPipeDrill()
             // Billed: one satellite session, like the Check Mailbox button (MESHSAT-400)
             method == Method.POST && uri == "/api/iridium/mailbox" -> handleIridiumMailbox()
+
+            // The node's whole configuration, read and written in one go (MESHSAT-1285)
+            method == Method.GET && uri == "/api/mesh/config" -> handleMeshConfig()
+            method == Method.POST && uri == "/api/mesh/profile" -> handleMeshProfile(session)
 
             // System
             method == Method.POST && uri == "/api/system/restart" -> handleRestart()
@@ -402,7 +410,20 @@ class LocalApiServer(
             put("imei", spp.modemInfo.value.imei)
             put("signal", spp.signal.value)
             put("sbdix_hold_ms", spp.sbdixHoldRemainingMs())
+            put("link_broken", spp.linkBroken.value)
         })
+    }
+
+    /**
+     * Make the pipe to the node refuse every write until the link is rebuilt. Free: nothing
+     * reaches the modem. The app is expected to notice within three writes, take iridium_0
+     * offline, reconnect to the node and claim the modem again, without a person.
+     */
+    private fun handleIridiumDeadPipeDrill(): Response {
+        val pipe = net.meshsat.android.service.GatewayService.meshtasticBle?.iridiumPipe?.value
+            ?: return jsonError(Response.Status.SERVICE_UNAVAILABLE, "no pipe to the node")
+        pipe.refuseWrites = true
+        return jsonOk(JSONObject().put("refusing_writes", true))
     }
 
     /** SBDWB -> SBDTC -> SBDRB through the node's pipe; ?size=1..270, default 100. */
@@ -417,6 +438,164 @@ class LocalApiServer(
             put("bytes", size)
             put("ms", System.currentTimeMillis() - started)
         })
+    }
+
+    private fun nodeSections(ble: net.meshsat.android.ble.MeshtasticBle): net.meshsat.android.ble.NodeSections {
+        val primary = ble.channels.value.firstOrNull { it.index == 0 }?.let { ch ->
+            ChannelProtos.Channel.newBuilder()
+                .setIndex(0)
+                .setRoleValue(ch.role)
+                .setSettings(
+                    ch.settings ?: ChannelProtos.ChannelSettings.newBuilder()
+                        .setName(ch.name)
+                        .setPsk(ByteString.copyFrom(ch.psk))
+                        .build(),
+                )
+                .build()
+        }
+        return net.meshsat.android.ble.NodeSections(
+            device = ble.deviceConfig.value,
+            lora = ble.loraConfig.value,
+            position = ble.positionConfig.value,
+            power = ble.powerConfig.value,
+            bluetooth = ble.bluetoothConfig.value,
+            network = ble.networkConfig.value,
+            primaryChannel = primary,
+        )
+    }
+
+    /** Everything the node has reported about itself. A channel key is shown as a fingerprint only. */
+    private fun handleMeshConfig(): Response {
+        val ble = net.meshsat.android.service.GatewayService.meshtasticBle
+            ?: return jsonError(Response.Status.SERVICE_UNAVAILABLE, "mesh not available")
+        val now = nodeSections(ble)
+        return jsonOk(JSONObject().apply {
+            put("connected", ble.state.value == net.meshsat.android.ble.MeshtasticBle.State.Connected)
+            put("long_name", ble.ownerName.value)
+            put("short_name", ble.ownerShortName.value)
+            put("firmware", ble.deviceMetadata.value?.firmwareVersion ?: "")
+            now.device?.let {
+                put("device", JSONObject()
+                    .put("role", it.role.name)
+                    .put("rebroadcast_mode", it.rebroadcastMode.name)
+                    .put("node_info_broadcast_secs", it.nodeInfoBroadcastSecs))
+            }
+            now.lora?.let {
+                put("lora", JSONObject()
+                    .put("region", it.region.name)
+                    .put("use_preset", it.usePreset)
+                    .put("preset", it.modemPreset.name)
+                    .put("tx_power", it.txPower)
+                    .put("tx_enabled", it.txEnabled)
+                    .put("hop_limit", it.hopLimit)
+                    .put("rx_boosted_gain", it.sx126XRxBoostedGain)
+                    .put("ignore_mqtt", it.ignoreMqtt)
+                    .put("channel_num", it.channelNum)
+                    .put("override_frequency", it.overrideFrequency.toDouble()))
+            }
+            now.position?.let {
+                put("position", JSONObject()
+                    .put("gps_mode", it.gpsMode.name)
+                    .put("fixed_position", it.fixedPosition)
+                    .put("broadcast_secs", it.positionBroadcastSecs)
+                    .put("smart", it.positionBroadcastSmartEnabled))
+            }
+            now.power?.let {
+                put("power", JSONObject()
+                    .put("power_saving", it.isPowerSaving)
+                    .put("sds_secs", it.sdsSecs.toLong() and 0xFFFFFFFFL)
+                    .put("ls_secs", it.lsSecs))
+            }
+            now.bluetooth?.let {
+                put("bluetooth", JSONObject()
+                    .put("enabled", it.enabled)
+                    .put("mode", it.mode.name)
+                    .put("fixed_pin_set", it.fixedPin != 0))
+            }
+            now.network?.let {
+                put("network", JSONObject()
+                    .put("wifi_enabled", it.wifiEnabled)
+                    .put("ntp_server", it.ntpServer))
+            }
+            put("channels", JSONArray().apply {
+                ble.channels.value.forEach { ch ->
+                    put(JSONObject()
+                        .put("index", ch.index)
+                        .put("role", ch.role)
+                        .put("name", ch.name)
+                        .put("key", net.meshsat.android.ble.NodeProfiles.keyFingerprint(ch.psk))
+                        .put("uplink", ch.uplinkEnabled)
+                        .put("downlink", ch.downlinkEnabled)
+                        .put("position_precision", ch.settings?.moduleSettings?.positionPrecision ?: -1))
+                }
+            })
+        })
+    }
+
+    /**
+     * Apply a node profile: one edit, one save, one restart of the node. Fields left out of the
+     * body are left alone on the node. The channel key is taken as base64 and never echoed.
+     */
+    private fun handleMeshProfile(session: IHTTPSession): Response {
+        val ble = net.meshsat.android.service.GatewayService.meshtasticBle
+            ?: return jsonError(Response.Status.SERVICE_UNAVAILABLE, "mesh not available")
+        val me = ble.myInfo.value?.myNodeNum ?: 0L
+        if (ble.state.value != net.meshsat.android.ble.MeshtasticBle.State.Connected || me == 0L) {
+            return jsonError(Response.Status.SERVICE_UNAVAILABLE, "not connected to a node")
+        }
+        val body = try {
+            JSONObject(readBody(session))
+        } catch (e: Exception) {
+            return jsonError(Response.Status.BAD_REQUEST, "body is not JSON")
+        }
+        fun str(k: String) = if (body.has(k)) body.getString(k) else null
+        fun int(k: String) = if (body.has(k)) body.getInt(k) else null
+        fun bool(k: String) = if (body.has(k)) body.getBoolean(k) else null
+        val psk = try {
+            str("channel_psk_base64")?.let { java.util.Base64.getDecoder().decode(it) }
+        } catch (e: IllegalArgumentException) {
+            return jsonError(Response.Status.BAD_REQUEST, "channel_psk_base64 is not base64")
+        }
+        val profile = net.meshsat.android.ble.NodeProfile(
+            longName = str("long_name"),
+            shortName = str("short_name"),
+            role = str("role"),
+            nodeInfoBroadcastSecs = int("node_info_broadcast_secs"),
+            region = str("region"),
+            preset = str("preset"),
+            txPower = int("tx_power"),
+            txEnabled = bool("tx_enabled"),
+            hopLimit = int("hop_limit"),
+            rxBoostedGain = bool("rx_boosted_gain"),
+            ignoreMqtt = bool("ignore_mqtt"),
+            channelName = str("channel_name"),
+            channelPsk = psk,
+            channelUplink = bool("channel_uplink"),
+            channelDownlink = bool("channel_downlink"),
+            channelPositionPrecision = int("channel_position_precision"),
+            gpsMode = str("gps_mode"),
+            positionBroadcastSecs = int("position_broadcast_secs"),
+            positionSmart = bool("position_smart"),
+            powerSaving = bool("power_saving"),
+            sdsSecs = if (body.has("sds_secs")) body.getLong("sds_secs") else null,
+            bluetoothEnabled = bool("bluetooth_enabled"),
+            bluetoothFixedPin = int("bluetooth_fixed_pin"),
+            ntpServer = str("ntp_server"),
+        )
+        return when (val plan = net.meshsat.android.ble.NodeProfiles.plan(nodeSections(ble), profile)) {
+            is net.meshsat.android.ble.NodeProfiles.Plan.Refused ->
+                jsonError(Response.Status.BAD_REQUEST, plan.reason)
+            is net.meshsat.android.ble.NodeProfiles.Plan.Ready -> {
+                plan.messages.forEach {
+                    ble.sendToRadio(net.meshsat.android.ble.MeshtasticProtoAdapter.buildAdmin(me, it))
+                }
+                android.util.Log.i("MeshSat", "Node profile sent: ${plan.sections.joinToString()}")
+                jsonOk(JSONObject()
+                    .put("sent", JSONArray(plan.sections))
+                    .put("messages", plan.messages.size)
+                    .put("note", "The node saves and restarts; read /api/mesh/config after it is back."))
+            }
+        }
     }
 
     /** Start a mailbox check and wait for its outcome, up to two minutes. */

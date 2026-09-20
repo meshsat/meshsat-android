@@ -649,6 +649,10 @@ object MeshtasticProtoAdapter {
         return wrapAdminToRadio(myNodeNum, myNodeNum, admin)
     }
 
+    /** Any admin message, addressed to our own node (MESHSAT-1285). */
+    fun buildAdmin(myNodeNum: Long, admin: AdminProtos.AdminMessage): ByteArray =
+        wrapAdminToRadio(myNodeNum, myNodeNum, admin)
+
     /** Build a ToRadio admin message to begin editing settings. */
     fun buildAdminBeginEditSettings(myNodeNum: Long): ByteArray {
         val admin = AdminProtos.AdminMessage.newBuilder()
