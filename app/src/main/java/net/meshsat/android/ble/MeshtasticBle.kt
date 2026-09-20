@@ -16,6 +16,7 @@ import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
 import android.content.Context
 import android.os.ParcelUuid
+import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -49,6 +50,8 @@ class MeshtasticBle(private val context: Context) {
         // What Meshtastic firmware asks for; Android caps the request at 517.
         private const val MAX_MTU = 517
         private const val ATT_HEADER_BYTES = 3
+        private const val TAG = "MeshtasticBle"
+        private const val FORCE_RECONNECT_PAUSE_MS = 1_000L
     }
 
     enum class State { Disconnected, Scanning, Connecting, Connected }
@@ -291,6 +294,12 @@ class MeshtasticBle(private val context: Context) {
     // --- BLE Connect ---
 
     fun connect(device: BluetoothDevice) {
+        // With Bluetooth switched off there is nothing to connect with, and saying "Connecting"
+        // would stay on the screen for ever (MESHSAT-615). Off is a state, not an error.
+        if (adapter?.isEnabled != true) {
+            _state.value = State.Disconnected
+            return
+        }
         stopScan()
         _state.value = State.Connecting
         gatt = device.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
@@ -326,6 +335,50 @@ class MeshtasticBle(private val context: Context) {
             connect(addr)
         } else {
             scope.launch { _error.emit("No previous BLE address for reconnect") }
+        }
+    }
+
+    /**
+     * Drop the link and build it again, even though Android still calls it connected
+     * (MESHSAT-1270). [reconnect] is a no-op while a client to the same node exists, which is
+     * exactly the wedge this is for: attached, and taking no writes. The first version of the
+     * recovery called [reconnect] and so did nothing at all.
+     */
+    fun forceReconnect() {
+        val addr = lastAddress ?: return
+        disconnect()
+        scope.launch {
+            // Android wants a moment between closing a client and opening the next.
+            delay(FORCE_RECONNECT_PAUSE_MS)
+            connect(addr)
+        }
+    }
+
+    /**
+     * Bluetooth was switched off. Android tears the link down without ever calling
+     * onConnectionStateChange, so the client object stays, dead, and every later [connect] to the
+     * node is refused as a duplicate: the app said the node was connected for as long as it ran
+     * (found 21 Sep 2026 by switching Bluetooth off to test the banner, MESHSAT-615).
+     */
+    fun onBluetoothOff() {
+        if (gatt == null && _state.value == State.Disconnected) return
+        Log.i(TAG, "Bluetooth went off; dropping the node link")
+        try {
+            gatt?.close()
+        } catch (e: Exception) {
+            // The Bluetooth service is already gone; there is nothing left to close.
+        }
+        gatt = null
+        teardown()
+    }
+
+    /** Bluetooth is back: go and get the node again. */
+    fun onBluetoothOn() {
+        if (lastAddress == null) return
+        Log.i(TAG, "Bluetooth is back; reconnecting to the node")
+        scope.launch {
+            delay(FORCE_RECONNECT_PAUSE_MS)
+            reconnect()
         }
     }
 
