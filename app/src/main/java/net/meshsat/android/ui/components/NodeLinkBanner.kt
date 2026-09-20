@@ -23,7 +23,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import net.meshsat.android.ble.MeshtasticBle
 import net.meshsat.android.data.SettingsRepository
-import net.meshsat.android.engine.InterfaceState
 import net.meshsat.android.service.GatewayService
 import net.meshsat.android.sos.SosController
 import net.meshsat.android.ui.theme.MeshSatAmber
@@ -70,12 +69,23 @@ fun NodeLinkBanner(onOpen: () -> Unit) {
     val meshUp = ble?.state.collectOrNull()?.value == MeshtasticBle.State.Connected
     val modemUnreachable = spp?.linkBroken.collectOrNull()?.value == true
 
-    if (meshUp && !modemUnreachable) return
+    val down = !meshUp || modemUnreachable
 
-    val since = lastGood(if (meshUp) "iridium_0" else "mesh_0")
+    // When this phone first saw the link go, kept here rather than read from InterfaceManager:
+    // its lastOnline is the moment a link came *up*, and using it made the banner say "since
+    // 23:16" about a node that had dropped twenty seconds earlier. Caught by taking the node
+    // away and reading the screen, which is what this issue asked for (MESHSAT-615).
+    var downSince by remember { mutableStateOf<Long?>(null) }
+    LaunchedEffect(down) {
+        downSince = if (down) System.currentTimeMillis() else null
+    }
+
+    if (!down) return
+
+    val since = downSince
     val what = if (meshUp) "the node's modem" else "your MeshSat node"
     val text = buildString {
-        append("No ")
+        append("Cannot reach ")
         append(what)
         if (since != null) {
             append(" since ")
@@ -98,14 +108,4 @@ fun NodeLinkBanner(onOpen: () -> Unit) {
     }
 }
 
-/**
- * When [interfaceId] was last up, from the manager that tracks it. Null while it has never been
- * up in this run, in which case the banner simply does not name a time: "since" a moment that
- * never happened would be a lie, and an invented one at that.
- */
-private fun lastGood(interfaceId: String): Long? {
-    val status = GatewayService.ifaceManager?.getAllStatus()?.firstOrNull { it.id == interfaceId }
-        ?: return null
-    if (status.state == InterfaceState.Disabled) return null
-    return status.lastOnline.takeIf { it > 0 }
-}
+
