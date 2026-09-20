@@ -1,0 +1,1 @@
+A test could fail at random about once in 256 runs, which stopped a release from being built. The second of the two network-coding implementations had the same fault as the first.
