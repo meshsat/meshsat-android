@@ -1,0 +1,1 @@
+A much smaller download: there is now an APK for each phone processor instead of one holding all four, and the libraries inside it are compressed. About 46 MB instead of 116 MB. The app itself is unchanged.
