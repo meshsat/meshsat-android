@@ -1,0 +1,1 @@
+The Hub connection now shows as online when it is, so the health figure and the interface list agree with what is working.
