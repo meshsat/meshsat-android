@@ -2152,8 +2152,8 @@ class GatewayService : Service() {
                 val failover = FailoverResolver(db.failoverGroupDao(), statusProvider)
 
                 // Delivery callback: routes to the correct transport
-                val callback = Dispatcher.DeliveryCallback { interfaceId, payload, textPreview, recipient, deliveryId ->
-                    deliverToTransport(interfaceId, payload, textPreview, recipient, deliveryId)
+                val callback = Dispatcher.DeliveryCallback { interfaceId, payload, textPreview, recipient, deliveryId, sourceBearer ->
+                    deliverToTransport(interfaceId, payload, textPreview, recipient, deliveryId, sourceBearer)
                 }
 
                 // Create and start dispatcher (Phase C: with sequence tracker)
@@ -2234,7 +2234,22 @@ class GatewayService : Service() {
      * Delivery callback: sends a message payload to the named interface.
      * Returns null on success, error message on failure.
      */
-    private suspend fun deliverToTransport(interfaceId: String, payload: ByteArray, textPreview: String, recipient: String = "", deliveryId: Long = 0): String? {
+    /**
+     * The Hub's name for the link a message arrived on (MESHSAT-1274). The Hub stores this
+     * verbatim in `messages.channel` and its routing engine reads it as the source of the
+     * message, so the vocabulary is the Hub's, not this app's interface ids. An empty bearer
+     * means the message was written here and did not arrive on anything.
+     */
+    private fun hubChannelOf(sourceBearer: String): String = when {
+        sourceBearer.startsWith("sms") -> "sms"
+        sourceBearer.startsWith("iridium9704") -> "iridium_imt"
+        sourceBearer.startsWith("iridium") -> "iridium"
+        sourceBearer.startsWith("mesh") -> "mesh"
+        sourceBearer.startsWith("aprs") -> "aprs"
+        else -> "mqtt"
+    }
+
+    private suspend fun deliverToTransport(interfaceId: String, payload: ByteArray, textPreview: String, recipient: String = "", deliveryId: Long = 0, sourceBearer: String = ""): String? {
         return try {
             when {
                 interfaceId.startsWith("mesh") -> {
@@ -2262,7 +2277,13 @@ class GatewayService : Service() {
                     val deviceId = imei.ifBlank { settings.hubBridgeId.first() }
                     if (deviceId.isBlank()) return "no device id for the Hub"
                     val text = if (payload.isNotEmpty()) String(payload, Charsets.UTF_8) else textPreview
-                    if (!hub.publishMessage(deviceId, text, recipient)) return "the Hub did not take the message"
+                    // The bearer it arrived on, not the one it leaves by: the Hub stores this
+                    // verbatim and its routing engine reads it as the source of the message, so
+                    // "mqtt" on a forwarded SMS both lost the provenance and stopped any Hub
+                    // route scoped to sms from firing (MESHSAT-1274).
+                    if (!hub.publishMessage(deviceId, text, recipient, channel = hubChannelOf(sourceBearer))) {
+                        return "the Hub did not take the message"
+                    }
                     db.messageDao().insert(
                         Message(
                             transport = "hub", direction = "tx", sender = "self",

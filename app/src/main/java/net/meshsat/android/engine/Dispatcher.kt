@@ -118,10 +118,19 @@ class Dispatcher(
         /**
          * Send a message to the given interface, to [recipient] when the delivery names one (empty:
          * the interface's own destination). [deliveryId] lets the transport record what the send
-         * learned, such as the satellite session's MOMSN (MESHSAT-1246). Returns null on success,
-         * error message on failure.
+         * learned, such as the satellite session's MOMSN (MESHSAT-1246). [sourceBearer] is the
+         * interface the message arrived on, empty when the user wrote it here, so a link that
+         * passes the message onwards can say where it came from (MESHSAT-1274). Returns null on
+         * success, error message on failure.
          */
-        suspend fun deliver(interfaceId: String, payload: ByteArray, textPreview: String, recipient: String, deliveryId: Long): String?
+        suspend fun deliver(
+            interfaceId: String,
+            payload: ByteArray,
+            textPreview: String,
+            recipient: String,
+            deliveryId: Long,
+            sourceBearer: String,
+        ): String?
     }
 
     // Loop prevention metrics
@@ -431,7 +440,9 @@ class Dispatcher(
             deliveryDao.setStatus(del.id, "sending")
 
             val payload = del.payload ?: del.textPreview.toByteArray()
-            val error = deliveryCallback.deliver(channelId, payload, del.textPreview, del.recipient, del.id)
+            val error = deliveryCallback.deliver(
+                channelId, payload, del.textPreview, del.recipient, del.id, sourceBearerOf(del.visited),
+            )
 
             when {
                 error == null -> {
@@ -635,6 +646,21 @@ class Dispatcher(
             // delivery falls back to the number under Setup.
             val m = Regex("\"to\"\\s*:\\s*\"([^\"]*)\"").find(forwardOptions) ?: return ""
             return m.groupValues[1].trim()
+        }
+
+        /**
+         * The interface a delivery's message arrived on, from the visited list the dispatcher
+         * writes when a rule matches: the source goes in first, then wherever it had already
+         * been. Empty for a message the user wrote on this phone, which has visited nothing.
+         *
+         * Read by hand rather than with org.json, which answers with defaults under JVM tests.
+         */
+        fun sourceBearerOf(visitedJson: String): String {
+            if (visitedJson.isBlank()) return ""
+            // Anchored: the column holds a top-level array, and an unanchored match would
+            // happily read the first string out of any nested one.
+            val m = Regex("^\\s*\\[\\s*\"([^\"]+)\"").find(visitedJson) ?: return ""
+            return m.groupValues[1]
         }
 
         /** The +SBDIX MO status in a satellite delivery's error ("Not sent: status 32, ..."), or null. */
