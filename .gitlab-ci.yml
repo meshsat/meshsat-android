@@ -98,17 +98,34 @@ build-release:
       bash ./gradlew assembleRelease bundleRelease
 
       # ── Collect artifacts ──
-      APK_PATH=$(find app/build/outputs/apk/release -name "*.apk" | head -1)
+      # One APK per processor type plus a universal one; gradle already names each file
+      # meshsat-android-<version>-<abi>-<versionCode>.apk (MESHSAT-1260).
+      cp app/build/outputs/apk/release/meshsat-android-*.apk .
       AAB_PATH=$(find app/build/outputs/bundle/release -name "*.aab" | head -1)
-      APK_NAME="meshsat-android-${VERSION}-release.apk"
       AAB_NAME="meshsat-android-${VERSION}-release.aab"
-      cp "$APK_PATH" "$APK_NAME"
       cp "$AAB_PATH" "$AAB_NAME"
-      echo "APK_NAME=${APK_NAME}" >> build.env
-      echo "AAB_NAME=${AAB_NAME}" >> build.env
-      echo "VERSION=${VERSION}" >> build.env
-      echo "Built: ${APK_NAME} ($(du -h ${APK_NAME} | cut -f1))"
-      echo "Built: ${AAB_NAME} ($(du -h ${AAB_NAME} | cut -f1))"
+
+      APK_UNIVERSAL=$(ls meshsat-android-*-universal-*.apk)
+      APK_ARM64=$(ls meshsat-android-*-arm64-v8a-*.apk)
+      APK_ARM32=$(ls meshsat-android-*-armeabi-v7a-*.apk)
+      APK_X86=$(ls meshsat-android-*-x86-*.apk)
+      APK_X86_64=$(ls meshsat-android-*-x86_64-*.apk)
+      APK_NAMES="$APK_UNIVERSAL $APK_ARM64 $APK_ARM32 $APK_X86 $APK_X86_64"
+
+      {
+        echo "APK_NAMES=${APK_NAMES}"
+        echo "APK_UNIVERSAL=${APK_UNIVERSAL}"
+        echo "APK_ARM64=${APK_ARM64}"
+        echo "APK_ARM32=${APK_ARM32}"
+        echo "APK_X86=${APK_X86}"
+        echo "APK_X86_64=${APK_X86_64}"
+        echo "AAB_NAME=${AAB_NAME}"
+        echo "VERSION=${VERSION}"
+      } >> build.env
+
+      for F in $APK_NAMES "$AAB_NAME"; do
+        echo "Built: ${F} ($(du -h ${F} | cut -f1))"
+      done
 
       # ── Clean up keystore ──
       rm -f /tmp/meshsat-upload.p12
@@ -120,7 +137,7 @@ build-release:
         "${BAO_ADDR}/v1/auth/token/revoke-self" || true
   artifacts:
     paths:
-      - "meshsat-android-*-release.apk"
+      - "meshsat-android-*.apk"
       - "meshsat-android-*-release.aab"
     reports:
       dotenv: build.env
@@ -141,7 +158,7 @@ upload-package:
     - apk add --no-cache curl
     - |
       set -e
-      for FILE in "$APK_NAME" "$AAB_NAME"; do
+      for FILE in $APK_NAMES "$AAB_NAME"; do
         echo "Uploading ${FILE} to GitLab Package Registry..."
         curl --fail \
           --header "JOB-TOKEN: ${CI_JOB_TOKEN}" \
@@ -172,12 +189,31 @@ create-gitlab-release:
 
       ## Download
 
-      - [${APK_NAME}](${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/meshsat-android/${VERSION}/${APK_NAME}) — Signed APK (sideload)
-      - [${AAB_NAME}](${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/meshsat-android/${VERSION}/${AAB_NAME}) — Signed AAB (Play Store)
+      Pick the APK for your phone's processor; nearly every phone since 2016 is arm64-v8a.
+      The universal APK works on all of them and is bigger.
+
+      - [${APK_ARM64}](${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/meshsat-android/${VERSION}/${APK_ARM64}) — arm64-v8a, the usual choice
+      - [${APK_ARM32}](${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/meshsat-android/${VERSION}/${APK_ARM32}) — armeabi-v7a, older 32-bit phones
+      - [${APK_X86}](${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/meshsat-android/${VERSION}/${APK_X86}) — x86, emulators
+      - [${APK_X86_64}](${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/meshsat-android/${VERSION}/${APK_X86_64}) — x86_64, emulators
+      - [${APK_UNIVERSAL}](${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/meshsat-android/${VERSION}/${APK_UNIVERSAL}) — every processor in one file
+      - [${AAB_NAME}](${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/meshsat-android/${VERSION}/${AAB_NAME}) — Signed AAB
     assets:
       links:
-        - name: "${APK_NAME}"
-          url: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/meshsat-android/${VERSION}/${APK_NAME}"
+        - name: "${APK_ARM64}"
+          url: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/meshsat-android/${VERSION}/${APK_ARM64}"
+          link_type: "package"
+        - name: "${APK_ARM32}"
+          url: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/meshsat-android/${VERSION}/${APK_ARM32}"
+          link_type: "package"
+        - name: "${APK_X86}"
+          url: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/meshsat-android/${VERSION}/${APK_X86}"
+          link_type: "package"
+        - name: "${APK_X86_64}"
+          url: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/meshsat-android/${VERSION}/${APK_X86_64}"
+          link_type: "package"
+        - name: "${APK_UNIVERSAL}"
+          url: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/meshsat-android/${VERSION}/${APK_UNIVERSAL}"
           link_type: "package"
         - name: "${AAB_NAME}"
           url: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/meshsat-android/${VERSION}/${AAB_NAME}"
@@ -214,19 +250,19 @@ create-github-release:
 
       ### Download
 
-      Download the APK below and install on your Android device.
-      The AAB is for Play Store distribution.
+      Pick the APK for your phone's processor. Nearly every phone since 2016 is **arm64-v8a**.
+      The **universal** APK runs on all of them and is about 20 MB larger.
+      The AAB is not for sideloading.
 
-      ### Features
-      - Meshtastic BLE radio connection
-      - Iridium 9603N via HC-05 Bluetooth SPP
-      - SMS gateway with AES-256-GCM encryption
-      - Per-conversation encryption keys
-      - Forwarding rules engine (mesh/iridium/SMS)
-      - Node map with phone GPS + mesh positions
-      - 6-hour signal history graphs
-      - SOS emergency broadcast
-      - Push notifications on incoming messages"
+      ### What it does
+      - Meshtastic mesh over Bluetooth LE
+      - Iridium satellite through a MeshSat node's RockBLOCK 9603
+      - SMS through the phone's own SIM, optionally encrypted
+      - APRS through a KISS TNC or APRS-IS
+      - Reticulum transport node relaying between the links
+      - Hub reporting over MQTT with a client certificate
+      - SOS on every route at once, with a check-in timer and zones
+      - Offline map and offline satellite pass prediction"
 
       # Check if release already exists (tag may arrive via mirror before this job)
       EXISTING=$(curl -s \
@@ -255,7 +291,7 @@ create-github-release:
           -H "Authorization: token ${GHCR_TOKEN}" \
           -H "Accept: application/vnd.github+json" \
           "https://api.github.com/repos/${GITHUB_REPO}/releases/${RELEASE_ID}/assets")
-        for ASSET_NAME in "$APK_NAME" "$AAB_NAME"; do
+        for ASSET_NAME in $APK_NAMES "$AAB_NAME"; do
           OLD_ID=$(echo "$ASSETS" | jq -r ".[] | select(.name == \"${ASSET_NAME}\") | .id // empty")
           if [ -n "$OLD_ID" ]; then
             echo "  Deleting old asset: ${ASSET_NAME}..."
@@ -282,23 +318,25 @@ create-github-release:
         echo "  Release created (ID: ${RELEASE_ID})."
       fi
 
-      # Upload APK as release asset
-      echo "Uploading ${APK_NAME} ($(du -h ${APK_NAME} | cut -f1))..."
+      # Upload every APK as a release asset (one per processor type, plus universal)
+      for APK in $APK_NAMES; do
+      echo "Uploading ${APK} ($(du -h ${APK} | cut -f1))..."
       UPLOAD_RESP=$(curl -s -w "\n%{http_code}" \
-        --max-time 300 \
+        --max-time 600 \
         -X POST \
         -H "Authorization: token ${GHCR_TOKEN}" \
         -H "Content-Type: application/vnd.android.package-archive" \
-        "${UPLOAD_URL}?name=${APK_NAME}" \
-        --data-binary "@${APK_NAME}")
+        "${UPLOAD_URL}?name=${APK}" \
+        --data-binary "@${APK}")
 
       HTTP_CODE=$(echo "$UPLOAD_RESP" | tail -1)
       if [ "$HTTP_CODE" = "201" ]; then
-        echo "  APK uploaded successfully."
+        echo "  ${APK} uploaded successfully."
       else
-        echo "  WARN: APK upload returned HTTP ${HTTP_CODE}"
+        echo "  WARN: ${APK} upload returned HTTP ${HTTP_CODE}"
         echo "$UPLOAD_RESP" | sed '$d' | jq . 2>/dev/null || true
       fi
+      done
 
       # Upload AAB as release asset
       echo "Uploading ${AAB_NAME} ($(du -h ${AAB_NAME} | cut -f1))..."

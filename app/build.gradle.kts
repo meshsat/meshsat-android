@@ -1,3 +1,6 @@
+import com.android.build.api.variant.FilterConfiguration
+import com.android.build.api.variant.impl.VariantOutputImpl
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -5,6 +8,18 @@ plugins {
     id("com.google.devtools.ksp")
     id("com.google.protobuf")
 }
+
+// One APK per processor type (MESHSAT-1260). The universal APK is 116 MB, three quarters of it
+// ONNX Runtime built for four of them; one processor type is about half that. Each APK needs its
+// own versionCode, so the base is multiplied by ten and the ABI adds the last digit — the
+// universal APK keeps 0. The file name carries that number, which is how F-Droid's recipe picks
+// the right APK out of the five.
+val baseVersionCode = 76
+val baseVersionName = "2.14.5"
+val abiVersionCodes = mapOf("armeabi-v7a" to 1, "arm64-v8a" to 2, "x86" to 3, "x86_64" to 4)
+
+// Splitting a debug build would make five APKs for every local run, so it happens on release only.
+val splitAbis = gradle.startParameter.taskNames.any { it.contains("Release") || it.contains("release") }
 
 android {
     namespace = "net.meshsat.android"
@@ -14,8 +29,8 @@ android {
         applicationId = "net.meshsat.android"
         minSdk = 26
         targetSdk = 35
-        versionCode = 76
-        versionName = "2.14.5"
+        versionCode = baseVersionCode
+        versionName = baseVersionName
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -66,11 +81,47 @@ android {
         noCompress += listOf("onnx", "bin", "mbtiles")
     }
 
+    // One APK per processor type on release builds (MESHSAT-1260)
+    splits {
+        abi {
+            isEnable = splitAbis
+            reset()
+            include("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
+            isUniversalApk = true
+        }
+    }
+
+    // Compress the native libraries in the APK instead of storing them uncompressed.
+    // Android extracts them at install time, which costs install space but makes the
+    // download markedly smaller — the point of the split (F-Droid MR !49450).
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
+
     // No dependency metadata block in the APK or AAB: AGP encrypts it with a Google key,
     // and F-Droid rejects APKs that carry one (MESHSAT-1258)
     dependenciesInfo {
         includeInApk = false
         includeInBundle = false
+    }
+}
+
+// Give every APK its own versionCode and a file name that carries it, so each one can be
+// released and verified on its own (MESHSAT-1260).
+androidComponents {
+    onVariants { variant ->
+        variant.outputs.forEach { output ->
+            val abi = output.filters
+                .find { it.filterType == FilterConfiguration.FilterType.ABI }
+                ?.identifier
+            val code = baseVersionCode * 10 + (abiVersionCodes[abi] ?: 0)
+            output.versionCode.set(code)
+            (output as? VariantOutputImpl)?.outputFileName?.set(
+                "meshsat-android-$baseVersionName-${abi ?: "universal"}-$code.apk"
+            )
+        }
     }
 }
 
