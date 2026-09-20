@@ -52,7 +52,7 @@ It also works with any plain Meshtastic radio, for the mesh only.
 
 ## Install
 
-1. Download the APK for your phone from the [latest release](https://github.com/meshsat/meshsat-android/releases/latest). There is one per processor: take **arm64-v8a** unless you know otherwise, since nearly every phone since 2016 is that. **armeabi-v7a** is for older 32-bit phones, **x86** and **x86_64** for emulators, and **universal** works on all of them at about 20 MB more. Settings > About phone, or an app like Droid Hardware Info, tells you which one a phone is.
+1. Download the APK for your phone from the [latest release](https://github.com/meshsat/meshsat-android/releases/latest). There is one per processor: take **arm64-v8a** unless you know otherwise, since nearly every phone since 2016 is that. **armeabi-v7a** is for older 32-bit phones, **x86** and **x86_64** for emulators, and **universal** works on all of them. A per-processor download is about 47 MB, the universal one about 67 MB. Settings > About phone, or an app like Droid Hardware Info, tells you which one a phone is.
 2. Let your browser or file manager install unknown apps. Android asks the first time.
 3. Open the APK and tap **Install**. Play Protect may warn about an unknown developer, because the app is not on the Play Store: tap **More details**, then **Install anyway**. The APK is signed, and you can [check the signature](#release-signing) first.
 4. Open MeshSat and allow Bluetooth, location, SMS and notifications. Android needs location for Bluetooth scanning.
