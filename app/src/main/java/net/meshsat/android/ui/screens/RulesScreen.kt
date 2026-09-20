@@ -67,6 +67,7 @@ import kotlinx.coroutines.launch
 import net.meshsat.android.data.AccessRuleEntity
 import net.meshsat.android.data.AppDatabase
 import net.meshsat.android.data.MessageDeliveryEntity
+import net.meshsat.android.engine.InterfaceState
 import net.meshsat.android.service.GatewayService
 import net.meshsat.android.ui.Words
 import net.meshsat.android.ui.theme.MeshSatAmber
@@ -105,11 +106,23 @@ private fun ruleTab(rule: AccessRuleEntity): BridgeTab = when {
     else -> BridgeTab.CrossBridge
 }
 
+/**
+ * The links a rule can name: the ones this phone is set up to use, plus [keep], the one a saved
+ * rule already names, so opening an old rule never blanks its field. A link that is switched
+ * off holds whatever is routed to it for ever, so offering it writes a rule that silently
+ * delivers nothing (MESHSAT-1281).
+ */
+internal fun ruleLinkChoices(all: List<Pair<String, Boolean>>, keep: String): List<String> =
+    all.filter { (id, disabled) -> !disabled || id == keep }.map { it.first }
+
 // Android interface IDs used by the gateway
-private fun getAvailableInterfaces(): List<String> {
+private fun getAvailableInterfaces(keep: String = ""): List<String> {
     val mgr = GatewayService.ifaceManager
     if (mgr != null) {
-        val ids = mgr.getAllStatus().map { it.id }
+        val ids = ruleLinkChoices(
+            mgr.getAllStatus().map { it.id to (it.state == InterfaceState.Disabled) },
+            keep,
+        )
         if (ids.isNotEmpty()) return ids
     }
     return listOf("mesh_0", "iridium_0", "sms_0") // fallback
@@ -827,7 +840,7 @@ private fun AddEditRuleDialog(
                 DropdownField(
                     label = if (isEgress) "When a message leaves by" else "When a message arrives by",
                     value = interfaceId,
-                    options = getAvailableInterfaces(),
+                    options = getAvailableInterfaces(keep = interfaceId),
                     displayMapper = { Words.channel(it) },
                     onSelect = { interfaceId = it },
                 )
@@ -849,7 +862,7 @@ private fun AddEditRuleDialog(
                     DropdownField(
                         label = "Pass it on by",
                         value = forwardTo,
-                        options = getAvailableInterfaces().filter { it != interfaceId },
+                        options = getAvailableInterfaces(keep = forwardTo).filter { it != interfaceId },
                         displayMapper = { Words.channel(it) },
                         isError = targetError,
                         supportingText = if (targetError) "Pick a different link from the one it arrives by." else null,
