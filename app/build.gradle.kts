@@ -14,8 +14,6 @@ plugins {
 // own versionCode, so the base is multiplied by ten and the ABI adds the last digit — the
 // universal APK keeps 0. The file name carries that number, which is how F-Droid's recipe picks
 // the right APK out of the five.
-val baseVersionCode = 77
-val baseVersionName = "2.14.6"
 val abiVersionCodes = mapOf("armeabi-v7a" to 1, "arm64-v8a" to 2, "x86" to 3, "x86_64" to 4)
 
 // Splitting a debug build would make five APKs for every local run, so it happens on release only.
@@ -29,8 +27,10 @@ android {
         applicationId = "net.meshsat.android"
         minSdk = 26
         targetSdk = 35
-        versionCode = baseVersionCode
-        versionName = baseVersionName
+        // Keep these literal: F-Droid's checkupdates reads them out of this file with a
+        // regex that only matches a number, and falls back to an older tag otherwise.
+        versionCode = 78
+        versionName = "2.14.7"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -110,6 +110,9 @@ android {
 
 // Give every APK its own versionCode and a file name that carries it, so each one can be
 // released and verified on its own (MESHSAT-1260).
+val baseVersionCode = android.defaultConfig.versionCode!!
+val baseVersionName = android.defaultConfig.versionName!!
+
 androidComponents {
     onVariants { variant ->
         variant.outputs.forEach { output ->
