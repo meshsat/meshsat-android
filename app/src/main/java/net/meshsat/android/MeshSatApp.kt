@@ -80,7 +80,9 @@ class MeshSatApp : Application() {
             }
         )
 
-        // Low importance: the icon shows in the status bar, with no sound or badge (MESHSAT-1241).
+        // Default importance on purpose, with sound, vibration, lights and badge all off: a
+        // channel below default, or a notification marked silent, has its icon hidden from the
+        // status bar on Pixels, which is the whole point of this one (MESHSAT-1241).
         manager.deleteNotificationChannel(CHANNEL_IRIDIUM_SIGNAL_OLD)
         manager.createNotificationChannel(
             NotificationChannel(

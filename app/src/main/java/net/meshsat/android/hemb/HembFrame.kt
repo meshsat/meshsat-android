@@ -111,28 +111,28 @@ object HembFrame {
         bearerIndex: Int,
         totalN: Int,
         flags: Int = FLAG_DATA,
+        ttl: Int = 0,
     ): ByteArray {
         val k = sym.k
         val frameSize = COMPACT_HEADER_LEN + k + sym.data.size
         val arr = ByteArray(frameSize)
 
+        // The Bridge's MarshalCompact, byte for byte (internal/hemb/frame.go). It is the only
+        // HeMB implementation in the field, so it is the reference (MESHSAT-1264).
         // Byte 0: version(2b) | streamID(4b) | flags(2b)
         arr[0] = (((streamId and 0x0F) shl 2) or (flags and 0x03)).toByte()
-        // Byte 1: sequence bits 11:4
-        arr[1] = ((sym.symbolIndex shr 4) and 0xFF).toByte()
-        // Byte 2: sequence bits 3:0 (4b) | K low nibble (4b) — wait, Go uses different layout
-        // Actually follow Go's compact layout exactly:
-        // Byte 1: sequence[11:4]
-        // Byte 2: K (8b)
+        // Byte 1: sequence bits 7:0
+        arr[1] = (sym.symbolIndex and 0xFF).toByte()
+        // Byte 2: K
         arr[2] = k.toByte()
-        // Byte 3: N (8b)
+        // Byte 3: N
         arr[3] = totalN.toByte()
-        // Byte 4: bearerIndex(4b) | genID bits 9:6 (4b)
-        arr[4] = (((bearerIndex and 0x0F) shl 4) or ((sym.genId shr 6) and 0x0F)).toByte()
-        // Byte 5: genID bits 5:0 (6b) | TTL(2b)
-        arr[5] = ((sym.genId and 0x3F) shl 2).toByte()
-        // Byte 6: sequence bits 3:0 (4b) | reserved(4b)
-        arr[6] = ((sym.symbolIndex and 0x0F) shl 4).toByte()
+        // Byte 4: bearerIndex(4b) | sequence bits 11:8 (4b)
+        arr[4] = (((bearerIndex and 0x0F) shl 4) or ((sym.symbolIndex shr 8) and 0x0F)).toByte()
+        // Byte 5: generation id bits 7:0
+        arr[5] = (sym.genId and 0xFF).toByte()
+        // Byte 6: generation id bits 9:8 (2b) | TTL(6b)
+        arr[6] = ((((sym.genId shr 8) and 0x03) shl 6) or (ttl and 0x3F)).toByte()
         // Byte 7: CRC-8
         arr[7] = crc8(arr, 0, 7)
 
@@ -188,15 +188,17 @@ object HembFrame {
         if (data.size >= COMPACT_HEADER_LEN) {
             if (crc8(data, 0, 7) != data[7]) return null
 
+            // The Bridge's UnmarshalCompact, bit for bit (internal/hemb/frame.go). Sequence,
+            // generation id and TTL each sat in different bits here until MESHSAT-1264, and
+            // nothing caught it because these tests round-tripped Android against itself.
             val flags = data[0].toInt() and 0x03
             val streamId = (data[0].toInt() and 0xFF) shr 2 and 0x0F
             val k = data[2].toInt() and 0xFF
             val n = data[3].toInt() and 0xFF
             val bearerIdx = (data[4].toInt() and 0xFF) shr 4 and 0x0F
-            val genId = (((data[4].toInt() and 0x0F) shl 6) or
-                ((data[5].toInt() and 0xFF) shr 2)) and 0x3FF
-            val sequence = (((data[1].toInt() and 0xFF) shl 4) or
-                ((data[6].toInt() and 0xFF) shr 4)) and 0xFFF
+            val sequence = (data[1].toInt() and 0xFF) or ((data[4].toInt() and 0x0F) shl 8)
+            val genId = (data[5].toInt() and 0xFF) or (((data[6].toInt() and 0xFF) shr 6 and 0x03) shl 8)
+            val ttl = data[6].toInt() and 0x3F
 
             val coeffEnd = COMPACT_HEADER_LEN + k
             if (data.size < coeffEnd + 1) return null
@@ -216,6 +218,7 @@ object HembFrame {
                 n = n,
                 flags = flags,
                 headerMode = HEADER_MODE_COMPACT,
+                ttl = ttl,
             )
         }
 
@@ -244,5 +247,7 @@ object HembFrame {
         val n: Int,
         val flags: Int = FLAG_DATA,
         val headerMode: String = HEADER_MODE_EXTENDED,
+        /** Hops left. Only the compact header carries one; the extended header has none. */
+        val ttl: Int = 0,
     )
 }
