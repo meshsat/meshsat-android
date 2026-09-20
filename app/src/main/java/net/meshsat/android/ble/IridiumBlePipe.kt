@@ -110,7 +110,21 @@ class IridiumBlePipe internal constructor(
         input.close()
     }
 
+    /**
+     * A drill for MESHSAT-1270: this pipe stops taking writes while the link stays attached,
+     * which is the wedge of 20 September and cannot be produced on a sealed node. Everything
+     * above this line is the real thing - the driver's counter, the interface going offline, the
+     * reconnect. The flag lives on the pipe, and a reconnect makes a new pipe, so recovery ends
+     * the drill exactly as it ended the real fault. Set from the loopback-only local API.
+     */
+    @Volatile
+    internal var refuseWrites = false
+
     private fun writeChunkBlocking(chunk: ByteArray): Boolean {
+        if (refuseWrites) {
+            Log.w(TAG, "drill: write refused (${chunk.size} bytes)")
+            return false
+        }
         val rx = rx ?: return false
         val op = queue.enqueue("w:${rx.uuid}") {
             GattCompat.write(gatt, rx, chunk, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)

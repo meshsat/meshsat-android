@@ -3,6 +3,10 @@ package net.meshsat.android.service
 import android.Manifest
 import android.app.PendingIntent
 import android.app.Service
+import android.bluetooth.BluetoothAdapter
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.IntentFilter
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
@@ -295,6 +299,12 @@ class GatewayService : Service() {
 
         meshtasticBle = MeshtasticBle(this)
         registry.register("ble_mesh_0", meshtasticBle!!)
+        ContextCompat.registerReceiver(
+            this,
+            bluetoothStateReceiver,
+            IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED),
+            ContextCompat.RECEIVER_NOT_EXPORTED,
+        )
         iridiumSpp = IridiumSpp().also { spp ->
             // Any satellite session can bring a message in: it is stored the moment it arrives.
             spp.mtSink = { bytes -> storeIridiumMt(spp, String(bytes, Charsets.UTF_8)) }
@@ -384,7 +394,25 @@ class GatewayService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    /**
+     * Bluetooth going off never reaches the GATT callback, so the node link is told here
+     * (MESHSAT-615): without it the app held a dead link and called it connected.
+     */
+    private val bluetoothStateReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            when (intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)) {
+                BluetoothAdapter.STATE_TURNING_OFF, BluetoothAdapter.STATE_OFF -> meshtasticBle?.onBluetoothOff()
+                BluetoothAdapter.STATE_ON -> meshtasticBle?.onBluetoothOn()
+            }
+        }
+    }
+
     override fun onDestroy() {
+        try {
+            unregisterReceiver(bluetoothStateReceiver)
+        } catch (e: IllegalArgumentException) {
+            // Never registered: onCreate did not get that far.
+        }
         registry.clear()
         passScheduler?.stop()
         passScheduler = null
@@ -2710,7 +2738,9 @@ class GatewayService : Service() {
                 }
                 lastRecoveryMs = nowMs
                 Log.w("MeshSat", "Iridium: the pipe takes no writes; reconnecting to the node")
-                ble.reconnect()
+                // Not reconnect(): that is a no-op while Android still holds a client to the
+                // node, which is the very case this recovery exists for.
+                ble.forceReconnect()
             }
         }
         scope.launch {
