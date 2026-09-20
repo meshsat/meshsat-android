@@ -1,0 +1,1 @@
+In the rule editor, "Hub" now means the link that really reaches the Hub. Before, that name belonged to an older link that is switched off, so a rule sent to "Hub" delivered nothing. Links that are switched off are no longer offered.
