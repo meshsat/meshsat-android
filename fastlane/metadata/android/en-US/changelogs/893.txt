@@ -1,0 +1,1 @@
+A message forwarded to the Hub now says which link it arrived on, instead of always saying MQTT. The Hub uses that to tell an SMS from a satellite or mesh message, and to decide which of its own routes apply.
