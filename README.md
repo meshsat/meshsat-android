@@ -85,6 +85,7 @@ Routing rules (Setup > Advanced > Routing rules) decide what is forwarded betwee
 - **TAK.** Positions from the Hub's TAK feed appear on the map. Receive only.
 - **Reticulum.** The phone runs as a Reticulum transport node and relays between the mesh, both Iridium modems, MQTT and TCP peers.
 - **Safety.** Hold the SOS button on Home for 3 seconds. The SOS goes out on every route the phone has, each one retried until it is sent: by satellite as the Bridge's SOS frame, which the Hub raises as an alarm; as a mesh broadcast, which any MeshSat kit in range relays; by SMS with a map link to each emergency contact; and to the Hub over the internet. It stays on, with a banner on every screen and a line per route saying where it stands, until you cancel it in the app or from the notification. Everyone who got it is then told you are safe. **Test the alarm** uses the same routes with a text that raises no alarm, and a position report instead of the SOS frame by satellite. A check-in timer sends SOS if the phone sees no activity for too long, and zones, drawn on the map, record when a mesh node enters or leaves an area.
+- **People you carry.** Swap contact cards face to face: one phone shows its card as a QR code under People, the other scans it, and both read the same fingerprint off their screens. The card is signed by the phone that made it, so it cannot be altered on the way, and the fingerprint you read aloud is what says the card is really theirs. A card that arrives as text instead of through the camera is kept, and marked, as imported.
 - **Records.** A message queue with everything waiting, sent or given up, and config export and import in YAML or JSON, in the same format as the Bridge.
 - **Local API** on 127.0.0.1:6051, for testing and automation.
 
@@ -101,14 +102,15 @@ The map works without internet down to country level, from a world overview buil
 | Reconnecting to the node and taking its modem back after an app restart | Verified 19 September 2026 |
 | Pass prediction with no internet | Verified 19 September 2026 |
 | The phone connected to the Hub as a bridge | Verified 19 September 2026 |
-| Recovery when the node drops out mid-session | Same code as a restart, **not exercised yet** |
+| Recovery when the node drops out mid-session | Verified 20 September 2026: the node was restarted while the phone held its modem, and the phone marked the link down and took the modem back on its own in 8 seconds |
 | RockBLOCK 9704 | **Not tested on hardware** |
 | SOS: hold to send, SMS to an emergency contact, cancel, and the cancellation after it | Verified 19 September 2026 on the Android 11 emulator (2.13.0) |
 | SOS by satellite to the Hub | The frame matches the Bridge's byte for byte in tests. **Not sent through the Hub yet**: it would page the on-call chain |
 | SOS over the mesh and to the Hub online, and Test the alarm on the phone | **Not exercised yet** |
 | SMS on Android 8 to 12 | Broken before 2.13.0 (the app said the phone could not send SMS). Fixed; verified on the Android 11 emulator |
 | Starting after a phone restart (option) | Verified on the Android 11 emulator |
-| A second tick when the Hub confirms a satellite message arrived | **In development** |
+| A second tick when the Hub confirms a satellite message arrived | Verified 20 September 2026 on four messages, receipt back from the Hub within seconds |
+| Contact cards swapped by QR code | Shown, read and stored on one phone. **Not yet swapped between two phones** |
 | Deployment to a real end user | **Never** |
 | Use in an actual emergency | **Never** |
 
