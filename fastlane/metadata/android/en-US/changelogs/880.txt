@@ -1,0 +1,1 @@
+The SMS setup no longer says texts are not allowed when they are. The number under Setup is now described for what it does, and a routing rule can carry its own destination.
