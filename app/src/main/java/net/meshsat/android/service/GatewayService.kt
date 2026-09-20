@@ -123,6 +123,9 @@ class GatewayService : Service() {
         private const val PIPE_CLAIM_RETRY_MS = 15_000L
         private const val PIPE_CLAIM_FIRST_RETRY_MS = 3_000L
 
+        /** At most one node reconnect this often when the pipe stops taking writes (MESHSAT-1270). */
+        private const val PIPE_RECOVERY_COOLDOWN_MS = 60_000L
+
         /** A mailbox check the user asked for (MESHSAT-400): running, or its last outcome. */
         data class MailboxCheck(
             val running: Boolean = false,
@@ -2591,6 +2594,25 @@ class GatewayService : Service() {
     private fun observeIridiumPipe() {
         val ble = meshtasticBle ?: return
         val spp = iridiumSpp ?: return
+        // A pipe that stops taking writes never mended itself: the claim stayed answered, so
+        // nothing here re-claimed, and only restarting the app brought the modem back after
+        // thirteen minutes (MESHSAT-1270). Drop the link and let the node reconnect, which
+        // re-runs the claim and the attach below.
+        scope.launch {
+            var lastRecoveryMs = 0L
+            spp.linkFaults.collect {
+                interfaceManager?.noteError("iridium_0", "The phone cannot reach the node's modem")
+                spp.detach()
+                val nowMs = System.currentTimeMillis()
+                if (nowMs - lastRecoveryMs < PIPE_RECOVERY_COOLDOWN_MS) {
+                    Log.w("MeshSat", "Iridium: the pipe takes no writes; waiting out the reconnect cooldown")
+                    return@collect
+                }
+                lastRecoveryMs = nowMs
+                Log.w("MeshSat", "Iridium: the pipe takes no writes; reconnecting to the node")
+                ble.reconnect()
+            }
+        }
         scope.launch {
             combine(ble.iridiumPipe, settings.iridiumNodePipeEnabled, iridiumWanted) { pipe, enabled, wanted ->
                 Triple(pipe, enabled, wanted)
