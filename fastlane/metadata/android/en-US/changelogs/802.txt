@@ -1,0 +1,1 @@
+The app now notices when it cannot reach the node's satellite modem. It says so on the home screen and gets the link back by itself, instead of reporting a healthy satellite link while nothing could leave the phone.
