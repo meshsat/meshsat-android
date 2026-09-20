@@ -135,6 +135,10 @@ fun PeersScreen(
             modifier = Modifier.padding(bottom = 8.dp),
         )
 
+        // Cards handed over face to face, above the nodes: a person you swapped cards with is
+        // someone you know, a node you heard is not (MESHSAT-566, 575).
+        ContactCardsSection()
+
         if (nodes.isEmpty()) {
             Box(
                 modifier = Modifier

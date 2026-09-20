@@ -215,6 +215,10 @@ class GatewayService : Service() {
         var rnsTransportNode: net.meshsat.android.reticulum.RnsTransportNode? = null
             private set
 
+        // This phone's Reticulum identity, the key that signs a contact card (MESHSAT-566/575)
+        var routingIdentity: net.meshsat.android.routing.Identity? = null
+            private set
+
         // Hub Reporter — bridge-to-hub uplink protocol (MESHSAT-292)
         var hubReporter: net.meshsat.android.hub.HubReporter? = null
             private set
@@ -1762,6 +1766,7 @@ class GatewayService : Service() {
 
                 val kvStore = net.meshsat.android.crypto.SecureKeyStore.getInstance(this@GatewayService)
                 val identity = net.meshsat.android.routing.Identity.loadOrGenerate(kvStore)
+                routingIdentity = identity
 
                 val announceHandler = net.meshsat.android.reticulum.RnsAnnounceHandler(
                     identity = identity,

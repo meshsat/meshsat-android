@@ -27,12 +27,14 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         HembBondGroupEntity::class,
         BridgeTrustEntity::class,
         TelemetryEntity::class,
+        ContactEntity::class,
     ],
-    version = 16,
+    version = 17,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
 
+    abstract fun contactDao(): ContactDao
     abstract fun messageDao(): MessageDao
     abstract fun forwardingRuleDao(): ForwardingRuleDao
     abstract fun signalDao(): SignalDao
@@ -222,6 +224,24 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /** Cards handed over by QR code (MESHSAT-566, 575); nothing else changes. */
+        val MIGRATION_16_17 = object : Migration(16, 17) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Room's own CREATE statement for ContactEntity, copied from the exported
+                // schema (app/schemas/.../17.json) rather than written by hand: it compares
+                // columns, defaults and the primary key on open, and this builder falls back
+                // to a destructive migration, which would take the messages with it.
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `contacts` (" +
+                        "`fingerprint` TEXT NOT NULL, `name` TEXT NOT NULL, " +
+                        "`signing_pub` TEXT NOT NULL, `mesh_node_id` TEXT NOT NULL, " +
+                        "`bridge_id` TEXT NOT NULL, `trust` TEXT NOT NULL, " +
+                        "`issued_at` INTEGER NOT NULL, `added_at` INTEGER NOT NULL, " +
+                        "PRIMARY KEY(`fingerprint`))"
+                )
+            }
+        }
+
         fun getInstance(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
@@ -233,6 +253,7 @@ abstract class AppDatabase : RoomDatabase() {
                         MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9,
                         MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13,
                         MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16,
+                        MIGRATION_16_17,
                     )
                     .fallbackToDestructiveMigration()
                     .build()
