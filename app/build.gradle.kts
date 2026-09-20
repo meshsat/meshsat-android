@@ -14,8 +14,8 @@ plugins {
 // own versionCode, so the base is multiplied by ten and the ABI adds the last digit — the
 // universal APK keeps 0. The file name carries that number, which is how F-Droid's recipe picks
 // the right APK out of the five.
-val baseVersionCode = 76
-val baseVersionName = "2.14.5"
+val baseVersionCode = 77
+val baseVersionName = "2.14.6"
 val abiVersionCodes = mapOf("armeabi-v7a" to 1, "arm64-v8a" to 2, "x86" to 3, "x86_64" to 4)
 
 // Splitting a debug build would make five APKs for every local run, so it happens on release only.
