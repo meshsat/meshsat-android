@@ -1,0 +1,1 @@
+A message that arrives by SMS now goes through the routing rules, as one arriving by mesh or satellite already did. Before this, a rule that forwarded incoming SMS could never act.
