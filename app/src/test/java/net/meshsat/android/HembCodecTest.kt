@@ -308,13 +308,29 @@ class HembCodecTest {
     }
 
     @Test
-    fun `reassembly buffer rejects duplicate generation after decode`() {
+    fun `reassembly buffer frees a generation once decoded, as the Bridge does`() {
         val segments = listOf(byteArrayOf(10))
         val symbols = HembRlncEncoder.encode(0, segments, 2)
 
         val buf = HembReassemblyBuffer()
         assertNotNull(buf.addSymbol(0, 0, symbols[0])) // K=1, decodes immediately
-        assertNull(buf.addSymbol(0, 1, symbols[1])) // already decoded
+
+        // The Bridge deletes the generation after decoding so a wrapped stream id
+        // (0-255) does not hit "already decoded" forever: internal/hemb/reassemble.go,
+        // "Remove decoded generation to free the stream+gen ID for reuse". A later
+        // symbol therefore opens a fresh generation and, at K=1, decodes again.
+        // Suppressing the repeat is the Deduplicator's job, not the codec's.
+        assertNotNull(buf.addSymbol(0, 1, symbols[1]))
+    }
+
+    @Test
+    fun `reassembly buffer ignores a duplicate while the generation is still open`() {
+        val segments = listOf(byteArrayOf(1), byteArrayOf(2))
+        val symbols = HembRlncEncoder.encode(0, segments, 3) // K=2, so one symbol leaves it open
+
+        val buf = HembReassemblyBuffer()
+        assertNull(buf.addSymbol(0, 0, symbols[0]))
+        assertEquals(1, buf.activeStreamCount)
     }
 
     @Test
