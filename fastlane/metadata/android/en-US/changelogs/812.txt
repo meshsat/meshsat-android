@@ -1,0 +1,1 @@
+The Hub now shows as its own connection, so the app stops reporting it offline while it is working, and a rule that forwards to the Hub delivers. Transports this phone has no hardware for are marked as not set up instead of dragging the health figure down. The compact HeMB header is on the same bits as the Bridge.
