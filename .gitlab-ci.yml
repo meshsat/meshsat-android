@@ -354,10 +354,14 @@ deploy-to-phone:
       # An update kills the app, and nothing brings it back: the phone is a gateway, and it
       # stayed down after the v2.17.1 install until someone opened it by hand. Starting the
       # activity starts the foreground service with it.
-      \$ADB -s "\$T" shell am start -n net.meshsat.android/.MainActivity >/dev/null 2>&1 || true
+      # Every adb shell here reads from /dev/null. This script is piped into "bash -s", and
+      # adb shell inherits stdin: without the redirect the first one swallows the rest of the
+      # script, which is exactly what happened on v2.18.2 - the install ran, everything after
+      # it vanished, and the job still reported success.
+      \$ADB -s "\$T" shell am start -n net.meshsat.android/.MainActivity </dev/null >/dev/null 2>&1 || true
       sleep 25
-      \$ADB -s "\$T" shell dumpsys package net.meshsat.android | grep -E "versionName|versionCode=" | head -2
-      if \$ADB -s "\$T" shell dumpsys activity services net.meshsat.android 2>/dev/null | grep -q ServiceRecord; then
+      \$ADB -s "\$T" shell dumpsys package net.meshsat.android </dev/null | grep -E "versionName|versionCode=" | head -2
+      if \$ADB -s "\$T" shell dumpsys activity services net.meshsat.android </dev/null 2>/dev/null | grep -q ServiceRecord; then
         echo "Gateway service is running again."
       else
         echo "WARNING: the app is installed but its gateway service did not come back."
