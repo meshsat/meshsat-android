@@ -38,6 +38,7 @@ import net.meshsat.android.data.SignalRecord
 import net.meshsat.android.engine.AckTracker
 import net.meshsat.android.engine.Dispatcher
 import net.meshsat.android.engine.FailoverResolver
+import net.meshsat.android.hub.HubReporter
 import net.meshsat.android.engine.IridiumFragment
 import net.meshsat.android.engine.InterfaceConfig
 import net.meshsat.android.engine.InterfaceManager
@@ -1869,6 +1870,15 @@ class GatewayService : Service() {
             autoReconnect = false,
             alwaysOnline = true, // SMS is always available via Android
         ))
+        // The Hub link the phone actually uses is HubReporter, and until MESHSAT-1261 nothing
+        // showed it here: the list said the Hub was offline while messages were flowing over it,
+        // and a rule aimed at the Hub waited for mqtt_0, which nothing ever brings online.
+        // HubReporter reconnects itself, so the manager only mirrors its state.
+        mgr.register(InterfaceConfig(
+            id = "hub_0", channelType = "hub",
+            autoReconnect = false,
+        ))
+        // The older per-device MQTT client, off unless someone turns it on in Settings.
         mgr.register(InterfaceConfig(
             id = "mqtt_0", channelType = "mqtt",
             autoReconnect = true,
@@ -2016,6 +2026,32 @@ class GatewayService : Service() {
             }
         }
 
+        // The Hub link, from the client that actually holds it (MESHSAT-1261).
+        scope.launch {
+            hubReporter?.state?.collect { state ->
+                when (state) {
+                    HubReporter.State.Connected -> mgr.setOnline("hub_0")
+                    HubReporter.State.Connecting -> mgr.setConnecting("hub_0")
+                    HubReporter.State.Disconnected -> mgr.setOffline("hub_0")
+                    HubReporter.State.Error -> mgr.setError("hub_0", "Hub connection failed")
+                }
+            }
+        }
+
+        // Interfaces this phone has no hardware or configuration for are marked Disabled rather
+        // than left sitting at Offline: an Offline interface reads as something that is meant to
+        // be working and is not, it drags the health figure down, and the Dispatcher holds
+        // anything routed to it for ever (MESHSAT-1261).
+        scope.launch {
+            if (!settings.mqttEnabled.first()) mgr.disable("mqtt_0")
+            if (!settings.aprsEnabled.first()) mgr.disable("aprs_0")
+            if (settings.iridium9704BtAddress.first().isBlank()) mgr.disable("iridium9704_0")
+            if (settings.hubRelayTarget.first().isBlank()) {
+                mgr.disable(net.meshsat.android.hub.relay.RelayBridgeTransport.INTERFACE_ID)
+            }
+            if (!settings.hubEnabled.first()) mgr.disable("hub_0")
+        }
+
         // Observe BLE errors → drive InterfaceManager
         meshtasticBle?.let { ble ->
             scope.launch {
@@ -2128,6 +2164,8 @@ class GatewayService : Service() {
                     "sms_0" to "sms",
                     "mqtt_0" to "mqtt",
                     "aprs_0" to "aprs",
+                    // The Hub, so a rule can forward to it and have it delivered (MESHSAT-1261).
+                    "hub_0" to "hub",
                 )
                 // Iridium sends (MESHSAT-1243): mark the chat message sent, or record a
                 // rule-forwarded one; retries wait for the next pass window when one is known.
@@ -2195,6 +2233,25 @@ class GatewayService : Service() {
                             transport = "mesh", direction = "tx", sender = "self",
                             recipient = net.meshsat.android.ui.Peers.MESH_ALL,
                             text = textPreview, forwarded = true, forwardedTo = "mesh:broadcast",
+                            timestamp = System.currentTimeMillis(),
+                        )
+                    )
+                    null // success
+                }
+                interfaceId == "hub_0" -> {
+                    val hub = hubReporter
+                        ?: return "the Hub is not set up"
+                    if (hub.state.value != HubReporter.State.Connected) return "not connected to the Hub"
+                    val imei = iridiumSpp?.modemInfo?.value?.imei.orEmpty()
+                    val deviceId = imei.ifBlank { settings.hubBridgeId.first() }
+                    if (deviceId.isBlank()) return "no device id for the Hub"
+                    val text = if (payload.isNotEmpty()) String(payload, Charsets.UTF_8) else textPreview
+                    if (!hub.publishMessage(deviceId, text, recipient)) return "the Hub did not take the message"
+                    db.messageDao().insert(
+                        Message(
+                            transport = "hub", direction = "tx", sender = "self",
+                            recipient = recipient.ifBlank { "hub" },
+                            text = textPreview, forwarded = true, forwardedTo = "hub:mo/decoded",
                             timestamp = System.currentTimeMillis(),
                         )
                     )
