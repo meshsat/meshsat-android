@@ -93,6 +93,8 @@ fun ContactCardsSection() {
                 color = MeshSatTextMuted,
                 modifier = Modifier.padding(top = 4.dp, bottom = 12.dp),
             )
+            // Two buttons to a row: three did not fit a phone's width, and "Paste" came out
+            // broken across two lines on the Pixel.
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = { showMyCard = true }) { Text("My card") }
                 OutlinedButton(onClick = {
@@ -112,8 +114,8 @@ fun ContactCardsSection() {
                         Toast.makeText(context, "No camera scanner: ${e.message}", Toast.LENGTH_LONG).show()
                     }
                 }) { Text("Scan a card") }
-                OutlinedButton(onClick = { showPaste = true }) { Text("Paste") }
             }
+            TextButton(onClick = { showPaste = true }) { Text("Paste a card instead") }
 
             if (contacts.isEmpty()) {
                 Text(
