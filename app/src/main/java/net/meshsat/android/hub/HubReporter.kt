@@ -70,6 +70,40 @@ class HubReporter(
 
     private var onCommand: ((HubCommand) -> Unit)? = null
 
+    /**
+     * Send a message to the Hub the way a kit does: on mo/decoded, where the Hub's routing
+     * engine picks it up and relays it onwards (MESHSAT-1261). This is what a forwarding rule
+     * to the Hub uses; before it there was none, and a rule aimed at the Hub sat in the queue
+     * behind `mqtt_0`, an interface nothing ever brought online.
+     *
+     * Blocks until the broker has it. False when the Hub is not connected or the publish failed.
+     */
+    fun publishMessage(deviceId: String, text: String, recipient: String = "", source: String = "android"): Boolean {
+        val c = client
+        if (c == null || !c.isConnected) return false
+        val device = HubTopics.segment(deviceId)
+        val decoded = JSONObject().apply {
+            put("imei", deviceId)
+            put("bridge_id", config.bridgeId)
+            put("text", text)
+            put("sos", false)
+            put("channel", "mqtt")
+            put("source", source)
+            if (recipient.isNotBlank()) put("to", recipient)
+            put("timestamp", HubProtocol.isoTimestamp())
+        }
+        return try {
+            c.publish(
+                HubTopics.deviceMODecoded(device),
+                MqttMessage(decoded.toString().toByteArray(StandardCharsets.UTF_8)).apply { qos = QOS_AT_LEAST_ONCE },
+            )
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "Message publish to the Hub failed: ${e.message}")
+            false
+        }
+    }
+
     /** Set callback for inbound commands from the Hub. */
     fun setCommandCallback(cb: (HubCommand) -> Unit) {
         onCommand = cb

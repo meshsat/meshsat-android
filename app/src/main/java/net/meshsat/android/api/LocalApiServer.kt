@@ -10,6 +10,7 @@ import net.meshsat.android.data.TelemetryEntity
 import net.meshsat.android.engine.DeadManSwitch
 import net.meshsat.android.engine.GeofenceMonitor
 import net.meshsat.android.engine.HealthScorer
+import net.meshsat.android.engine.InterfaceState
 import net.meshsat.android.engine.InterfaceManager
 import net.meshsat.android.engine.SigningService
 import fi.iki.elonen.NanoHTTPD
@@ -117,7 +118,10 @@ class LocalApiServer(
     // --- Health ---
 
     private fun handleHealth(): Response {
-        val ifaces = interfaceManager?.getAllStatus() ?: emptyList()
+        // Disabled interfaces are the ones this phone has no hardware or configuration for.
+        // Counting them made a phone where everything worked read 4 of 8 (MESHSAT-1261).
+        val ifaces = (interfaceManager?.getAllStatus() ?: emptyList())
+            .filter { it.state != InterfaceState.Disabled }
         val online = ifaces.count { it.state.isAvailable }
         val json = JSONObject().apply {
             put("status", if (online > 0) "ok" else "degraded")
