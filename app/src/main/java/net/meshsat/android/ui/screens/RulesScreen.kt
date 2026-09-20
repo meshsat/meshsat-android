@@ -69,6 +69,7 @@ import net.meshsat.android.data.AppDatabase
 import net.meshsat.android.data.MessageDeliveryEntity
 import net.meshsat.android.service.GatewayService
 import net.meshsat.android.ui.Words
+import net.meshsat.android.ui.theme.MeshSatAmber
 import net.meshsat.android.ui.theme.MeshSatBorder
 import net.meshsat.android.ui.theme.MeshSatRed
 import net.meshsat.android.ui.theme.MeshSatSurface
@@ -113,6 +114,23 @@ private fun getAvailableInterfaces(): List<String> {
     }
     return listOf("mesh_0", "iridium_0", "sms_0") // fallback
 }
+
+/**
+ * The Hub reporter's own links - hub_0, hub_1 - and deliberately not hub_relay, which is a
+ * tunnel to another bridge and puts nothing in the Hub's message store.
+ */
+private val HUB_REPORT_LINK = Regex("""hub_\d+""")
+
+/**
+ * Whether a rule would hand the Hub something it already has (MESHSAT-1276).
+ *
+ * A RockBLOCK's own message reaches the Hub through the provider's webhook, so forwarding
+ * satellite traffic there delivers a second copy under a different message id, which neither
+ * the Hub's insert guard nor its route claim collapses. Mesh and SMS are the opposite: the Hub
+ * has no other copy of those, which is the point of forwarding them.
+ */
+internal fun duplicatesTheHub(source: String, destination: String): Boolean =
+    HUB_REPORT_LINK.matches(destination) && source.startsWith("iridium")
 
 /** A rule's action, as the user reads it: Forward, Drop, Log only. */
 internal fun ruleActionLabel(action: String): String = when (action.lowercase()) {
@@ -837,6 +855,20 @@ private fun AddEditRuleDialog(
                         supportingText = if (targetError) "Pick a different link from the one it arrives by." else null,
                         onSelect = { forwardTo = it },
                     )
+                    // Satellite messages reach the Hub twice if this rule exists: the modem's
+                    // own message goes to the Hub through the provider, and this sends a second
+                    // copy with a different id, which nothing de-duplicates. Not a loop - the
+                    // Hub cannot feed itself - but two of everything at the far end, including
+                    // notifications (MESHSAT-1276).
+                    if (duplicatesTheHub(interfaceId, forwardTo)) {
+                        Text(
+                            text = "The Hub already receives satellite messages straight from the " +
+                                "provider. This rule sends a second copy, so anything the Hub does " +
+                                "with them - alerts, TAK, webhooks - happens twice.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MeshSatAmber,
+                        )
+                    }
                 }
 
                 Row(
