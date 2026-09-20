@@ -2239,21 +2239,19 @@ class GatewayService : Service() {
      * verbatim in `messages.channel` and its routing engine reads it as the source of the
      * message, so the vocabulary is the Hub's, not this app's interface ids. An empty bearer
      * means the message was written here and did not arrive on anything.
+     *
+     * The satellite values were held back for a release while it looked as though they would
+     * newly fire five unrestricted Hub routes, one of them transmitting on APRS. They do not:
+     * a RockBLOCK's own traffic already reaches the Hub through the Ground Control webhook,
+     * which sets `channel: iridium` itself, so those routes have been firing all along, and
+     * the APRS destination is off in the Hub's config (MESHSAT-1275).
      */
     private fun hubChannelOf(sourceBearer: String): String = when {
         sourceBearer.startsWith("sms") -> "sms"
         sourceBearer.startsWith("mesh") -> "mesh"
-        // The satellite values are held back on purpose (MESHSAT-1275). The Hub folds
-        // "iridium" and "iridium_imt" into its "satellite" source, and five enabled routes
-        // match that today with no sender restriction on any of them - among them APRS, which
-        // keys a transmitter under the owner's callsign, and notifications, which page a
-        // person. Sending the truthful value would fire all five on the first satellite
-        // message this phone forwards. Until those routes carry a sender list, or someone
-        // decides they should fire, a forwarded satellite message keeps saying "mqtt", which
-        // matches none of them. Checked on the Hub by the meshsat-hub session, 20 Sep 2026.
-        sourceBearer.startsWith("iridium") -> "mqtt"
-        // Never checked against the Hub's routes, and this phone has no APRS hardware.
-        sourceBearer.startsWith("aprs") -> "mqtt"
+        sourceBearer.startsWith("iridium9704") -> "iridium_imt"
+        sourceBearer.startsWith("iridium") -> "iridium"
+        sourceBearer.startsWith("aprs") -> "aprs"
         else -> "mqtt"
     }
 
