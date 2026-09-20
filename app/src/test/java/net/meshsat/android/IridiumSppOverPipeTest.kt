@@ -203,6 +203,33 @@ class IridiumSppOverPipeTest {
     }
 
     @Test
+    fun `a message that has been handed over is dropped from the modem`() = runBlocking {
+        val modem = FakeModem().apply {
+            sbdixReply = "+SBDIX: 0, 220, 1, 7, 5, 0"
+            mt = "hello".toByteArray()
+        }
+        val spp = attached(modem)
+        spp.mtSink = { }
+        spp.sbdix()
+        // Without AT+SBDD1 the modem keeps the message and keeps its MT flag raised, so every
+        // later poll reads and delivers it again. Three copies of one message reached the
+        // owner's phone that way on 20 Sep 2026 (MESHSAT-1266).
+        assertTrue(modem.commands.contains("AT+SBDD1"))
+    }
+
+    @Test
+    fun `a message that could not be stored stays in the modem`() = runBlocking {
+        val modem = FakeModem().apply {
+            sbdixReply = "+SBDIX: 0, 221, 1, 7, 5, 0"
+            mt = "keep me".toByteArray()
+        }
+        val spp = attached(modem)
+        spp.mtSink = { throw IllegalStateException("database is gone") }
+        spp.sbdix()
+        assertFalse(modem.commands.contains("AT+SBDD1"))
+    }
+
+    @Test
     fun `SBDWB sends the payload with its checksum, binary-safe`() = runBlocking {
         val modem = FakeModem()
         val spp = attached(modem)

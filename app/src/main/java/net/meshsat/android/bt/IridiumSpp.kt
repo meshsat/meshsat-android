@@ -428,13 +428,18 @@ class IridiumSpp(private val clock: () -> Long = System::currentTimeMillis) {
             if (mt != null) {
                 Log.i(TAG, "SBDIX brought a message in: ${mt.size} bytes, MTMSN ${result.mtMsn}")
                 if (deliverMt) {
+                    var delivered = false
                     mtSink?.let { sink ->
                         try {
                             sink(mt)
+                            delivered = true
                         } catch (e: Exception) {
                             Log.w(TAG, "Storing the message that came in failed: ${e.message}")
                         }
                     }
+                    // Only once it is safely stored: the modem holds the message, and its MT
+                    // flag stays up, until it is told to drop it (MESHSAT-1266).
+                    if (delivered) clearMtBuffer()
                 }
             }
             result.copy(mt = mt)
@@ -451,6 +456,23 @@ class IridiumSpp(private val clock: () -> Long = System::currentTimeMillis) {
             infoLine(sendAT("AT+SBDD0")) == "0"
         } catch (e: Exception) {
             _error.emit("SBDD0 failed: ${e.message}")
+            false
+        }
+    }
+
+    /**
+     * Clear the MT buffer (AT+SBDD1), once the message in it has been stored. The modem keeps
+     * a received message, with its MT flag raised, until it is told to drop it, so without this
+     * every later status poll reads and delivers the same message again — three copies of one
+     * message on 20 Sep 2026 (MESHSAT-1266). The Bridge does the same: AT+SBDD1 in
+     * internal/transport/direct_sat.go.
+     */
+    suspend fun clearMtBuffer(): Boolean {
+        if (!isWireReady()) return false
+        return try {
+            infoLine(sendAT("AT+SBDD1")) == "0"
+        } catch (e: Exception) {
+            _error.emit("SBDD1 failed: ${e.message}")
             false
         }
     }

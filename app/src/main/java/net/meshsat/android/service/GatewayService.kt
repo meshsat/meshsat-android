@@ -2956,6 +2956,11 @@ class GatewayService : Service() {
     private suspend fun receiveIridiumMt(spp: IridiumSpp) {
         val mtText = spp.readMtBuffer() ?: return
         storeIridiumMt(spp, mtText)
+        // Drop it from the modem now that it is in the database. The MT flag stays raised
+        // while the message sits there, so the next poll would read and store it again, and
+        // the dedup that hides this lives in memory and does not survive a restart
+        // (MESHSAT-1266).
+        spp.clearMtBuffer()
     }
 
     private fun startMailboxCheck(): Boolean {
