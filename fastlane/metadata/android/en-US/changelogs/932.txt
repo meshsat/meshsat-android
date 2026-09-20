@@ -1,0 +1,1 @@
+The banner shown when the phone cannot reach your node now reads properly and says when the link actually dropped, rather than when it had last come up.
