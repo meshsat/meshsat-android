@@ -329,7 +329,15 @@ deploy-to-phone:
       \$ADB connect "${PHONE_ADB_TARGET}" >/dev/null 2>&1 || true
       T=\$(\$ADB devices | awk '/device\$/ && \$1 != "List" {print \$1; exit}')
       if [ -z "\$T" ]; then
-        echo "No adb device. Wireless debugging off, phone on another network, or the port changed from ${PHONE_ADB_TARGET}."
+        # Wireless debugging takes a new port every time it reconnects, so the fixed
+        # target above goes stale by itself. mDNS is how the phone announces the current
+        # one (MESHSAT-1270 session, 20 Sep 2026: the port moved twice in an afternoon).
+        M=\$(\$ADB mdns services 2>/dev/null | awk '/_adb-tls-connect/ {print \$3; exit}')
+        if [ -n "\$M" ]; then \$ADB connect "\$M" >/dev/null 2>&1 || true; fi
+        T=\$(\$ADB devices | awk '/device\$/ && \$1 != "List" {print \$1; exit}')
+      fi
+      if [ -z "\$T" ]; then
+        echo "No adb device. Wireless debugging off, or the phone is on another network."
         exit 1
       fi
       echo "Installing on \$T"
