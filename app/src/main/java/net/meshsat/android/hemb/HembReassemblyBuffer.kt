@@ -16,7 +16,10 @@ class HembReassemblyBuffer(
 
     private class StreamState {
         val generations = ConcurrentHashMap<Int, GenerationState>()
-        val createdAt = System.currentTimeMillis()
+        // Monotonic, like the Bridge's time.Now()/time.Since: currentTimeMillis has
+        // millisecond resolution, so a stream created in the same millisecond read as
+        // zero elapsed and reap(0) removed nothing.
+        val createdAtNanos = System.nanoTime()
     }
 
     private class GenerationState(val k: Int, val symSize: Int) {
@@ -98,10 +101,10 @@ class HembReassemblyBuffer(
 
     /** Remove streams older than maxAgeMs. Returns count of reaped streams. */
     fun reap(maxAgeMs: Long = 5 * 60 * 1000): Int {
-        val cutoff = System.currentTimeMillis() - maxAgeMs
+        val now = System.nanoTime()
         var removed = 0
         streams.entries.removeIf { (streamId, state) ->
-            if (state.createdAt < cutoff) {
+            if (now - state.createdAtNanos > maxAgeMs * 1_000_000L) {
                 for ((genId, gen) in state.generations) {
                     if (!gen.decoded) {
                         emitEvent(eventListener, HembEventType.GENERATION_FAILED, GenerationFailedPayload(

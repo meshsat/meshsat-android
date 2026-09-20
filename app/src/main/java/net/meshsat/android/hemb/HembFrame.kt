@@ -153,8 +153,10 @@ object HembFrame {
             if (crc8(data, 0, 15) != data[15]) return null
 
             val flags = data[2].toInt() and 0x03
-            val streamId = ((data[2].toInt() and 0xFF) shr 2 and 0x0F) or
-                ((data[3].toInt() and 0xFF) shl 4)
+            // Byte 3 holds the whole stream id; byte 2 repeats its low nibble for the
+            // compact header's benefit. The Bridge reads b[3] (internal/hemb/frame.go
+            // UnmarshalExtended), and combining the two gave (id shl 4) or id.
+            val streamId = data[3].toInt() and 0xFF
             val sequence = (data[4].toInt() and 0xFF) or ((data[5].toInt() and 0xFF) shl 8)
             val k = data[6].toInt() and 0xFF
             val n = data[7].toInt() and 0xFF
@@ -167,7 +169,7 @@ object HembFrame {
             val codedData = data.copyOfRange(coeffEnd, data.size)
 
             return ParsedSymbol(
-                streamId = streamId and 0xFF,
+                streamId = streamId,
                 bearerIndex = bearerIdx,
                 symbol = HembCodedSymbol(
                     genId = genId,
