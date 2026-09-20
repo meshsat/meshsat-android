@@ -1,0 +1,1 @@
+A message that arrives by satellite is stored once. The modem was handing the same message back every time the app reconnected to the node, so one message could appear two or three times in the chat.
