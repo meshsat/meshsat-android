@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import net.meshsat.android.ble.LineWatcher
 import net.meshsat.android.ble.ModemLink
+import net.meshsat.android.ble.PipeWriteFailedException
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.io.InputStream
@@ -273,7 +274,9 @@ class IridiumSpp(private val clock: () -> Long = System::currentTimeMillis) {
         try {
             os.write("$command\r".toByteArray(Charsets.US_ASCII))
             os.flush()
-        } catch (e: IOException) {
+        } catch (e: PipeWriteFailedException) {
+            // Only a write that did not get through counts. A node holding its own modem
+            // throws PipeNotOwnedException, which is a handover, not a broken link.
             noteWriteFailed()
             throw e
         }

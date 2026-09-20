@@ -135,16 +135,29 @@ class PipeOutputStream(
         if (pending.size() == 0) return
         val data = pending.toByteArray()
         pending.reset()
-        if (!canWrite()) throw IOException("The node does not give this phone the modem")
+        if (!canWrite()) throw PipeNotOwnedException()
         val size = chunkSize().coerceAtLeast(IridiumPipeContract.MIN_CHUNK_BYTES)
         var off = 0
         while (off < data.size) {
             val end = minOf(off + size, data.size)
-            if (!sendChunk(data.copyOfRange(off, end))) throw IOException("Iridium pipe write failed")
+            if (!sendChunk(data.copyOfRange(off, end))) throw PipeWriteFailedException()
             off = end
         }
     }
 }
+
+/**
+ * The node holds its own modem, so it discards anything this phone writes. A normal state
+ * during a handover, and nothing to do with the health of the link.
+ */
+class PipeNotOwnedException : IOException("The node does not give this phone the modem")
+
+/**
+ * The write itself did not get through to the node. Counted towards a broken link, unlike
+ * [PipeNotOwnedException]: telling the two apart is what keeps a handover from dropping the
+ * BLE connection (MESHSAT-1270).
+ */
+class PipeWriteFailedException : IOException("Iridium pipe write failed")
 
 /**
  * Watches the modem's output for an unsolicited line, "SBDRING" by default: the 9603
