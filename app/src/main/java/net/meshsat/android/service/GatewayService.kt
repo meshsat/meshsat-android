@@ -819,6 +819,20 @@ class GatewayService : Service() {
                 reporter.start()
                 hubReporter = reporter
                 Log.i("MeshSat", "Hub Reporter initialized: bridge=$bridgeId")
+                // hub_0 follows this client (MESHSAT-1261). The observer belongs here, not in
+                // initInterfaceManager: that runs before this one, so it would bind to a null
+                // reporter and collect nothing, leaving hub_0 Offline while the Hub was up.
+                scope.launch {
+                    reporter.state.collect { state ->
+                        val mgr = interfaceManager ?: return@collect
+                        when (state) {
+                            HubReporter.State.Connected -> mgr.setOnline("hub_0")
+                            HubReporter.State.Connecting -> mgr.setConnecting("hub_0")
+                            HubReporter.State.Disconnected -> mgr.setOffline("hub_0")
+                            HubReporter.State.Error -> mgr.setError("hub_0", "Hub connection failed")
+                        }
+                    }
+                }
             } catch (e: Exception) {
                 Log.w("MeshSat", "Hub Reporter init failed: ${e.message}")
             }
@@ -2026,17 +2040,7 @@ class GatewayService : Service() {
             }
         }
 
-        // The Hub link, from the client that actually holds it (MESHSAT-1261).
-        scope.launch {
-            hubReporter?.state?.collect { state ->
-                when (state) {
-                    HubReporter.State.Connected -> mgr.setOnline("hub_0")
-                    HubReporter.State.Connecting -> mgr.setConnecting("hub_0")
-                    HubReporter.State.Disconnected -> mgr.setOffline("hub_0")
-                    HubReporter.State.Error -> mgr.setError("hub_0", "Hub connection failed")
-                }
-            }
-        }
+        // hub_0's state is wired in initHubReporter, where the client it follows is made.
 
         // Interfaces this phone has no hardware or configuration for are marked Disabled rather
         // than left sitting at Offline: an Offline interface reads as something that is meant to
