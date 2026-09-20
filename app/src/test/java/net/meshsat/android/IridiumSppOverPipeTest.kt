@@ -6,6 +6,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import net.meshsat.android.ble.ModemLink
 import net.meshsat.android.ble.PipeInputStream
+import net.meshsat.android.ble.PipeNotOwnedException
+import net.meshsat.android.ble.PipeWriteFailedException
 import net.meshsat.android.bt.IridiumSpp
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -46,9 +48,13 @@ class IridiumSppOverPipeTest {
         /** A wedged BLE pipe: attached, answering every write with a failure (MESHSAT-1270). */
         @Volatile var writesFail = false
 
+        /** The node is using its own modem, so it discards what this phone writes. */
+        @Volatile var notOurs = false
+
         override val output: OutputStream = object : OutputStream() {
             override fun write(b: Int) {
-                if (writesFail) throw java.io.IOException("Iridium pipe write failed")
+                if (notOurs) throw PipeNotOwnedException()
+                if (writesFail) throw PipeWriteFailedException()
                 onByte(b.toByte())
             }
         }
@@ -178,6 +184,21 @@ class IridiumSppOverPipeTest {
         // while nothing could leave the phone (MESHSAT-1270).
         assertEquals(IridiumSpp.State.Disconnected, spp.state.value)
         assertTrue(spp.linkBroken.value)
+    }
+
+    @Test
+    fun `a node using its own modem is a handover, not a broken link`() {
+        val modem = FakeModem()
+        val spp = attached(modem)
+        modem.notOurs = true
+
+        fastClock {
+            runBlocking { repeat(IridiumSpp.LINK_BROKEN_WRITES + 2) { spp.pollSignal() } }
+        }
+
+        // Dropping the BLE connection here would fight the node over every handover.
+        assertFalse(spp.linkBroken.value)
+        assertEquals(IridiumSpp.State.Connected, spp.state.value)
     }
 
     @Test
