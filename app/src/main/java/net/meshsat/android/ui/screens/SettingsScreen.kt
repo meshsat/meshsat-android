@@ -1893,10 +1893,14 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
 
         if (section.shows(SetupSection.Sms)) {
             // SMS was only ever offered from a banner in Messages; Setup is where people look for it.
+            // Only what the app actually uses, and what the manifest declares. READ_SMS was in
+            // this list and in neither: nothing reads the inbox, the manifest never asked for it,
+            // and a permission that is not declared can never be granted - so this card said
+            // "Not allowed yet" for ever on a phone that sends and receives texts perfectly well,
+            // and its button asked for something Android would not give (MESHSAT-1261 session).
             val smsPermissions = arrayOf(
                 Manifest.permission.SEND_SMS,
                 Manifest.permission.RECEIVE_SMS,
-                Manifest.permission.READ_SMS,
             )
             fun smsAllowed() = smsPermissions.all {
                 ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
@@ -1929,11 +1933,14 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
             }
         }
         if (section.shows(SetupSection.Sms)) {
-            SectionCard("Kit phone number") {
+            // Was "Kit phone number": one global number, from when this app was a companion to
+            // a single Raspberry Pi kit. There is never just one other device, so it is named for
+            // what it actually does - the fallback when a text has no recipient of its own.
+            SectionCard("Where a text goes with no recipient") {
                 OutlinedTextField(
                     value = phoneInput,
                     onValueChange = { phoneInput = it },
-                    label = { Text("Kit phone number, e.g. +31612345678", style = MaterialTheme.typography.bodySmall) },
+                    label = { Text("Optional number, e.g. +31612345678", style = MaterialTheme.typography.bodySmall) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                     textStyle = MaterialTheme.typography.bodyMedium,
@@ -1954,7 +1961,10 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
                 }
 
                 Text(
-                    text = "The number of the SIM card in your MeshSat kit. SOS texts and encrypted SMS to the kit go to this number.",
+                    text = "Only used when a message has no recipient of its own: a routing rule that " +
+                        "forwards to SMS without naming a number. Messages you write carry their own " +
+                        "recipient, and SOS texts go to your emergency contacts under Safety. Leave it " +
+                        "empty and a text with no recipient is not sent.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MeshSatTextMuted,
                 )

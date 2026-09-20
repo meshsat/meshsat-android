@@ -306,13 +306,19 @@ class Dispatcher(
             }.distinct()
             val visitedJson = JSONArray(visitedSet).toString()
 
-            // Parse forward_options for TTL
+            // Parse forward_options for TTL and, where the link needs an address, the recipient.
+            // A rule sending to SMS had nowhere to say which number, so every rule-forwarded text
+            // fell through to one global setting - the old "kit phone number", written when the
+            // phone talked to a single kit. A rule can now name its own: {"to": "+31612345678"}.
             var ttlSeconds = 0
+            var ruleRecipient = ""
             val fwdOpts = match.rule.forwardOptions
             if (fwdOpts.isNotEmpty() && fwdOpts != "{}") {
                 try {
-                    ttlSeconds = JSONObject(fwdOpts).optInt("ttl_seconds", 0)
+                    val opts = JSONObject(fwdOpts)
+                    ttlSeconds = opts.optInt("ttl_seconds", 0)
                 } catch (_: Exception) {}
+                ruleRecipient = recipientFromOptions(fwdOpts)
             }
             // Apply per-channel default TTL
             if (ttlSeconds == 0 && desc != null && desc.defaultTtl.inWholeSeconds > 0) {
@@ -357,6 +363,7 @@ class Dispatcher(
                 ttlSeconds = ttlSeconds,
                 expiresAt = expiresAt,
                 qosLevel = match.rule.qosLevel,
+                recipient = ruleRecipient,
             )
 
             try {
@@ -611,6 +618,23 @@ class Dispatcher(
                 else -> minOf(initialWait * (1 shl retries.coerceIn(0, 10)), maxWait)
             }
             return nowMs + wait.inWholeMilliseconds
+        }
+
+        /**
+         * The address a rule names for links that need one, from its forward options:
+         * `{"to": "+31612345678"}`. Empty when the rule names none, when the options are not
+         * JSON, or when someone wrote something that is not a string - in which case the
+         * delivery falls back to the number under Setup, as everything did before.
+         */
+        fun recipientFromOptions(forwardOptions: String): String {
+            if (forwardOptions.isBlank() || forwardOptions == "{}") return ""
+            // Read by hand, not with org.json: under JVM unit tests the android.jar stubs make
+            // every JSONObject call answer with a default, so a parser written that way passes
+            // on a phone and cannot be tested at all (the repo has been bitten before).
+            // A string value only: {"to": {...}} or a missing value yields nothing, and the
+            // delivery falls back to the number under Setup.
+            val m = Regex("\"to\"\\s*:\\s*\"([^\"]*)\"").find(forwardOptions) ?: return ""
+            return m.groupValues[1].trim()
         }
 
         /** The +SBDIX MO status in a satellite delivery's error ("Not sent: status 32, ..."), or null. */
