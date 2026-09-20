@@ -78,7 +78,18 @@ class HubReporter(
      *
      * Blocks until the broker has it. False when the Hub is not connected or the publish failed.
      */
-    fun publishMessage(deviceId: String, text: String, recipient: String = "", source: String = "android"): Boolean {
+    fun publishMessage(
+        deviceId: String,
+        text: String,
+        recipient: String = "",
+        source: String = "android",
+        /**
+         * The link the message arrived on, in the Hub's vocabulary: sms, iridium, iridium_imt,
+         * mesh, or mqtt when it started here. Stored verbatim and read by the Hub's routing
+         * engine as the source of the message (MESHSAT-1274).
+         */
+        channel: String = "mqtt",
+    ): Boolean {
         val c = client
         if (c == null || !c.isConnected) return false
         val device = HubTopics.segment(deviceId)
@@ -87,7 +98,7 @@ class HubReporter(
             put("bridge_id", config.bridgeId)
             put("text", text)
             put("sos", false)
-            put("channel", "mqtt")
+            put("channel", channel)
             put("source", source)
             if (recipient.isNotBlank()) put("to", recipient)
             put("timestamp", HubProtocol.isoTimestamp())
