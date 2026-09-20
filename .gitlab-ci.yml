@@ -8,12 +8,34 @@
 
 stages:
   - validate
+  - test
   - build
   - release
 
 variables:
   GITHUB_REPO: "meshsat/meshsat-android"
   BAO_ADDR: "https://openbao.nuclearlighters.net:8200"
+
+# =============================================================================
+# Unit tests (every push to main and every tag) — MESHSAT-1259
+# Runs before the build stage, so a red test stops a release rather than
+# following it. 609 tests, JVM only, no device needed.
+# =============================================================================
+test:
+  stage: test
+  image: cimg/android:2024.10.1
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_COMMIT_TAG =~ /^v/'
+  script:
+    - bash ./gradlew testDebugUnitTest
+  artifacts:
+    when: always
+    expire_in: 7 days
+    reports:
+      junit: app/build/test-results/testDebugUnitTest/TEST-*.xml
+    paths:
+      - app/build/reports/tests/testDebugUnitTest
 
 # =============================================================================
 # Build debug APK (every push to main — verification only)
