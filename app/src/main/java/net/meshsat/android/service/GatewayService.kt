@@ -2242,10 +2242,18 @@ class GatewayService : Service() {
      */
     private fun hubChannelOf(sourceBearer: String): String = when {
         sourceBearer.startsWith("sms") -> "sms"
-        sourceBearer.startsWith("iridium9704") -> "iridium_imt"
-        sourceBearer.startsWith("iridium") -> "iridium"
         sourceBearer.startsWith("mesh") -> "mesh"
-        sourceBearer.startsWith("aprs") -> "aprs"
+        // The satellite values are held back on purpose (MESHSAT-1275). The Hub folds
+        // "iridium" and "iridium_imt" into its "satellite" source, and five enabled routes
+        // match that today with no sender restriction on any of them - among them APRS, which
+        // keys a transmitter under the owner's callsign, and notifications, which page a
+        // person. Sending the truthful value would fire all five on the first satellite
+        // message this phone forwards. Until those routes carry a sender list, or someone
+        // decides they should fire, a forwarded satellite message keeps saying "mqtt", which
+        // matches none of them. Checked on the Hub by the meshsat-hub session, 20 Sep 2026.
+        sourceBearer.startsWith("iridium") -> "mqtt"
+        // Never checked against the Hub's routes, and this phone has no APRS hardware.
+        sourceBearer.startsWith("aprs") -> "mqtt"
         else -> "mqtt"
     }
 
