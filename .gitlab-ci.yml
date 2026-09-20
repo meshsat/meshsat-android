@@ -17,6 +17,45 @@ variables:
   BAO_ADDR: "https://openbao.nuclearlighters.net:8200"
 
 # =============================================================================
+# Changelog files must exist for every APK of this version (MESHSAT-1260)
+# A release ships five APKs with versionCodes base*10+0..4, and F-Droid reads its
+# "What's new" per versionCode. A missing file is invisible until it shows as an
+# empty changelog in the client, so fail here instead. scripts/bump-version.sh
+# writes all five.
+# =============================================================================
+changelog-files:
+  stage: validate
+  image: python:3.12-slim
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_COMMIT_TAG =~ /^v/'
+  script:
+    - |
+      python3 - <<'PYEOF'
+      import re, sys, pathlib
+      gradle = pathlib.Path("app/build.gradle.kts").read_text()
+      m = re.search(r'^\s*versionCode\s*=\s*(\d+)', gradle, re.M)
+      n = re.search(r'^\s*versionName\s*=\s*"([^"]+)"', gradle, re.M)
+      if not m or not n:
+          sys.exit("versionCode/versionName must be literal in app/build.gradle.kts "
+                   "(F-Droid's checkupdates reads them with a number-only regex)")
+      base, name = int(m.group(1)), n.group(1)
+      d = pathlib.Path("fastlane/metadata/android/en-US/changelogs")
+      abis = ["universal", "armeabi-v7a", "arm64-v8a", "x86", "x86_64"]
+      missing = []
+      for digit, abi in enumerate(abis):
+          f = d / f"{base * 10 + digit}.txt"
+          if not f.is_file() or not f.read_text().strip():
+              missing.append(f"{f.name} ({abi})")
+      if missing:
+          print(f"v{name} (versionCode base {base}) is missing changelog files:")
+          for x in missing:
+              print("  -", x)
+          sys.exit("run scripts/bump-version.sh, or write the files by hand")
+      print(f"v{name}: all five changelog files present for {base * 10}-{base * 10 + 4}")
+      PYEOF
+
+# =============================================================================
 # Unit tests (every push to main and every tag) — MESHSAT-1259
 # Runs before the build stage, so a red test stops a release rather than
 # following it. 609 tests, JVM only, no device needed.
