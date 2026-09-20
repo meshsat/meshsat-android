@@ -1,0 +1,1 @@
+Switching Bluetooth or flight mode off and on no longer loses the node until the app is restarted, and the recovery for a node link that stops answering now really rebuilds the link. New for setting up several nodes alike: a whole node configuration can be applied in one go and read back in full.
