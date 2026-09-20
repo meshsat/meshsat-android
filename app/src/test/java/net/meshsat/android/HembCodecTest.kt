@@ -133,7 +133,7 @@ class HembCodecTest {
         val segments = HembRlncEncoder.segmentPayload(original, symSize)
         val k = segments.size
 
-        val symbols = HembRlncEncoder.encode(0, segments, k)
+        val symbols = encodeInnovative(0, segments, k)
         assertEquals(k, symbols.size)
 
         val decoder = HembRlncDecoder(k, symSize)
@@ -163,7 +163,7 @@ class HembCodecTest {
         val k = segments.size
         val n = k + 3
 
-        val symbols = HembRlncEncoder.encode(42, segments, n)
+        val symbols = encodeInnovative(42, segments, n)
         assertEquals(n, symbols.size)
 
         // Feed only first K symbols.
@@ -187,7 +187,7 @@ class HembCodecTest {
     @Test
     fun `RLNC progressive rank tracking`() {
         val segments = listOf(byteArrayOf(1, 2), byteArrayOf(3, 4), byteArrayOf(5, 6))
-        val symbols = HembRlncEncoder.encode(0, segments, 4)
+        val symbols = encodeInnovative(0, segments, 4)
 
         val decoder = HembRlncDecoder(3, 2)
         assertEquals(0, decoder.rank)
@@ -217,9 +217,22 @@ class HembCodecTest {
     }
 
     @Test
+    fun `encoding for a rank assertion survives a dependent draw`() {
+        // About one encoding in 256 is rank-deficient at K=3, so two thousand draws
+        // meet that case several times over. Without the retry inside encodeInnovative
+        // this test is the very flake it guards against (MESHSAT-1269).
+        val segments = listOf(byteArrayOf(1, 2), byteArrayOf(3, 4), byteArrayOf(5, 6))
+        repeat(2000) {
+            val decoder = HembRlncDecoder(3, 2)
+            encodeInnovative(0, segments, 3).take(3).forEach { decoder.feed(it) }
+            assertEquals(3, decoder.rank)
+        }
+    }
+
+    @Test
     fun `hembTryDecode convenience function`() {
         val segments = listOf(byteArrayOf(1, 2, 3), byteArrayOf(4, 5, 6))
-        val symbols = HembRlncEncoder.encode(0, segments, 3)
+        val symbols = encodeInnovative(0, segments, 3)
         val result = hembTryDecode(symbols, 2)
         assertNotNull(result)
         assertEquals(2, result!!.size)
@@ -292,7 +305,7 @@ class HembCodecTest {
     @Test
     fun `reassembly buffer decodes when K symbols received`() {
         val segments = listOf(byteArrayOf(1, 2, 3), byteArrayOf(4, 5, 6))
-        val symbols = HembRlncEncoder.encode(0, segments, 3)
+        val symbols = encodeInnovative(0, segments, 3)
 
         var delivered: ByteArray? = null
         val buf = HembReassemblyBuffer(deliverFn = { delivered = it })
@@ -513,6 +526,39 @@ class HembCodecTest {
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────
+
+    /**
+     * Encode, drawing fresh coefficients until the first K symbols are mutually
+     * innovative.
+     *
+     * `HembRlncEncoder.encode` fills every coefficient from `SecureRandom`, the first
+     * K symbols included, so K of them are linearly dependent about once in 256
+     * encodings at K=3. A test that feeds exactly K symbols and expects full rank
+     * fails at that rate through no fault of the code: "RLNC progressive rank
+     * tracking" went red in the pipeline for the v2.14.8 bump and green in the next
+     * one, on the same source (MESHSAT-1269).
+     *
+     * The Bridge's tests pre-flight the same way before asserting on rank, and say
+     * why: internal/hemb/hemb_test.go, "Pre-flight: verify every C(n,k) subset
+     * decodes. If any subset is rank-deficient, regenerate the encoding with fresh
+     * coefficients."
+     */
+    private fun encodeInnovative(
+        genId: Int,
+        segments: List<ByteArray>,
+        n: Int,
+        attempts: Int = 10,
+    ): List<HembCodedSymbol> {
+        val k = segments.size
+        val symSize = segments[0].size
+        repeat(attempts) {
+            val symbols = HembRlncEncoder.encode(genId, segments, n)
+            val probe = HembRlncDecoder(k, symSize)
+            symbols.take(k).forEach { probe.feed(it) }
+            if (probe.rank == k) return symbols
+        }
+        throw AssertionError("no full-rank encoding of K=$k in $attempts attempts")
+    }
 
     private fun testBearer(
         channelType: String = "mesh",
