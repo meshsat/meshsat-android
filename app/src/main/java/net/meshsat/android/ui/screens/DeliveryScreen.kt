@@ -141,6 +141,13 @@ internal fun deliveryProblemText(error: String): String {
         e == "cancelled" -> "You cancelled it."
         e.startsWith("cancelled: exceeded retry limit") -> "Stopped after too many tries."
         e.startsWith("TTL expired") -> "It waited too long and expired."
+        // Two very different waits, and the queue used to read the same for both (MESHSAT-615):
+        // the radio being out of reach is something a person can act on, a satellite that is not
+        // overhead is not.
+        e.startsWith("Could not hand the message to the modem") ->
+            "The phone cannot reach the node's radio. It is waiting for the radio, not for a satellite."
+        e.contains("no network service") ->
+            "The satellite modem found no network. It is waiting for a satellite to come over."
         e == "egress rules denied" -> "A rule on this link blocked it."
         e == "recovered after restart" -> "The app restarted while sending it, so it is tried again."
         else -> e.replaceFirstChar { it.uppercase() }

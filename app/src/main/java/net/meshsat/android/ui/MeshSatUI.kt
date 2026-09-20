@@ -68,6 +68,7 @@ import net.meshsat.android.service.GatewayService
 import net.meshsat.android.ui.components.MapFocus
 import net.meshsat.android.ui.components.SubScreen
 import net.meshsat.android.ui.screens.AboutScreen
+import net.meshsat.android.ui.components.NodeLinkBanner
 import net.meshsat.android.ui.screens.SosBanner
 import net.meshsat.android.ui.screens.SosScreen
 import net.meshsat.android.ui.screens.AdvancedScreen
@@ -155,6 +156,9 @@ fun MeshSatUI(openRoute: String? = null, onRouteOpened: () -> Unit = {}) {
             Column {
                 StatusStrip()
                 if (currentRoute != "sos") SosBanner(onOpen = { navigate("sos") })
+                // The node being out of reach belongs on every screen, not only on Home
+                // (MESHSAT-615). Setup is where someone goes to do something about it.
+                NodeLinkBanner(onOpen = { navigate("setup") })
             }
         },
         bottomBar = {
