@@ -26,8 +26,12 @@ object Words {
         id.startsWith("iridium") -> "Satellite"
         id.startsWith("mesh") -> "Mesh"
         id.startsWith("sms") -> "SMS"
-        id.startsWith("mqtt") -> "Hub"
+        // hub_relay before hub_0: the relay is a tunnel to another bridge, not the Hub itself.
         id.contains("relay") -> "Hub relay"
+        id.startsWith("hub") -> "Hub"
+        // The older per-device broker link. It was the one called "Hub" while the real Hub link
+        // read "hub_0", so a rule written to "Hub" went nowhere (MESHSAT-1281).
+        id.startsWith("mqtt") -> "MQTT broker"
         id.startsWith("aprs") -> "Ham radio"
         id.startsWith("tcp_rns") || id.startsWith("rns") -> "Reticulum"
         id.isBlank() -> "Unknown"
@@ -62,7 +66,7 @@ object Words {
             id.startsWith("iridium") -> "iridium"
             id.startsWith("mesh") -> "mesh"
             id.startsWith("sms") -> "sms"
-            id.startsWith("mqtt") || id.contains("relay") -> "hub"
+            id.startsWith("mqtt") || id.startsWith("hub") || id.contains("relay") -> "hub"
             id.startsWith("aprs") -> "aprs"
             else -> id
         },
