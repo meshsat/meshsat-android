@@ -1,0 +1,1 @@
+People can now swap contact cards face to face by QR code. Your card is signed by this phone, and both of you read the same fingerprint off the screen to be sure it is really theirs.
