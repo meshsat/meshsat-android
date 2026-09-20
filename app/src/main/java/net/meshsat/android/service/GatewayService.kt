@@ -1296,6 +1296,13 @@ class GatewayService : Service() {
                     wasEncrypted = wasEncrypted,
                     wasCompressed = wasCompressed,
                 )
+                // A message that arrives by SMS goes through the rules, as one that arrives by
+                // mesh or by satellite does. Until MESHSAT-1261 it did not: an inbound SMS was
+                // stored, possibly forwarded to one fixed number, handed to the MQTT client that
+                // nothing brings online, and that was all. `evaluateAndForward` even had an SMS
+                // branch that nothing ever called, so a rule on sms_0 could not fire, whatever
+                // it said.
+                scope.launch { evaluateAndForward(ForwardingRule.Transport.SMS, text, sender) }
             }
         Log.i("MeshSat", "SMS → MQTT relay initialized")
     }
