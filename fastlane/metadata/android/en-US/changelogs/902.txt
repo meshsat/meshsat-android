@@ -1,0 +1,1 @@
+A message forwarded to the Hub now says whether it arrived by SMS or over the mesh, instead of always saying MQTT. Satellite keeps the old value for now, so that no forwarded message can trigger a radio transmission.
