@@ -57,7 +57,8 @@ fun AboutScreen() {
 
         InfoSection("Transports") {
             InfoItem("Meshtastic", "BLE (Bluetooth Low Energy)")
-            InfoItem("Iridium 9603N", "Bluetooth SPP via HC-05/HC-06")
+            InfoItem("Iridium 9603N", "The MeshSat node's BLE pipe")
+            InfoItem("RockBLOCK 9704", "Bluetooth SPP via HC-05/HC-06")
             InfoItem("Cellular SMS", "Native Android SMS")
         }
 

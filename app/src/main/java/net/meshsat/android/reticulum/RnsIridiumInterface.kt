@@ -4,7 +4,8 @@ import android.util.Log
 import net.meshsat.android.bt.IridiumSpp
 
 /**
- * Reticulum interface over Iridium SBD (via HC-05 Bluetooth SPP).
+ * Reticulum interface over Iridium SBD, through whatever link `IridiumSpp` is on - the
+ * MeshSat node's BLE pipe since v2.9.0, not the HC-05 SPP bridge it used to be.
  *
  * Encapsulates Reticulum packets in SBD Mobile-Originated (MO) messages.
  * Most Reticulum packets fit in a single SBD frame (340-byte MO MTU).

@@ -75,8 +75,8 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 
 /**
- * Foreground service that keeps Bluetooth connections alive
- * for Meshtastic BLE and Iridium SPP (HC-05).
+ * Foreground service that keeps the Bluetooth connections alive: the MeshSat node over BLE,
+ * carrying both Meshtastic and the 9603's Iridium pipe, and a 9704 over HC-05 SPP.
  *
  * Manages transport lifecycle, message routing via RulesEngine,
  * signal history tracking, node position storage, notifications, and SOS.
