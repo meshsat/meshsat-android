@@ -1,0 +1,1 @@
+Passes from every Iridium satellite are shown once. When the app downloaded orbit data from its backup source, some satellites came twice and others were missing, so some passes were doubled and others never shown.
