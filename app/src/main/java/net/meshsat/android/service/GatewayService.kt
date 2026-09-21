@@ -324,6 +324,12 @@ class GatewayService : Service() {
             ContextCompat.RECEIVER_NOT_EXPORTED,
         )
         iridiumSpp = IridiumSpp().also { spp ->
+            // Every satellite session is kept, taken or not, for the chart's session dots (MESHSAT-1300).
+            scope.launch {
+                spp.sessionOutcomes.collect { ok ->
+                    db.signalDao().insert(SignalRecord(source = "gss", value = if (ok) 1 else 0))
+                }
+            }
             // Any satellite session can bring a message in: it is stored the moment it arrives.
             spp.mtSink = { bytes -> storeIridiumMt(spp, String(bytes, Charsets.UTF_8)) }
         }
@@ -1163,7 +1169,7 @@ class GatewayService : Service() {
         val predictor = {
             val nowMs = System.currentTimeMillis()
             if (nowMs - cacheTimestampMs < cacheTtlMs && cachedPasses.isNotEmpty()) {
-                cachedPasses
+                cachedPasses.filter { it.losUnix >= nowMs / 1000 }
             } else {
                 val tleSet = kotlinx.coroutines.runBlocking { tleFetcher.localTles() }
                 val allTles = tleSet.tles
@@ -1181,7 +1187,10 @@ class GatewayService : Service() {
                                 lat = loc.latitude,
                                 lon = loc.longitude,
                                 altKm = (loc.altitude / 1000.0),
-                                startUnix = nowSec,
+                                // Three hours back as well, for the signal-vs-passes chart on
+                                // Home (MESHSAT-1300); the scheduler still gets only what has
+                                // not ended yet (below).
+                                startUnix = nowSec - 3 * 3600L,
                                 endUnix = nowSec + 6 * 3600L, // 6 hours in seconds
                             )
                         } catch (e: Exception) {
@@ -1196,7 +1205,7 @@ class GatewayService : Service() {
                     cachedPasses = sorted
                     _passes.value = sorted
                     cacheTimestampMs = nowMs
-                    sorted
+                    sorted.filter { it.losUnix >= nowSec }
                 } else emptyList()
             }
         }

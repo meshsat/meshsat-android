@@ -1,5 +1,10 @@
 package net.meshsat.android.ui.screens
 
+import net.meshsat.android.ui.components.SkyChart
+import net.meshsat.android.ui.components.SkyGeometry
+import net.meshsat.android.ui.components.SkySession
+import net.meshsat.android.ui.components.SkySignal
+import androidx.compose.foundation.clickable
 import android.Manifest
 import android.content.pm.PackageManager
 import androidx.compose.foundation.Image
@@ -116,6 +121,8 @@ fun HomeLanes(navigate: (String) -> Unit) {
     var smsQueue by remember { mutableIntStateOf(0) }
     var smsToday by remember { mutableIntStateOf(0) }
     var savedNode by remember { mutableStateOf("") }
+    var skySignals by remember { mutableStateOf<List<SkySignal>>(emptyList()) }
+    var skySessions by remember { mutableStateOf<List<SkySession>>(emptyList()) }
     LaunchedEffect(Unit) {
         while (true) {
             withContext(Dispatchers.IO) {
@@ -124,6 +131,10 @@ fun HomeLanes(navigate: (String) -> Unit) {
                 meshQueue = dao.queueDepth("mesh_0")
                 smsQueue = dao.queueDepth("sms_0")
                 smsToday = db.messageDao().countByTransportSince("sms", System.currentTimeMillis() - 86_400_000)
+                // The last three hours of signal and sessions, for the chart under the Satellite lane
+                val skySince = System.currentTimeMillis() - 3 * 3600_000L
+                skySignals = db.signalDao().getSince("iridium", skySince).first().map { SkySignal(it.timestamp / 1000, it.value) }
+                skySessions = db.signalDao().getSince("gss", skySince).first().map { SkySession(it.timestamp / 1000, it.value >= 1) }
             }
             savedNode = settings.meshtasticBleAddress.first()
             delay(5_000)
@@ -254,6 +265,27 @@ fun HomeLanes(navigate: (String) -> Unit) {
                 inFlight = iridiumQueue > 0,
                 onClick = { navigate(if (sppState == IridiumSpp.State.Connected) "passes" else "setup/satellite") },
             )
+            // The Bridge's Iridium widget: three hours of real signal and sessions over the passes
+            // that were predicted for them, and the next three hours of passes (MESHSAT-1300).
+            val nowSec = now / 1000
+            val skyStart = nowSec - 3 * 3600L
+            val skyEnd = nowSec + 3 * 3600L
+            if (savedNode.isNotBlank() && (skySignals.isNotEmpty() || passes.any { SkyGeometry.overlaps(it, skyStart, skyEnd) })) {
+                SkyChart(
+                    passes = passes,
+                    signals = skySignals,
+                    sessions = skySessions,
+                    startSec = skyStart,
+                    endSec = skyEnd,
+                    nowSec = nowSec,
+                    compact = true,
+                    windowLabel = "6 h window",
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { navigate("passes") }
+                        .padding(start = 12.dp, end = 12.dp, bottom = 10.dp),
+                )
+            }
             HorizontalDivider(color = MeshSatBorder)
             TransportLane(
                 icon = ImageVector.vectorResource(R.drawable.ic_transport_mesh),

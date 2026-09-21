@@ -144,6 +144,14 @@ class IridiumSpp(private val clock: () -> Long = System::currentTimeMillis) {
     /** One per crossing, so the service can re-establish the link and arm again. */
     val linkFaults: SharedFlow<Unit> = _linkFaults
 
+    private val _sessionOutcomes = MutableSharedFlow<Boolean>(extraBufferCapacity = 8, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+
+    /**
+     * Each satellite session's outcome, true when the gateway took it (MO status 0-4): the dots
+     * the Bridge calls GSS on its signal-vs-passes chart (MESHSAT-1300).
+     */
+    val sessionOutcomes: SharedFlow<Boolean> = _sessionOutcomes
+
     private val _signal = MutableStateFlow(0)
     val signal: StateFlow<Int> = _signal
 
@@ -477,6 +485,7 @@ class IridiumSpp(private val clock: () -> Long = System::currentTimeMillis) {
                     "MT status ${result.mtStatus}, ${result.mtQueued} waiting",
             )
             if (result.moStatus == 32 || result.moStatus == 36) sbdixHeldUntil = clock() + SBDIX_HOLD_MS
+            _sessionOutcomes.tryEmit(result.moSuccess)
             clearMoBuffer()
             // A message came in with this session: read it now, before another session overwrites it.
             val mt = if (result.mtAvailable) readMtBinary()?.takeIf { it.isNotEmpty() } else null
