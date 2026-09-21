@@ -89,6 +89,7 @@ import net.meshsat.android.data.ConversationKeyRepository
 import net.meshsat.android.data.ConversationSummary
 import net.meshsat.android.data.Message
 import net.meshsat.android.data.SettingsRepository
+import net.meshsat.android.engine.SatelliteLimits
 import net.meshsat.android.service.GatewayService
 import net.meshsat.android.ui.theme.ColorCellular
 import net.meshsat.android.ui.theme.ColorIridium
@@ -585,8 +586,12 @@ fun ConversationChatView(
                 .border(1.dp, MeshSatBorder, RoundedCornerShape(8.dp))
                 .padding(8.dp),
         ) {
+            // A satellite message that cannot fit one frame is stopped here, not after it has been
+            // queued and billed for (MESHSAT-1280). The keyboard's Send key goes through this too.
+            val fitsTheLink = sendTransport != "iridium" ||
+                SatelliteLimits.fits(composeText.trim().toByteArray(Charsets.UTF_8).size)
             val send = {
-                if (composeText.isNotBlank()) {
+                if (composeText.isNotBlank() && fitsTheLink) {
                     sendMessage(context, composeText.trim(), sendTransport, peer, meshConnected, iridiumConnected)
                     composeText = ""
                 }
@@ -617,13 +622,13 @@ fun ConversationChatView(
                 )
                 IconButton(
                     onClick = send,
-                    enabled = composeText.isNotBlank(),
+                    enabled = composeText.isNotBlank() && fitsTheLink,
                     modifier = Modifier.size(48.dp),
                 ) {
                     Icon(
                         Icons.AutoMirrored.Filled.Send,
                         contentDescription = "Send",
-                        tint = if (composeText.isNotBlank()) MeshSatTeal else MeshSatTextMuted,
+                        tint = if (composeText.isNotBlank() && fitsTheLink) MeshSatTeal else MeshSatTextMuted,
                     )
                 }
             }
@@ -645,7 +650,8 @@ private fun composeHint(transport: String, text: String, peer: String, meshUp: B
     val bytes = text.trim().toByteArray(Charsets.UTF_8).size
     return when (transport) {
         "iridium" -> {
-            val size = if (bytes == 0) "" else " $bytes bytes, ${Words.count((bytes + 49) / 50, "credit")}${if (bytes > 340) ", sent in parts" else ""}."
+            if (!SatelliteLimits.fits(bytes)) return SatelliteLimits.tooLong(bytes)
+            val size = if (bytes == 0) "" else " $bytes bytes, ${Words.count((bytes + 49) / 50, "credit")}."
             (if (satUp) "By satellite." else "By satellite, when the modem is back.") + size
         }
         "mesh" -> when {
