@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- Internet for map tiles -->
     <uses-permission android:name="android.permission.INTERNET" />
@@ -47,6 +48,15 @@
         android:supportsRtl="true"
         android:networkSecurityConfig="@xml/network_security_config"
         android:theme="@style/Theme.MeshSat">
+
+        <!-- The QR scanner (Hub code, key sync, contact cards), upright and with the status bar.
+             The library's own screen is locked to landscape and full screen, so the phone had to
+             be turned sideways to scan a code (owner, 21 Sep 2026, MESHSAT-1299). -->
+        <activity
+            android:name="com.journeyapps.barcodescanner.CaptureActivity"
+            android:screenOrientation="portrait"
+            android:theme="@android:style/Theme.Material.NoActionBar"
+            tools:replace="android:screenOrientation,android:theme" />
 
         <activity
             android:name=".MainActivity"
