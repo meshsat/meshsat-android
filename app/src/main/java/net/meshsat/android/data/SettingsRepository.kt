@@ -233,14 +233,21 @@ class SettingsRepository(private val context: Context) {
     // --- Per-channel compression (MESHSAT-203) ---
     // Values: "off", "msvqsc", "smaz2"
 
+    /**
+     * Kept only so an old export still imports. Nothing reads it for sending: a Meshtastic text
+     * channel is shared with radios that are not MeshSat, so mesh text always goes out as typed
+     * (OutgoingText.onMesh, MESHSAT-1286).
+     */
     val compressMesh: Flow<String> = context.dataStore.data.map {
-        it[KEY_COMPRESS_MESH] ?: "msvqsc"
+        it[KEY_COMPRESS_MESH] ?: "off"
     }
     val compressIridium: Flow<String> = context.dataStore.data.map {
         it[KEY_COMPRESS_IRIDIUM] ?: "off"   // Off by default — Hub can't decode MSVQ-SC yet
     }
     val compressSms: Flow<String> = context.dataStore.data.map {
-        it[KEY_COMPRESS_SMS] ?: "msvqsc"
+        // Off unless the person turns it on for a MeshSat peer: an ordinary phone shows a coded
+        // SMS as a line of base64, and MSVQ-SC is lossy (MESHSAT-1286).
+        it[KEY_COMPRESS_SMS] ?: "off"
     }
     val compressMqtt: Flow<String> = context.dataStore.data.map {
         it[KEY_COMPRESS_MQTT] ?: "off"      // MQTT sends JSON, no compression needed
