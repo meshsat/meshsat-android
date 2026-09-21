@@ -2,7 +2,9 @@ package net.meshsat.android
 
 import net.meshsat.android.data.EmergencyContact
 import net.meshsat.android.data.EmergencyContact.Companion.Added
+import net.meshsat.android.ui.screens.contactsAppAmong
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -45,5 +47,21 @@ class EmergencyContactAddingTest {
         val r = EmergencyContact.adding(emptyList(), "Anna\tde\nVries", "+31612345678") as Added.Ok
         assertEquals(r.list, EmergencyContact.decode(EmergencyContact.encode(r.list)))
         assertEquals("Anna de Vries", r.list.single().name)
+    }
+
+    @Test
+    fun `a file manager that says it can pick things is not asked about`() {
+        assertEquals(
+            "com.android.contacts",
+            contactsAppAmong(listOf("com.android.contacts" to true, "pl.solidexplorer2" to false)),
+        )
+        assertEquals("org.fossify.contacts", contactsAppAmong(listOf("org.fossify.contacts" to false)))
+    }
+
+    @Test
+    fun `two real contacts apps, or none, are left to Android`() {
+        assertNull(contactsAppAmong(listOf("com.android.contacts" to true, "com.google.android.contacts" to true)))
+        assertNull(contactsAppAmong(listOf("a.contacts" to false, "b.files" to false)))
+        assertNull(contactsAppAmong(emptyList()))
     }
 }
