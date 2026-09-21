@@ -1,0 +1,1 @@
+Home now shows the last three hours of satellite signal over the passes that were predicted, and the next three hours of passes, like the MeshSat kit's dashboard. The passes screen draws each pass at its real height; before, every pass was drawn at half of it.
