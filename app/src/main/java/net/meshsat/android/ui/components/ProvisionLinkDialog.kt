@@ -74,7 +74,11 @@ fun ProvisionLinkDialog(url: String, onDone: () -> Unit) {
                     scope.launch {
                         try {
                             val bundle = withContext(Dispatchers.IO) {
-                                ProvisionImporter.claimBundle(request)
+                                ProvisionImporter.claimBundle(request) { attempt ->
+                                    if (attempt == 1) scope.launch {
+                                        Toast.makeText(context, "The Hub is getting the new credentials ready. Waiting...", Toast.LENGTH_LONG).show()
+                                    }
+                                }
                             }
                             val msg = ProvisionImporter.apply(bundle, context)
                             // Start the gateway again so it reads the new Hub settings (MESHSAT-749).

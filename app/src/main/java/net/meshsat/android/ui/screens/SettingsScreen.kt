@@ -296,7 +296,11 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
                 try {
                     Toast.makeText(context, "Processing provision QR...", Toast.LENGTH_SHORT).show()
                     val bundle = withContext(Dispatchers.IO) {
-                        net.meshsat.android.crypto.ProvisionImporter.processQr(scanned)
+                        net.meshsat.android.crypto.ProvisionImporter.processQr(scanned) { attempt ->
+                            if (attempt == 1) scope.launch {
+                                Toast.makeText(context, "The Hub is getting the new credentials ready. Waiting...", Toast.LENGTH_LONG).show()
+                            }
+                        }
                     }
                     provisionBundle = bundle
                     showProvisionDialog = true

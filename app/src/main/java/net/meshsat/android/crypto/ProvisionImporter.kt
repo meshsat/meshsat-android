@@ -54,7 +54,7 @@ object ProvisionImporter {
      * 1. Inline: meshsat://provision/<base64url-encoded-json> (v2.2.0 — full bundle in QR)
      * 2. Nonce: meshsat://provision/{bid}/{nonce}?hub={host} (v2.2.1+ — fetch via HTTPS)
      */
-    suspend fun processQr(url: String): ProvisionBundle {
+    suspend fun processQr(url: String, onWaiting: ((Int) -> Unit)? = null): ProvisionBundle {
         require(url.startsWith(URL_PREFIX)) { "Not a MeshSat provisioning QR code" }
 
         val payload = url.substring(URL_PREFIX.length)
@@ -63,7 +63,7 @@ object ProvisionImporter {
         return if (payload.contains("?hub=")) {
             // Nonce format: {bid}/{nonce}?hub={host}
             val request = parseNonceUrl(payload)
-            claimBundle(request)
+            claimBundle(request, onWaiting)
         } else {
             // Inline format: base64url-encoded JSON
             parseInlineBundle(payload)
@@ -127,7 +127,37 @@ object ProvisionImporter {
      *
      * @throws ProvisionException with user-friendly message on failure
      */
-    suspend fun claimBundle(request: ProvisionRequest): ProvisionBundle {
+    suspend fun claimBundle(request: ProvisionRequest, onWaiting: ((Int) -> Unit)? = null): ProvisionBundle {
+        // The Hub answers 503 with Retry-After while its broker has not yet accepted the new
+        // password; the claim stays valid and the same link works a few seconds later
+        // (MESHSAT-1298, measured up to 53 s). That is a wait, not a failed scan.
+        val deadlineMs = System.currentTimeMillis() + CLAIM_WAIT_MAX_MS
+        var attempt = 0
+        while (true) {
+            attempt++
+            when (val r = claimOnce(request)) {
+                is Claim.Done -> return r.bundle
+                is Claim.NotYet -> {
+                    val waitMs = claimRetryDelayMs(r.retryAfterSec)
+                    if (System.currentTimeMillis() + waitMs > deadlineMs) {
+                        throw ProvisionException(
+                            "The Hub is still getting the new credentials ready. Wait a minute, then scan the same code again."
+                        )
+                    }
+                    Log.i(TAG, "Hub not ready for the claim yet (attempt $attempt); trying again in ${waitMs / 1000}s")
+                    onWaiting?.invoke(attempt)
+                    kotlinx.coroutines.delay(waitMs)
+                }
+            }
+        }
+    }
+
+    private sealed class Claim {
+        data class Done(val bundle: ProvisionBundle) : Claim()
+        data class NotYet(val retryAfterSec: Int?) : Claim()
+    }
+
+    private fun claimOnce(request: ProvisionRequest): Claim {
         val claimUrl = "https://${request.hubHost}/api/bridges/${request.bridgeId}/provision/${request.nonce}"
         Log.i(TAG, "Claiming provision: $claimUrl")
 
@@ -142,8 +172,9 @@ object ProvisionImporter {
             when {
                 code == 200 -> {
                     val body = BufferedReader(InputStreamReader(conn.inputStream)).readText()
-                    return parseBundle(body)
+                    return Claim.Done(parseBundle(body))
                 }
+                code == 503 -> return Claim.NotYet(conn.getHeaderField("Retry-After")?.trim()?.toIntOrNull())
                 code == 404 -> throw ProvisionException(
                     "Provisioning token expired or already used. Generate a new QR from the Hub."
                 )
@@ -242,4 +273,10 @@ object ProvisionImporter {
     }
 
     class ProvisionException(message: String) : Exception(message)
+
+    /** How long a scan may wait for the Hub to be ready before it gives up (MESHSAT-1298). */
+    const val CLAIM_WAIT_MAX_MS = 120_000L
+
+    /** The Hub's Retry-After, kept between 1 and 15 s; 5 s when it names none. Pure, so it has a test. */
+    internal fun claimRetryDelayMs(retryAfterSec: Int?): Long = ((retryAfterSec ?: 5).coerceIn(1, 15)) * 1000L
 }
