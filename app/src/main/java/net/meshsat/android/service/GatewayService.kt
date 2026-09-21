@@ -41,6 +41,7 @@ import net.meshsat.android.data.SettingsRepository
 import net.meshsat.android.data.SignalRecord
 import net.meshsat.android.engine.HubOrigin
 import net.meshsat.android.engine.OutgoingText
+import net.meshsat.android.engine.SatelliteLimits
 import net.meshsat.android.engine.AckTracker
 import net.meshsat.android.engine.Dispatcher
 import net.meshsat.android.engine.FailoverResolver
@@ -275,10 +276,6 @@ class GatewayService : Service() {
     // Phase B: structured dispatch (replaces basic if/else routing)
     private var dispatcher: Dispatcher? = null
     private var accessEvaluator: AccessEvaluator? = null
-
-    // SBD fragmentation: wrapping counter for Iridium 2-byte fragment header.
-    private var iridiumMsgID = 0
-    private fun nextMsgID(): Int = (iridiumMsgID++ and 0xFF)
 
     // Phase C: transport hardening
     private var interfaceManager: InterfaceManager? = null
@@ -2353,9 +2350,9 @@ class GatewayService : Service() {
                     val hold = spp.sbdixHoldRemainingMs()
                     if (hold > 0) return "${Dispatcher.NOT_NOW}$hold the satellite modem pauses after a session found no network"
                     val data = if (payload.isNotEmpty()) payload else textPreview.toByteArray()
-                    // Fragment messages >340B using Iridium 2-byte header.
-                    val fragments = IridiumFragment.fragment(data, IridiumFragment.MO_MTU, nextMsgID())
-                    val chunks = fragments ?: listOf(data)
+                    // One message, one frame: nothing is cut into parts any more (MESHSAT-1280).
+                    if (!SatelliteLimits.fits(data.size)) return "${Dispatcher.NEVER} ${SatelliteLimits.tooLong(data.size)}"
+                    val chunks = listOf(data)
                     var momsn = -1
                     for ((i, chunk) in chunks.withIndex()) {
                         val part = if (chunks.size > 1) " (part ${i + 1} of ${chunks.size})" else ""
@@ -3280,9 +3277,13 @@ class GatewayService : Service() {
             }
         }
 
-        // Fragment messages >340B using Iridium 2-byte header.
-        val fragments = IridiumFragment.fragment(data, IridiumFragment.MO_MTU, nextMsgID())
-        val chunks = fragments ?: listOf(data)
+        // One message, one frame: nothing is cut into parts any more (MESHSAT-1280).
+        if (!SatelliteLimits.fits(data.size)) {
+            Log.w("MeshSat", "Iridium: ${data.size} bytes is too long for one satellite message; not sent")
+            postMessageNotification("Not sent by satellite", SatelliteLimits.tooLong(data.size))
+            return
+        }
+        val chunks = listOf(data)
 
         for ((i, chunk) in chunks.withIndex()) {
             val written = spp.writeMoBuffer(chunk)
@@ -3315,9 +3316,6 @@ class GatewayService : Service() {
                 timestamp = System.currentTimeMillis(),
             )
         )
-        if (fragments != null) {
-            Log.i("MeshSat", "Iridium MO sent ${chunks.size} fragments (${data.size} bytes)")
-        }
     }
 
     /** Send a text message to mesh (called from UI compose bar). */

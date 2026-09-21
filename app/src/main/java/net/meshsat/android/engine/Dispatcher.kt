@@ -450,6 +450,15 @@ class Dispatcher(
                     handleSuccess(channelId, del)
                     true
                 }
+                error.startsWith(NEVER) -> {
+                    // Trying again cannot help (a message too long for the link): stop here,
+                    // rather than spend every retry and the queue's patience on it.
+                    val why = error.removePrefix(NEVER).trim()
+                    deliveryDao.setStatus(del.id, "dead", why)
+                    audit("drop", channelId, del, why.take(80))
+                    Log.w(TAG, "Delivery ${del.id} can never go by $channelId: $why")
+                    true
+                }
                 error.startsWith(NOT_NOW) -> {
                     // Not this message's failure (the satellite modem's pause after a session found
                     // no network): wait it out without counting a try.
@@ -602,6 +611,9 @@ class Dispatcher(
          * reason. The delivery waits without counting a try, and the rest of the batch waits too.
          */
         const val NOT_NOW = "not-now:"
+
+        /** A callback's answer for a message this channel can never carry, however often it is tried. */
+        const val NEVER = "never:"
 
         /** A callback's answer for a send that may have arrived although it failed (the link dropped mid-session). */
         const val UNCONFIRMED = "unconfirmed:"
