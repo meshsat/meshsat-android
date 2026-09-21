@@ -442,6 +442,10 @@ class GatewayService : Service() {
         passScheduler = null
         hubReporter?.stop()
         hubReporter = null
+        // It lives in the companion, so a restarted service would otherwise run a second
+        // client beside it under the same client id (MESHSAT-1305).
+        mqttTransport?.disconnect()
+        mqttTransport = null
         aprsMessageTracker?.cancelAll()
         aprsMessageTracker = null
         aprsBeacon?.stop()
