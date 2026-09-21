@@ -1,0 +1,1 @@
+Choosing an emergency contact now opens your phone's contacts straight away. Rules brought in by importing a configuration now take effect at once; before, they were ignored until the app was restarted.
