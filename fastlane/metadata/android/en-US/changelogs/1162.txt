@@ -1,0 +1,1 @@
+Home and the node screen show your MeshSat node's battery: how full it is, its voltage, whether it runs on USB power, and roughly how long it will last at the rate it has been draining.
