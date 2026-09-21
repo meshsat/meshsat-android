@@ -1,5 +1,9 @@
 package net.meshsat.android.ui.screens
 
+import net.meshsat.android.ui.components.SkyChart
+import net.meshsat.android.ui.components.SkySession
+import net.meshsat.android.ui.components.SkySignal
+import kotlinx.coroutines.flow.first
 import android.Manifest
 import android.content.pm.PackageManager
 import android.location.LocationManager
@@ -107,6 +111,19 @@ fun PassPredictorScreen() {
     var cacheAgeSec by remember { mutableLongStateOf(-1L) }
     var tleSource by remember { mutableStateOf(TleFetcher.Source.None) }
     var windowHours by remember { mutableIntStateOf(24) }
+    var skySignals by remember { mutableStateOf<List<SkySignal>>(emptyList()) }
+    var skySessions by remember { mutableStateOf<List<SkySession>>(emptyList()) }
+    // The past half of the window: what the modem actually heard, and its sessions.
+    LaunchedEffect(windowHours) {
+        while (true) {
+            withContext(Dispatchers.IO) {
+                val since = System.currentTimeMillis() - windowHours * 3600_000L / 2
+                skySignals = db.signalDao().getSince("iridium", since).first().map { SkySignal(it.timestamp / 1000, it.value) }
+                skySessions = db.signalDao().getSince("gss", since).first().map { SkySession(it.timestamp / 1000, it.value >= 1) }
+            }
+            delay(60_000)
+        }
+    }
     var minElevDeg by remember { mutableIntStateOf(5) }
     var errorMsg by remember { mutableStateOf<String?>(null) }
     var expandedPassList by remember { mutableStateOf(false) }
@@ -350,15 +367,32 @@ fun PassPredictorScreen() {
             }
         }
 
-        // Elevation arc chart
+        // Signal vs passes, as on the Bridge (MESHSAT-1300)
         if (!loading && passes.isNotEmpty()) {
             item {
-                PassElevationChart(
-                    passes = passes,
-                    windowHours = windowHours,
-                    minElevDeg = minElevDeg.toDouble(),
-                    nowUnix = nowUnix,
-                )
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MeshSatSurface, RoundedCornerShape(8.dp))
+                        .border(1.dp, MeshSatBorder, RoundedCornerShape(8.dp))
+                        .padding(8.dp),
+                ) {
+                    Text(
+                        "Signal vs passes",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MeshSatTextSecondary,
+                        modifier = Modifier.padding(bottom = 4.dp),
+                    )
+                    SkyChart(
+                        passes = passes,
+                        signals = skySignals,
+                        sessions = skySessions,
+                        startSec = nowUnix - windowHours * 3600L / 2,
+                        endSec = nowUnix + windowHours * 3600L / 2,
+                        nowSec = nowUnix,
+                        compact = false,
+                    )
+                }
             }
         }
 
@@ -434,175 +468,6 @@ fun PassPredictorScreen() {
                         .padding(24.dp),
                 )
             }
-        }
-    }
-}
-
-@Composable
-private fun PassElevationChart(
-    passes: List<PassPrediction>,
-    windowHours: Int,
-    minElevDeg: Double,
-    nowUnix: Long,
-) {
-    val density = LocalDensity.current
-
-    Canvas(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(250.dp)
-            .background(MeshSatSurface, RoundedCornerShape(8.dp))
-            .border(1.dp, MeshSatBorder, RoundedCornerShape(8.dp))
-            .padding(4.dp)
-    ) {
-        val w = size.width
-        val h = size.height
-        val pad = 40f * density.density   // left padding for Y labels
-        val padBottom = 24f * density.density  // bottom padding for X labels
-        val padTop = 8f * density.density
-        val chartW = w - pad
-        val chartH = h - padBottom - padTop
-
-        val startUnix = nowUnix - windowHours * 3600L / 2
-        val endUnix = nowUnix + windowHours * 3600L / 2
-        val timeRange = (endUnix - startUnix).toFloat()
-
-        fun timeToX(unix: Long): Float = pad + ((unix - startUnix).toFloat() / timeRange) * chartW
-        fun elevToY(deg: Double): Float = padTop + chartH * (1f - (deg.toFloat() / 90f))
-
-        val dashEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 10f), 0f)
-
-        // Horizontal grid lines at 30 and 60 degrees
-        val gridPaint = Color(0xFF4B5563).copy(alpha = 0.4f)
-        for (deg in listOf(30.0, 60.0)) {
-            val y = elevToY(deg)
-            drawLine(
-                color = gridPaint,
-                start = androidx.compose.ui.geometry.Offset(pad, y),
-                end = androidx.compose.ui.geometry.Offset(w, y),
-                pathEffect = dashEffect,
-                strokeWidth = 1f,
-            )
-        }
-
-        // Y axis labels: 0, 30, 60, 90
-        val labelPaint = android.graphics.Paint().apply {
-            color = android.graphics.Color.parseColor("#6B7280")
-            textSize = 9f * density.density
-            textAlign = android.graphics.Paint.Align.RIGHT
-            isAntiAlias = true
-        }
-        for (deg in listOf(0, 30, 60, 90)) {
-            val y = elevToY(deg.toDouble())
-            drawContext.canvas.nativeCanvas.drawText(
-                "${deg}\u00B0",
-                pad - 6f * density.density,
-                y + 3f * density.density,
-                labelPaint,
-            )
-        }
-
-        // X axis labels: time marks
-        val xLabelPaint = android.graphics.Paint().apply {
-            color = android.graphics.Color.parseColor("#6B7280")
-            textSize = 9f * density.density
-            textAlign = android.graphics.Paint.Align.CENTER
-            isAntiAlias = true
-        }
-        // Determine interval: 2h for <= 24h, 4h for larger windows
-        val intervalHours = if (windowHours <= 24) 2 else 4
-        val intervalSec = intervalHours * 3600L
-        // Snap start to next interval boundary
-        val firstTick = ((startUnix / intervalSec) + 1) * intervalSec
-        var tick = firstTick
-        while (tick < endUnix) {
-            val x = timeToX(tick)
-            if (x > pad && x < w - 10f) {
-                drawContext.canvas.nativeCanvas.drawText(
-                    formatTimeUtc(tick),
-                    x,
-                    h - 4f * density.density,
-                    xLabelPaint,
-                )
-                // Small tick mark
-                drawLine(
-                    color = gridPaint,
-                    start = androidx.compose.ui.geometry.Offset(x, padTop + chartH),
-                    end = androidx.compose.ui.geometry.Offset(x, padTop + chartH + 4f * density.density),
-                    strokeWidth = 1f,
-                )
-            }
-            tick += intervalSec
-        }
-
-        // Baseline at 0 degrees
-        drawLine(
-            color = MeshSatBorder,
-            start = androidx.compose.ui.geometry.Offset(pad, elevToY(0.0)),
-            end = androidx.compose.ui.geometry.Offset(w, elevToY(0.0)),
-            strokeWidth = 1f,
-        )
-
-        // Min elevation line (dashed amber)
-        if (minElevDeg > 0) {
-            val minY = elevToY(minElevDeg)
-            drawLine(
-                color = MeshSatAmber.copy(alpha = 0.6f),
-                start = androidx.compose.ui.geometry.Offset(pad, minY),
-                end = androidx.compose.ui.geometry.Offset(w, minY),
-                pathEffect = dashEffect,
-                strokeWidth = 1f * density.density,
-            )
-        }
-
-        // Determine next upcoming pass for highlight
-        val nextUpcoming = passes.firstOrNull { it.aosUnix > nowUnix }
-
-        // Pass arcs
-        for (pass in passes) {
-            if (pass.losUnix < startUnix || pass.aosUnix > endUnix) continue
-
-            val x1 = timeToX(pass.aosUnix)
-            val x2 = timeToX(pass.losUnix)
-            val xMid = (x1 + x2) / 2f
-            val yPeak = elevToY(pass.peakElevDeg)
-            val yBase = elevToY(0.0)
-
-            val isHighlight = pass.isActive || pass == nextUpcoming
-            val fillAlpha = if (isHighlight) 0.5f else 0.25f
-            val strokeAlpha = if (isHighlight) 1f else 0.6f
-            val strokeWidth = if (isHighlight) 2.5f * density.density else 1.5f * density.density
-
-            // Filled bezier arc
-            val fillPath = Path().apply {
-                moveTo(x1, yBase)
-                quadraticTo(xMid, yPeak, x2, yBase)
-                close()
-            }
-            drawPath(fillPath, ColorIridium.copy(alpha = fillAlpha))
-
-            // Stroke bezier arc
-            val strokePath = Path().apply {
-                moveTo(x1, yBase)
-                quadraticTo(xMid, yPeak, x2, yBase)
-            }
-            drawPath(
-                strokePath,
-                ColorIridium.copy(alpha = strokeAlpha),
-                style = Stroke(width = strokeWidth),
-            )
-        }
-
-        // Current time vertical line (dashed amber)
-        val nowX = timeToX(nowUnix)
-        if (nowX in pad..w) {
-            drawLine(
-                color = MeshSatAmber,
-                start = androidx.compose.ui.geometry.Offset(nowX, padTop),
-                end = androidx.compose.ui.geometry.Offset(nowX, padTop + chartH),
-                pathEffect = dashEffect,
-                strokeWidth = 1.5f * density.density,
-            )
         }
     }
 }
