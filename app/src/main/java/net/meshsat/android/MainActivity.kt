@@ -15,6 +15,7 @@ import androidx.core.content.ContextCompat
 import net.meshsat.android.crypto.ProvisionImporter
 import net.meshsat.android.ui.MeshSatUI
 import net.meshsat.android.ui.screens.WelcomeScreen
+import net.meshsat.android.ui.components.ProvisionClaimHost
 import net.meshsat.android.ui.components.ProvisionLinkDialog
 import net.meshsat.android.ui.theme.MeshSatTheme
 import net.meshsat.android.ui.theme.NightModeEffect
@@ -84,6 +85,7 @@ class MainActivity : ComponentActivity() {
                 provisionLink.value?.let { url ->
                     ProvisionLinkDialog(url = url, onDone = { provisionLink.value = null })
                 }
+                ProvisionClaimHost()
             }
         }
     }
