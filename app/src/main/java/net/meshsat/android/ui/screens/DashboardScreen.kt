@@ -1,5 +1,11 @@
 package net.meshsat.android.ui.screens
 
+import net.meshsat.android.ui.components.SkyChart
+import net.meshsat.android.ui.components.SkyGeometry
+import net.meshsat.android.ui.components.SkySession
+import net.meshsat.android.ui.components.SkySignal
+import androidx.compose.runtime.produceState
+import androidx.compose.foundation.clickable
 import android.content.Intent
 import android.widget.Toast
 import androidx.compose.foundation.Canvas
@@ -233,18 +239,8 @@ fun DashboardScreen(navigate: (String) -> Unit = {}) {
                 }
                 "signals" -> {
                 // ====== 2. Signal History Charts ======
-                if (iridiumHistory.isNotEmpty()) {
-                    item {
-                        SignalChart(
-                            title = "Satellite signal, last 6 hours",
-                            records = iridiumHistory,
-                            maxValue = 5f,
-                            minValue = 0f,
-                            color = ColorIridium,
-                            formatValue = { "${it.toInt()} of 5" },
-                        )
-                    }
-                }
+                // The Bridge's Iridium widget in place of the plain sparkline (MESHSAT-1300).
+                item { SatelliteSkyCard(navigate) }
 
                 if (meshHistory.isNotEmpty()) {
                     item {
@@ -381,6 +377,44 @@ fun DashboardScreen(navigate: (String) -> Unit = {}) {
 // ============================================================================
 
 /** Reusable card container. */
+/**
+ * Three hours of real satellite signal and sessions over the passes predicted for them, and the
+ * next three hours of passes: the Bridge dashboard's Iridium widget (MESHSAT-1300). It replaced
+ * "Satellite signal, last 6 hours", a sparkline with no passes to read it against.
+ */
+@Composable
+private fun SatelliteSkyCard(navigate: (String) -> Unit) {
+    val context = LocalContext.current
+    val db = remember { AppDatabase.getInstance(context) }
+    val nowSec by produceState(System.currentTimeMillis() / 1000) {
+        while (true) {
+            delay(30_000)
+            value = System.currentTimeMillis() / 1000
+        }
+    }
+    // Queried again every ten minutes so the window moves; new rows arrive in between by themselves.
+    val since = remember(nowSec / 600) { (nowSec - 3 * 3600L) * 1000 }
+    val signalRows by remember(since) { db.signalDao().getSince("iridium", since) }.collectAsState(initial = emptyList())
+    val sessionRows by remember(since) { db.signalDao().getSince("gss", since) }.collectAsState(initial = emptyList())
+    val passes by GatewayService.passes.collectAsState()
+    val start = nowSec - 3 * 3600L
+    val end = nowSec + 3 * 3600L
+    if (signalRows.isEmpty() && passes.none { SkyGeometry.overlaps(it, start, end) }) return
+    DashboardCard(title = "Satellite signal and passes") {
+        SkyChart(
+            passes = passes,
+            signals = signalRows.map { SkySignal(it.timestamp / 1000, it.value) },
+            sessions = sessionRows.map { SkySession(it.timestamp / 1000, it.value >= 1) },
+            startSec = start,
+            endSec = end,
+            nowSec = nowSec,
+            compact = true,
+            windowLabel = "3 h back, 3 h ahead",
+            modifier = Modifier.fillMaxWidth().clickable { navigate("passes") },
+        )
+    }
+}
+
 @Composable
 private fun DashboardCard(title: String, content: @Composable () -> Unit) {
     Column(

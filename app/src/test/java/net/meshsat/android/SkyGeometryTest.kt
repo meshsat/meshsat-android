@@ -60,4 +60,20 @@ class SkyGeometryTest {
         assertFalse(SkyGeometry.overlaps(pass(100, 900, 30.0), 1_000, 2_000))
         assertFalse(SkyGeometry.overlaps(pass(2_000, 2_600, 30.0), 1_000, 2_000))
     }
+
+    @Test
+    fun `readings are averaged to what the width can show`() {
+        val raw = (0 until 720).map { net.meshsat.android.ui.components.SkySignal(it * 60L, if (it % 2 == 0) 0 else 5) }
+        val step = SkyGeometry.stepFor(12 * 3600L, widthPx = 900f, minGapPx = 9f)
+        assertEquals(432L, step)
+        val avg = SkyGeometry.averaged(raw, step)
+        assertTrue(avg.size in 90..110)
+        assertTrue(avg.all { it.second in 2f..3f })
+    }
+
+    @Test
+    fun `at a minute a step nothing is averaged`() {
+        val raw = listOf(net.meshsat.android.ui.components.SkySignal(120, 3), net.meshsat.android.ui.components.SkySignal(60, 1))
+        assertEquals(listOf(60L to 1f, 120L to 3f), SkyGeometry.averaged(raw, 60))
+    }
 }
