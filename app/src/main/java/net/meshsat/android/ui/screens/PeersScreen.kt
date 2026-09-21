@@ -330,11 +330,12 @@ private fun PeerRow(
 
         // Battery
         Text(
-            text = if (node.batteryLevel in 0..100) "${node.batteryLevel}%" else "-",
+            text = net.meshsat.android.ble.NodeBattery.cell(node.batteryLevel),
             style = MaterialTheme.typography.bodySmall,
             fontFamily = PlexMono,
             color = when {
                 node.batteryLevel < 0 -> MeshSatTextMuted
+                node.batteryLevel > 100 -> MeshSatGreen // on USB power (MESHSAT-1315)
                 node.batteryLevel <= 20 -> MeshSatAmber
                 else -> MeshSatGreen
             },

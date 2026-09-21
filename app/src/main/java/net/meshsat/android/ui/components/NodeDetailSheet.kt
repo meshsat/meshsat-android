@@ -132,7 +132,7 @@ fun NodeDetailSheet(
             if (!isMe) DetailRow("Last heard", Words.ago(node.lastHeard))
             DetailRow(
                 "Battery",
-                if (node.batteryLevel in 0..100) "${node.batteryLevel}%" else "Not reported",
+                net.meshsat.android.ble.NodeBattery.describe(node.batteryLevel, 0f, null) ?: "Not reported",
                 mono = node.batteryLevel in 0..100,
             )
             if (!isMe) DetailRow("Signal", signal.long)

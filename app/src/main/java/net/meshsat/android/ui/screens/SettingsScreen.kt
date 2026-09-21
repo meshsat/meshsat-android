@@ -395,6 +395,8 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
                     color = ColorMesh,
                 )
 
+                // Collected every time, never inside a branch or a ?. chain (MESHSAT-1249).
+                val nodeBattery by GatewayService.nodeBattery.collectAsState()
                 if (state == MeshtasticBle.State.Connected) {
                     // Show device info when connected
                     val myInfo = GatewayService.meshtasticBle?.myInfo.collectOrNull()
@@ -405,6 +407,11 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
                             InfoRow("Firmware", info.firmwareVersion)
                         }
                         InfoRow("Node ID", "!%08x".format(info.myNodeNum))
+                        // The node's own battery (MESHSAT-1315)
+                        nodeBattery?.takeIf { it.nodeNum == info.myNodeNum }?.let { b ->
+                            net.meshsat.android.ble.NodeBattery.describe(b.level, b.voltage, b.hoursLeft)
+                                ?.let { InfoRow("Battery", it) }
+                        }
                         if (info.rebootCount > 0) {
                             InfoRow("Reboots", info.rebootCount.toString())
                         }
