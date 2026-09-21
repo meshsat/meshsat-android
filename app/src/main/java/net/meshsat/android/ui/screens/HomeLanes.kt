@@ -159,7 +159,10 @@ fun HomeLanes(navigate: (String) -> Unit) {
         }
     }
     val satQueueLine = if (iridiumQueue > 0) "${Words.count(iridiumQueue, "message")} waiting to go out. " else ""
+    val bluetoothOff = ble?.bluetoothOn?.value == false
     val (satState, satDetail) = when {
+        bluetoothOff && savedNode.isNotBlank() ->
+            LaneState.Failed to (satQueueLine + "Bluetooth is off on this phone. Switch it on to reach the node's modem.").trim()
         // Before MESHSAT-1270 a pipe that took no writes still read as Working here, under a
         // line about the satellite overhead. What a person needs to know first is that the
         // phone cannot reach the radio at all; the satellite is not the problem.
@@ -180,6 +183,8 @@ fun HomeLanes(navigate: (String) -> Unit) {
     // --- Mesh ---
     val others = nodes.count { it.nodeNum != myNum }
     val (meshLane, meshDetail) = when {
+        bluetoothOff && savedNode.isNotBlank() ->
+            LaneState.Failed to "Bluetooth is off on this phone. Switch it on to reach your node."
         meshUp -> LaneState.Working to buildString {
             append(if (myName.isNotBlank()) "Connected to $myName" else "Connected")
             if (rssi != 0) append(", signal $rssi dBm")
