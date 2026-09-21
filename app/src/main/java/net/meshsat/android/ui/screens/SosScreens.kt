@@ -1,5 +1,12 @@
 package net.meshsat.android.ui.screens
 
+import android.app.Activity
+import android.content.ActivityNotFoundException
+import android.net.Uri
+import android.provider.ContactsContract
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.rememberUpdatedState
 import android.Manifest
 import android.content.Context
 import android.content.Intent
@@ -446,7 +453,26 @@ fun SosSettingsCard() {
     var newPhone by remember { mutableStateOf("") }
     var phoneError by remember { mutableStateOf<String?>(null) }
     var confirmTest by remember { mutableStateOf(false) }
+    var typing by remember { mutableStateOf(false) }
     val run by SosController.run.collectAsState()
+    val latestContacts by rememberUpdatedState(contacts)
+    val pickContact = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        val uri = result.data?.data
+        if (result.resultCode != Activity.RESULT_OK || uri == null) return@rememberLauncherForActivityResult
+        val picked = readPickedContact(context, uri)
+        if (picked == null) {
+            phoneError = "Could not read that contact. Type the number instead."
+            typing = true
+            return@rememberLauncherForActivityResult
+        }
+        when (val r = EmergencyContact.adding(latestContacts, picked.first, picked.second)) {
+            is EmergencyContact.Companion.Added.No -> phoneError = r.why
+            is EmergencyContact.Companion.Added.Ok -> {
+                phoneError = null
+                scope.launch { settings.setSosContacts(r.list) }
+            }
+        }
+    }
 
     LaunchedEffect(savedName) { if (name == null) name = savedName }
 
@@ -499,39 +525,56 @@ fun SosSettingsCard() {
                 }
             }
             if (contacts.size < EmergencyContact.MAX) {
-                OutlinedTextField(
-                    value = newName,
-                    onValueChange = { newName = it.replace("\t", " ").replace("\n", " ").take(40) },
-                    label = { Text("Name") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                OutlinedTextField(
-                    value = newPhone,
-                    onValueChange = { newPhone = it.take(24); phoneError = null },
-                    label = { Text("Phone number, with country code") },
-                    placeholder = { Text("+31 6 1234 5678") },
-                    singleLine = true,
-                    isError = phoneError != null,
-                    supportingText = phoneError?.let { e -> { Text(e) } },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Button(
-                    onClick = {
-                        val phone = EmergencyContact.normalisePhone(newPhone)
-                        when {
-                            phone == null -> phoneError = "That is not a phone number."
-                            contacts.any { it.phone == phone } -> phoneError = "That number is already on the list."
-                            else -> {
-                                scope.launch { settings.setSosContacts(contacts + EmergencyContact(newName.trim(), phone)) }
-                                newName = ""
-                                newPhone = ""
+                // The phone's own contacts first (owner, 21 Sep 2026): nobody knows a number by
+                // heart, and a number typed under stress is a number typed wrong. The system picker
+                // has its own search and hands over only the one row the person chose, so this
+                // needs no permission to read the address book.
+                Button(onClick = {
+                    phoneError = null
+                    try {
+                        pickContact.launch(Intent(Intent.ACTION_PICK, ContactsContract.CommonDataKinds.Phone.CONTENT_URI))
+                    } catch (e: ActivityNotFoundException) {
+                        typing = true
+                        phoneError = "This phone has no contacts app. Type the number instead."
+                    }
+                }) { Text("Choose from your contacts") }
+                if (!typing) {
+                    phoneError?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MeshSatAmber) }
+                    TextButton(onClick = { typing = true }) { Text("Or type a number", color = MeshSatTextSecondary) }
+                } else {
+                    OutlinedTextField(
+                        value = newName,
+                        onValueChange = { newName = it.replace("\t", " ").replace("\n", " ").take(40) },
+                        label = { Text("Name") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = newPhone,
+                        onValueChange = { newPhone = it.take(24); phoneError = null },
+                        label = { Text("Phone number, with country code") },
+                        placeholder = { Text("+31 6 1234 5678") },
+                        singleLine = true,
+                        isError = phoneError != null,
+                        supportingText = phoneError?.let { e -> { Text(e) } },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedButton(
+                        onClick = {
+                            when (val r = EmergencyContact.adding(contacts, newName, newPhone)) {
+                                is EmergencyContact.Companion.Added.No -> phoneError = r.why
+                                is EmergencyContact.Companion.Added.Ok -> {
+                                    scope.launch { settings.setSosContacts(r.list) }
+                                    newName = ""
+                                    newPhone = ""
+                                    typing = false
+                                }
                             }
-                        }
-                    },
-                    enabled = newPhone.isNotBlank(),
-                ) { Text("Add contact") }
+                        },
+                        enabled = newPhone.isNotBlank(),
+                    ) { Text("Add this number", color = OffWhite) }
+                }
             }
 
         } else {
@@ -554,3 +597,23 @@ fun SosSettingsCard() {
     }
     if (confirmTest) TestAlarmDialog(reach, onDismiss = { confirmTest = false }, onTest = { confirmTest = false; startSos(context, test = true) })
 }
+
+/**
+ * The name and number of the one row the system's contact picker handed back. The picker grants
+ * read access to that row alone, so no contacts permission is declared or asked for.
+ */
+private fun readPickedContact(context: Context, uri: Uri): Pair<String, String>? = try {
+    context.contentResolver.query(
+        uri,
+        arrayOf(
+            ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+            ContactsContract.CommonDataKinds.Phone.NUMBER,
+        ),
+        null, null, null,
+    )?.use { c ->
+        if (!c.moveToFirst()) null else (c.getString(0).orEmpty() to c.getString(1).orEmpty())
+    }
+} catch (e: Exception) {
+    null
+}
+

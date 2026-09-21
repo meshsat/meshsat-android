@@ -20,6 +20,26 @@ data class EmergencyContact(val name: String, val phone: String) {
                 EmergencyContact(line.substring(0, tab).trim(), phone)
             }.take(MAX).toList()
 
+        /** What came of adding someone: the new list, or why not, in words for the screen. */
+        sealed class Added {
+            data class Ok(val list: List<EmergencyContact>) : Added()
+            data class No(val why: String) : Added()
+        }
+
+        /**
+         * Add [name] and [rawPhone] to [list], whether they were picked from the phone's contacts
+         * or typed. A contacts app hands numbers over as people wrote them ("06 12 34 56 78",
+         * "(020) 555-0100"), so the number is normalised here and nowhere else.
+         */
+        fun adding(list: List<EmergencyContact>, name: String, rawPhone: String): Added {
+            if (list.size >= MAX) return Added.No("The list is full: $MAX contacts at most.")
+            val phone = normalisePhone(rawPhone)
+                ?: return Added.No(if (rawPhone.isBlank()) "That contact has no phone number." else "That is not a phone number.")
+            if (list.any { it.phone == phone }) return Added.No("That number is already on the list.")
+            val clean = name.replace('\t', ' ').replace('\n', ' ').trim().take(40)
+            return Added.Ok(list + EmergencyContact(clean, phone))
+        }
+
         /**
          * A phone number as the phone's SMS service takes it: an optional leading +, then 3 to 15
          * digits (E.164 at most), spaces, dashes, dots and brackets dropped. Null when it is not one.
