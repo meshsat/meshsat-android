@@ -230,8 +230,20 @@ class GatewayService : Service() {
             private set
 
         // Hub Reporter — bridge-to-hub uplink protocol (MESHSAT-292)
+        private val _hubReporterNow = MutableStateFlow<net.meshsat.android.hub.HubReporter?>(null)
+
+        /**
+         * The reporter as a flow, for screens: a restart of the gateway makes a new reporter,
+         * and a screen that read the old one kept showing it - "Not set up" on the Hub card
+         * right after provisioning (MESHSAT-749).
+         */
+        val hubReporterNow: StateFlow<net.meshsat.android.hub.HubReporter?> = _hubReporterNow
+
         var hubReporter: net.meshsat.android.hub.HubReporter? = null
-            private set
+            private set(value) {
+                field = value
+                _hubReporterNow.value = value
+            }
 
         // Hub relay client — Reticulum over a Hub WebSocket tunnel to one kit (MESHSAT-1157)
         var hubRelayTransport: net.meshsat.android.hub.relay.RelayBridgeTransport? = null
