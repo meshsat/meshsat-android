@@ -168,6 +168,64 @@ object MeshtasticProtoAdapter {
     }
 
     /**
+     * A node announcing itself over the air (MESHSAT-1287): a NODEINFO_APP packet whose payload
+     * is the sender's User. This is a different shape from [extractNodeInfo], which reads the
+     * node list the radio hands over at connect. The dispatcher used that one for both, so an
+     * announcement heard after connecting was read as nothing, and a node first met on the air
+     * stayed "Node !4370c1d8" until the app was next restarted with the radio knowing it.
+     * Only the identity is known here; the merge in MeshtasticBle keeps the rest.
+     */
+    fun extractNodeInfoFromPacket(fromRadio: MeshProtos.FromRadio): MeshtasticProtocol.MeshNodeInfo? {
+        if (!fromRadio.hasPacket()) return null
+        val pkt = fromRadio.packet
+        if (!pkt.hasDecoded() || pkt.decoded.portnum != Portnums.PortNum.NODEINFO_APP) return null
+        val user = try {
+            MeshProtos.User.parseFrom(pkt.decoded.payload)
+        } catch (e: Exception) {
+            return null
+        }
+        if (user.longName.isEmpty() && user.shortName.isEmpty()) return null
+        return MeshtasticProtocol.MeshNodeInfo(
+            nodeNum = pkt.from.toLong() and 0xFFFFFFFFL,
+            longName = user.longName,
+            shortName = user.shortName,
+            macaddr = user.macaddr.toByteArray().joinToString(":") { "%02x".format(it) },
+            hwModel = user.hwModelValue,
+            batteryLevel = -1,
+            lastHeard = System.currentTimeMillis(),
+            snr = pkt.rxSnr,
+            hopsAway = -1,
+            viaMqtt = pkt.viaMqtt,
+            isLicensed = user.isLicensed,
+        )
+    }
+
+    /**
+     * Ask [destNode] who it is: our own User, sent to it with want_response, which is how
+     * Meshtastic exchanges names. Without it a name arrives only with the node's own
+     * announcement, every three hours on this mesh.
+     */
+    fun encodeNodeInfoRequest(myNodeNum: Long, destNode: Long, longName: String, shortName: String): ByteArray {
+        val me = MeshProtos.User.newBuilder()
+            .setId(MeshtasticProtocol.formatNodeId(myNodeNum))
+            .setLongName(longName)
+            .setShortName(shortName)
+            .build()
+        val data = MeshProtos.Data.newBuilder()
+            .setPortnum(Portnums.PortNum.NODEINFO_APP)
+            .setPayload(me.toByteString())
+            .setWantResponse(true)
+            .build()
+        val meshPacket = MeshProtos.MeshPacket.newBuilder()
+            .setFrom(myNodeNum.toInt())
+            .setTo(destNode.toInt())
+            .setDecoded(data)
+            .setHopLimit(3)
+            .build()
+        return MeshProtos.ToRadio.newBuilder().setPacket(meshPacket).build().toByteArray()
+    }
+
+    /**
      * How our radio heard this packet over the air, or null when it did not: a packet that came
      * through MQTT, or one with no receive metrics at all (our own node's packets, and anything the
      * radio did not receive by LoRa, carry rx_snr 0 and rx_rssi 0). hop_start is set by the sender;
