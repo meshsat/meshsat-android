@@ -244,6 +244,14 @@ class MeshtasticBle(private val context: Context) {
         if (idx < 0 || current[idx].longName.isBlank()) askWhoIs(nodeNum)
     }
 
+    private val _bluetoothOn = MutableStateFlow(adapter?.isEnabled == true)
+
+    /**
+     * Whether the phone's Bluetooth is switched on. When it is off, that is the whole reason the
+     * node cannot be reached, and the one thing worth telling the person (MESHSAT-615).
+     */
+    val bluetoothOn: StateFlow<Boolean> = _bluetoothOn
+
     private val whoIsAsked = WhoIsLimiter()
 
     /**
@@ -396,6 +404,7 @@ class MeshtasticBle(private val context: Context) {
      * (found 21 Sep 2026 by switching Bluetooth off to test the banner, MESHSAT-615).
      */
     fun onBluetoothOff() {
+        _bluetoothOn.value = false
         if (gatt == null && _state.value == State.Disconnected) return
         Log.i(TAG, "Bluetooth went off; dropping the node link")
         try {
@@ -409,6 +418,7 @@ class MeshtasticBle(private val context: Context) {
 
     /** Bluetooth is back: go and get the node again. */
     fun onBluetoothOn() {
+        _bluetoothOn.value = true
         if (lastAddress == null) return
         Log.i(TAG, "Bluetooth is back; reconnecting to the node")
         scope.launch {

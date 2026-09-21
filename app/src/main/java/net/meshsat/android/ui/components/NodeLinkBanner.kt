@@ -1,5 +1,9 @@
 package net.meshsat.android.ui.components
 
+import android.bluetooth.BluetoothAdapter
+import android.content.Context
+import android.content.Intent
+import android.provider.Settings
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Row
@@ -83,29 +87,70 @@ fun NodeLinkBanner(onOpen: () -> Unit) {
     if (!down) return
 
     val since = downSince
-    val what = if (meshUp) "the node's modem" else "your MeshSat node"
-    val text = buildString {
-        append("Cannot reach ")
-        append(what)
-        if (since != null) {
-            append(" since ")
-            append(SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(since)))
-            val mins = ((now - since) / 60_000L).coerceAtLeast(0)
-            if (mins >= 1) append(" (${mins} min)")
-        }
-        append(". Nothing goes out by mesh or satellite. Tap to see.")
-    }
+    val bluetoothOff = ble?.bluetoothOn.collectOrNull()?.value == false
+    val text = nodeLinkBannerText(
+        bluetoothOff = bluetoothOff,
+        meshUp = meshUp,
+        since = since?.let { SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(it)) },
+        minutes = since?.let { ((now - it) / 60_000L).coerceAtLeast(0) } ?: 0,
+    )
 
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
             .background(MeshSatAmber)
-            .clickable(onClick = onOpen)
+            .clickable {
+                if (bluetoothOff) askForBluetooth(context) else onOpen()
+            }
             .padding(horizontal = 16.dp, vertical = 10.dp),
     ) {
         Text(text, style = MaterialTheme.typography.bodyMedium, color = SpaceBlack)
     }
 }
 
+/**
+ * What the banner says. The cause comes first when the phone knows it: the first version said
+ * "Cannot reach your MeshSat node" while the phone's own Bluetooth was switched off, which sends a
+ * person to look at a radio in a case when the answer is in their hand (owner, 21 Sep 2026).
+ */
+internal fun nodeLinkBannerText(bluetoothOff: Boolean, meshUp: Boolean, since: String?, minutes: Long): String =
+    buildString {
+        val how = buildString {
+            if (since != null) {
+                append(" since ")
+                append(since)
+                if (minutes >= 1) append(" ($minutes min)")
+            }
+        }
+        when {
+            bluetoothOff -> {
+                append("Bluetooth is off")
+                append(how)
+                append(", so the phone cannot reach your MeshSat node. Nothing goes out by mesh or satellite. Tap to switch it on.")
+            }
+            else -> {
+                append("Cannot reach ")
+                append(if (meshUp) "the node's modem" else "your MeshSat node")
+                append(how)
+                append(". Nothing goes out by mesh or satellite. Tap to see.")
+            }
+        }
+    }
 
+/** The system's own "turn on Bluetooth?" dialog, or its Bluetooth settings if that is refused. */
+private fun askForBluetooth(context: Context) {
+    try {
+        context.startActivity(
+            Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        )
+    } catch (e: Exception) {
+        try {
+            context.startActivity(
+                Intent(Settings.ACTION_BLUETOOTH_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        } catch (e2: Exception) {
+            // No way to open either; the banner still says what to do.
+        }
+    }
+}
