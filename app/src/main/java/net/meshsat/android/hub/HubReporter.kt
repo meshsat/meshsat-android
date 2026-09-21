@@ -143,14 +143,42 @@ class HubReporter(
             return
         }
         _state.value = State.Connecting
+        stopped = false
 
         scope.launch {
+            // A first connect that fails is tried again, with backoff, until it works or the
+            // reporter is stopped. It used to be tried once: on 21 Sep 2026 the phone's first
+            // connect after provisioning failed and the phone stayed off the Hub until someone
+            // restarted the gateway by hand (MESHSAT-749). Paho's automatic reconnect only
+            // covers a connection that was once up.
+            var wait = CONNECT_RETRY_MIN_MS
+            while (!stopped) {
+                if (connectOnce()) return@launch
+                if (stopped) return@launch
+                Log.i(TAG, "Hub connect: trying again in ${wait / 1000}s")
+                delay(wait)
+                wait = nextConnectRetry(wait)
+                if (!stopped) _state.value = State.Connecting
+            }
+        }
+    }
+
+    @Volatile private var stopped = false
+
+    /** One attempt with a fresh client. True when connected and announced. */
+    private suspend fun connectOnce(): Boolean {
+            var attempt: MqttClient? = null
             try {
                 val clientId = "meshsat-android-${config.bridgeId.takeLast(12)}"
                 Log.i(TAG, "Connecting to ${config.hubUrl} as $clientId (cert=${config.clientCertPem.length > 0})")
                 val mqttClient = MqttClient(config.hubUrl, clientId, MemoryPersistence())
+                attempt = mqttClient
 
                 val opts = MqttConnectOptions().apply {
+                    // 3.1.1 only. Left at the default, a refused connect makes Paho try 3.1 over
+                    // the same WebSocket module, which fails with "Already connected" and hides
+                    // the broker's real answer (seen 21 Sep 2026, MESHSAT-749). NATS speaks 3.1.1.
+                    mqttVersion = MqttConnectOptions.MQTT_VERSION_3_1_1
                     isCleanSession = true
                     connectionTimeout = 10
                     keepAliveInterval = 60
@@ -252,17 +280,21 @@ class HubReporter(
 
                 // Start periodic health reporting
                 startHealthLoop()
+                return true
 
             } catch (e: Exception) {
                 Log.e(TAG, "Hub connect failed: ${e.message}", e)
                 _lastError.value = connectFailureText(e)
                 _state.value = State.Error
+                // A failed client is closed, never reused: its network module cannot start twice.
+                runCatching { attempt?.close() }
+                return false
             }
-        }
     }
 
     /** Publish death, disconnect from Hub. */
     fun stop() {
+        stopped = true
         healthJob?.cancel()
         healthJob = null
 
@@ -788,3 +820,11 @@ internal fun connectFailureText(e: Throwable): String {
     val inner = chain.last().let { it.message?.trim().orEmpty().ifBlank { it.javaClass.simpleName } }
     return if (chain.size > 1 && inner != outer && !outer.contains(inner)) "$outer: $inner" else outer
 }
+
+/** The first retry after a failed Hub connect, and the longest wait between tries. */
+internal const val CONNECT_RETRY_MIN_MS = 5_000L
+internal const val CONNECT_RETRY_MAX_MS = 60_000L
+
+/** The wait after [previousMs]: doubled, never above a minute. Pure, so it has a test. */
+internal fun nextConnectRetry(previousMs: Long): Long =
+    (previousMs * 2).coerceIn(CONNECT_RETRY_MIN_MS, CONNECT_RETRY_MAX_MS)
