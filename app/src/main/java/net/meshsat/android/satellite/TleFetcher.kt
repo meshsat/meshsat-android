@@ -30,7 +30,10 @@ class TleFetcher(
         private const val CELESTRAK_IRIDIUM_URL =
             "https://celestrak.org/NORAD/elements/gp.php?GROUP=iridium-NEXT&FORMAT=3le"
         // Fallback source (MESHSAT-1240): the same public element sets, searchable by name.
-        private const val TLE_API_URL = "https://tle.ivanstanojevic.me/api/tle/?search=IRIDIUM&page-size=100&page="
+        // Sorted, because without an order the API shuffles between requests: pages fetched one
+        // after another repeated some satellites and skipped others (MESHSAT-1304).
+        private const val TLE_API_URL =
+            "https://tle.ivanstanojevic.me/api/tle/?search=IRIDIUM&page-size=100&sort=id&sort-dir=asc&page="
         private const val TLE_API_MAX_PAGES = 6
         private const val USER_AGENT = "MeshSat-Android (+https://meshsat.net)"
         private val IRIDIUM_NEXT_NAME = Regex("IRIDIUM 1\\d\\d")
@@ -49,6 +52,15 @@ class TleFetcher(
          * search also returns the retired first generation and debris.
          */
         fun isIridiumNext(name: String): Boolean = IRIDIUM_NEXT_NAME.matches(name.trim())
+
+        /**
+         * One element set per satellite, the newest, ordered by name. A download that holds a
+         * satellite twice would predict each of its passes twice.
+         */
+        fun onePerSatellite(tles: List<TleElements>): List<TleElements> =
+            tles.groupBy { it.catalogNumber }
+                .map { (_, sets) -> sets.maxBy { it.epochJd } }
+                .sortedBy { it.name }
 
         /** Newest element epoch in unix seconds, or 0 for an empty set. */
         fun newestEpochUnix(tles: List<TleElements>): Long =
@@ -86,9 +98,9 @@ class TleFetcher(
      */
     suspend fun getCachedTles(): List<TleElements> = withContext(Dispatchers.IO) {
         val dao = db.tleCacheDao()
-        dao.getAll().mapNotNull { entry ->
+        onePerSatellite(dao.getAll().mapNotNull { entry ->
             TleParser.parse(entry.satelliteName, entry.line1, entry.line2)
-        }
+        })
     }
 
     /**
@@ -101,11 +113,14 @@ class TleFetcher(
     }
 
     /**
-     * Returns true if the download is older than a day, or there never was one.
+     * Returns true if the download is older than a day, there never was one, or it lacks
+     * satellites the snapshot in the app has (a download made before MESHSAT-1304 could skip
+     * some).
      */
     suspend fun isCacheStale(): Boolean {
         val age = cacheAgeSec()
-        return age < 0 || age > CACHE_MAX_AGE_SEC
+        if (age < 0 || age > CACHE_MAX_AGE_SEC) return true
+        return getCachedTles().size < onePerSatellite(bundledTles).size
     }
 
     /** The elements to predict with. Never touches the network. */
@@ -132,7 +147,7 @@ class TleFetcher(
             val body = conn.inputStream.bufferedReader().readText()
             conn.disconnect()
 
-            val tles = TleParser.parseMulti(body)
+            val tles = onePerSatellite(TleParser.parseMulti(body))
             if (tles.isEmpty()) {
                 Log.w(TAG, "Celestrak returned no parsable elements; keeping the current ones")
                 return@withContext null
@@ -181,9 +196,10 @@ class TleFetcher(
                 Log.w(TAG, "TLE API returned no Iridium NEXT elements; keeping the current ones")
                 return@withContext null
             }
-            store(found)
-            Log.i(TAG, "Downloaded ${found.size} Iridium element sets from the TLE API")
-            found
+            val tles = onePerSatellite(found)
+            store(tles)
+            Log.i(TAG, "Downloaded ${tles.size} Iridium element sets from the TLE API")
+            tles
         } catch (e: Exception) {
             Log.w(TAG, "TLE API download failed (${e.javaClass.simpleName}: ${e.message}); keeping the current elements")
             null

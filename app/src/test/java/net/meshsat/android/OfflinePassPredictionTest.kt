@@ -43,6 +43,24 @@ class OfflinePassPredictionTest {
     }
 
     @Test
+    fun `a download holding a satellite twice keeps its newest set only`() {
+        // What the unsorted TLE API produced (MESHSAT-1304): IRIDIUM 138 on two pages, and
+        // an older set of it as well.
+        val i138 = bundled.first { it.name == "IRIDIUM 138" }
+        val repeated = bundled + i138 + i138.copy(epochJd = i138.epochJd - 2)
+        val kept = TleFetcher.onePerSatellite(repeated)
+        assertEquals(bundled.size, kept.size)
+        assertEquals(i138, kept.single { it.name == "IRIDIUM 138" })
+        assertEquals(kept.map { it.name }.sorted(), kept.map { it.name })
+
+        val start = TleFetcher.newestEpochUnix(bundled)
+        fun passes(tles: List<net.meshsat.android.satellite.TleElements>) =
+            PassPredictor.predictAllPasses(tles, 52.16, 4.51, 0.0, start, start + 24 * 3600L, 5.0).size
+        assertTrue("repeated sets predict passes twice", passes(repeated) > passes(bundled))
+        assertEquals(passes(bundled), passes(kept))
+    }
+
+    @Test
     fun `passes over Leiden are predicted from the snapshot alone`() {
         val start = TleFetcher.newestEpochUnix(bundled)
         val all = PassPredictor.predictAllPasses(bundled, 52.16, 4.51, 0.0, start, start + 6 * 3600L, 5.0)
