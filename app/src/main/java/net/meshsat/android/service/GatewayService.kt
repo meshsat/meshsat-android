@@ -598,7 +598,10 @@ class GatewayService : Service() {
                 Log.i("MeshSat", "SigningService initialized: ${signing.signerId.take(16)}...")
 
                 // Config manager
-                val cfgMgr = ConfigManager(db.accessRuleDao(), db.objectGroupDao(), db.failoverGroupDao())
+                val cfgMgr = ConfigManager(db.accessRuleDao(), db.objectGroupDao(), db.failoverGroupDao()) {
+                    // The evaluator keeps the rules in memory; an import must make it read again.
+                    accessEval?.reloadFromDb()
+                }
                 configManager = cfgMgr
 
                 // Local API server (localhost:6051)

@@ -26,6 +26,13 @@ class ConfigManager(
     private val accessRuleDao: AccessRuleDao,
     private val objectGroupDao: ObjectGroupDao,
     private val failoverGroupDao: FailoverGroupDao,
+    /**
+     * Told when an import has replaced the rules, so whoever evaluates them can read them again.
+     * Without it an import wrote the database and the running gateway went on applying the old
+     * rules until it was restarted: a rule imported over the API, from a file or pushed by the
+     * Hub looked saved and did nothing (found 21 Sep 2026 proving MESHSAT-1274).
+     */
+    private val onImported: (suspend () -> Unit)? = null,
 ) {
     /**
      * Export the current configuration as a JSON string.
@@ -204,6 +211,7 @@ class ConfigManager(
         counts["failover_groups"] = fgroupsArr.length()
 
         Log.i(TAG, "config import complete: $counts")
+        onImported?.invoke()
         return counts
     }
 
