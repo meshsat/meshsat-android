@@ -1,0 +1,1 @@
+Satellite passes are now predicted at the right times. The orbit calculation had errors that put every satellite in the wrong place, so the app showed about three times too many passes and wrong next-pass times.
