@@ -624,8 +624,13 @@ private fun readPickedContact(context: Context, uri: Uri): Pair<String, String>?
  */
 private fun contactPickIntent(context: Context): Intent {
     val intent = Intent(Intent.ACTION_PICK, ContactsContract.CommonDataKinds.Phone.CONTENT_URI)
+    // Asked by TYPE, not by the contacts address: a query by address alone finds nothing, because
+    // only starting an activity looks the type up from the provider. v2.18.13 asked by address,
+    // got an empty list, and so still showed the chooser (checked on the phone with
+    // `cmd package query-activities`).
+    val probe = Intent(Intent.ACTION_PICK).setType(ContactsContract.CommonDataKinds.Phone.CONTENT_TYPE)
     val handlers = try {
-        context.packageManager.queryIntentActivities(intent, 0).map {
+        context.packageManager.queryIntentActivities(probe, 0).map {
             it.activityInfo.packageName to
                 ((it.activityInfo.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) != 0)
         }
