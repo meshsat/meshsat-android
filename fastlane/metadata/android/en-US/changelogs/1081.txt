@@ -1,0 +1,1 @@
+Reaching a MeshSat kit's own settings through the Hub, from a phone that cannot reach the kit's network directly, now works; before, every such request was refused on the phone.
