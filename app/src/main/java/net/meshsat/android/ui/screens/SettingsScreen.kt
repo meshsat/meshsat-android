@@ -259,8 +259,6 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
     }
 
     // QR provisioning state
-    var provisionBundle by remember { mutableStateOf<net.meshsat.android.crypto.ProvisionImporter.ProvisionBundle?>(null) }
-    var showProvisionDialog by remember { mutableStateOf(false) }
     val hubReporterNow by GatewayService.hubReporterNow.collectAsState()
     val hubReporterState = hubReporterNow?.state.collectOrNull()
 
@@ -291,26 +289,9 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
         )
         val scanned = scanResult.contents
         if (scanned != null && net.meshsat.android.crypto.ProvisionImporter.isProvisionUrl(scanned)) {
-            // Hub provisioning QR — supports both inline (base64) and nonce (HTTPS fetch) formats
-            scope.launch {
-                try {
-                    Toast.makeText(context, "Processing provision QR...", Toast.LENGTH_SHORT).show()
-                    val bundle = withContext(Dispatchers.IO) {
-                        net.meshsat.android.crypto.ProvisionImporter.processQr(scanned) { attempt ->
-                            if (attempt == 1) scope.launch {
-                                Toast.makeText(context, "The Hub is getting the new credentials ready. Waiting...", Toast.LENGTH_LONG).show()
-                            }
-                        }
-                    }
-                    provisionBundle = bundle
-                    showProvisionDialog = true
-                } catch (e: net.meshsat.android.crypto.ProvisionImporter.ProvisionException) {
-                    Toast.makeText(context, e.message, Toast.LENGTH_LONG).show()
-                } catch (e: Exception) {
-                    android.util.Log.e("SettingsScreen", "Provision failed", e)
-                    Toast.makeText(context, "Provision failed: ${e.message}", Toast.LENGTH_LONG).show()
-                }
-            }
+            // Hub provisioning QR: claimed by the app, not by this screen, so leaving the screen
+            // does not drop it, and ProvisionClaimHost shows the wait (MESHSAT-1306).
+            net.meshsat.android.crypto.ProvisionClaim.fromQr(scanned)
         } else if (scanned != null && scanned.startsWith("meshsat://key/")) {
             // MeshSat key bundle URL — contains signed multi-channel key bundle (MESHSAT-495)
             scope.launch {
@@ -1595,62 +1576,6 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
             }
         }
 
-        // Provision confirmation dialog
-        if (showProvisionDialog && provisionBundle != null) {
-            val bundle = provisionBundle!!
-            AlertDialog(
-                onDismissRequest = { showProvisionDialog = false },
-                title = { Text("Provision Hub Connection") },
-                text = {
-                    Column {
-                        Text(
-                            "Provision Hub connection for bridge \"${bundle.bridgeId}\"?\n\n" +
-                                "This will overwrite existing Hub settings.",
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text("Hub: ${bundle.mqttUrl}", style = MaterialTheme.typography.bodySmall, color = MeshSatTextMuted)
-                        if (bundle.certExpiry.isNotBlank()) {
-                            Text("Cert expires: ${bundle.certExpiry}", style = MaterialTheme.typography.bodySmall, color = MeshSatTextMuted)
-                        }
-                        if (bundle.reticulumTcp.isNotBlank()) {
-                            Text("Reticulum: ${bundle.reticulumTcp}", style = MaterialTheme.typography.bodySmall, color = MeshSatTextMuted)
-                        }
-                    }
-                },
-                confirmButton = {
-                    Button(
-                        onClick = {
-                            showProvisionDialog = false
-                            scope.launch {
-                                try {
-                                    val msg = net.meshsat.android.crypto.ProvisionImporter.apply(bundle, context)
-                                    // Update ALL local UI state vars immediately
-                                    hubUrlInput = bundle.mqttUrl
-                                    hubBridgeIdInput = bundle.bridgeId
-                                    hubUsernameInput = bundle.username
-                                    hubPasswordInput = bundle.password
-                                    hubCallsignInput = "" // reset callsign
-                                    hubHealthIntervalInput = "30"
-                                    // The gateway reads the Hub settings when it starts, so start it
-                                    // again rather than telling the person to (MESHSAT-749): it is a
-                                    // foreground service and survives the app being swiped away.
-                                    GatewayService.scheduleRestart(context)
-                                    Toast.makeText(context, "$msg. Connecting to the Hub.", Toast.LENGTH_LONG).show()
-                                } catch (e: Exception) {
-                                    Toast.makeText(context, "Provision failed: ${e.message}", Toast.LENGTH_LONG).show()
-                                }
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = MeshSatTeal),
-                    ) { Text("Provision") }
-                },
-                dismissButton = {
-                    TextButton(onClick = { showProvisionDialog = false }) { Text("Cancel") }
-                },
-            )
-        }
-
         if (section.shows(SetupSection.Hub)) {
             SectionCard("Hub connection") {
                 // --- Where the Hub link stands, and the switch for it ---
@@ -1689,6 +1614,23 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
                         colors = SwitchDefaults.colors(checkedTrackColor = MeshSatTeal),
                         modifier = Modifier.semantics { contentDescription = "Use the Hub" },
                     )
+                }
+                // A provisioning claim still waiting for the Hub (MESHSAT-1306): shown here too,
+                // for when its dialog was hidden.
+                val claim = net.meshsat.android.crypto.ProvisionClaim.state.collectAsState().value
+                if (claim is net.meshsat.android.crypto.ProvisionClaim.State.Waiting) {
+                    val waited = net.meshsat.android.ui.components.waitedSeconds(claim.startedMs)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = MeshSatTeal)
+                        Text(
+                            "Getting the Hub's settings, $waited s",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MeshSatTextMuted,
+                        )
+                    }
                 }
                 // Why, when it failed: the library's own words, not only "Cannot reach the Hub"
                 // (MESHSAT-749; the SNI fault sat in logcat for a day).

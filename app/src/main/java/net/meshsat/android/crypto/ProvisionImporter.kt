@@ -159,7 +159,8 @@ object ProvisionImporter {
 
     private fun claimOnce(request: ProvisionRequest): Claim {
         val claimUrl = "https://${request.hubHost}/api/bridges/${request.bridgeId}/provision/${request.nonce}"
-        Log.i(TAG, "Claiming provision: $claimUrl")
+        // Not the URL: its nonce is a live single-use credential (MESHSAT-1306).
+        Log.i(TAG, "Claiming provision for ${request.bridgeId} from ${request.hubHost}")
 
         val conn = URL(claimUrl).openConnection() as HttpURLConnection
         try {
