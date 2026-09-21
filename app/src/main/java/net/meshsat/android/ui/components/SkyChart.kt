@@ -4,6 +4,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -55,7 +57,27 @@ internal object SkyGeometry {
 
     fun elevY(deg: Double, bottom: Float, height: Float): Float = bottom - (deg.toFloat() / 90f) * height
 
-    fun barsY(bars: Int, bottom: Float, height: Float): Float = bottom - (bars.coerceIn(0, 5) / 5f) * height
+    fun barsY(bars: Int, bottom: Float, height: Float): Float = barsY(bars.toFloat(), bottom, height)
+
+    fun barsY(bars: Float, bottom: Float, height: Float): Float = bottom - (bars.coerceIn(0f, 5f) / 5f) * height
+
+    /**
+     * Readings averaged into steps of [stepSec], one point per step (at its middle). On a phone a
+     * reading a minute over twelve hours is 720 points in a few hundred pixels, and a line zigzagging
+     * between 0 and 5 bars filled the past half of the chart with solid green (MESHSAT-1300).
+     */
+    fun averaged(signals: List<SkySignal>, stepSec: Long): List<Pair<Long, Float>> {
+        if (stepSec <= 60L) return signals.sortedBy { it.atSec }.map { it.atSec to it.bars.toFloat() }
+        return signals.groupBy { it.atSec / stepSec }
+            .toSortedMap()
+            .map { (bucket, list) -> (bucket * stepSec + stepSec / 2) to list.map { it.bars }.average().toFloat() }
+    }
+
+    /** The step that leaves about [minGapPx] between points across [widthPx], never under a minute. */
+    fun stepFor(spanSec: Long, widthPx: Float, minGapPx: Float): Long {
+        val points = (widthPx / minGapPx).coerceAtLeast(1f)
+        return maxOf(60L, (spanSec / points).toLong())
+    }
 
     data class Triangle(val x1: Float, val xMid: Float, val x2: Float, val peakY: Float)
 
@@ -73,6 +95,8 @@ internal object SkyGeometry {
     }
 
     /** Green from 3 bars, amber at 1 and 2, red at 0 - the Bridge's thresholds. */
+    fun signalArgb(bars: Float): Long = signalArgb(kotlin.math.round(bars).toInt())
+
     fun signalArgb(bars: Int): Long = when {
         bars >= 3 -> 0xFF10B981
         bars >= 1 -> 0xFFF59E0B
@@ -108,6 +132,7 @@ private val hhmm = SimpleDateFormat("HH:mm", Locale.US).apply { timeZone = TimeZ
  * Bridge's "Signal vs passes" chart (MESHSAT-1300). [compact] is the Home widget - the Bridge's
  * Iridium card - and the full size is the passes screen, with both scales and tap to inspect.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun SkyChart(
     passes: List<PassPrediction>,
@@ -128,7 +153,7 @@ fun SkyChart(
         Canvas(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(if (compact) 104.dp else 240.dp)
+                .height(if (compact) 104.dp else 220.dp)
                 .then(
                     if (compact) Modifier
                     else Modifier.pointerInput(Unit) { detectTapGestures { tapX = if (tapX == null) it.x else null } },
@@ -136,8 +161,8 @@ fun SkyChart(
         ) {
             val w = size.width
             val h = size.height
-            val padL = (if (compact) 8f else 30f) * density
-            val padR = (if (compact) 8f else 30f) * density
+            val padL = (if (compact) 6f else 22f) * density
+            val padR = (if (compact) 6f else 24f) * density
             val plotTop = (if (compact) 6f else 14f) * density
             val plotBottom = h - (if (compact) 14f else 22f) * density
             val plotW = w - padL - padR
@@ -220,9 +245,9 @@ fun SkyChart(
                 }
 
                 // Signal: soft area, the line, then a dot per reading coloured by strength
-                val pts = signals.sortedBy { it.atSec }
-                    .filter { it.atSec in startSec..endSec }
-                    .map { Offset(xOf(it.atSec), SkyGeometry.barsY(it.bars, plotBottom, plotH)) to it.bars }
+                val step = SkyGeometry.stepFor(endSec - startSec, plotW, 3f * density)
+                val pts = SkyGeometry.averaged(signals.filter { it.atSec in startSec..endSec }, step)
+                    .map { (ts, bars) -> Offset(xOf(ts), SkyGeometry.barsY(bars, plotBottom, plotH)) to bars }
                 if (pts.size > 1) {
                     val area = Path().apply {
                         moveTo(pts.first().first.x, plotBottom)
@@ -239,7 +264,7 @@ fun SkyChart(
                     drawPath(line, SignalGreen.copy(alpha = 0.7f), style = Stroke(width = (if (compact) 1.2f else 1.5f) * density))
                 }
                 for ((o, bars) in pts) {
-                    drawCircle(Color(SkyGeometry.signalArgb(bars)).copy(alpha = 0.85f), radius = (if (compact) 1.5f else 2.5f) * density, center = o)
+                    drawCircle(Color(SkyGeometry.signalArgb(bars)).copy(alpha = 0.85f), radius = (if (compact) 1.4f else 1.8f) * density, center = o)
                 }
 
                 // Satellite sessions on the baseline
@@ -264,11 +289,16 @@ fun SkyChart(
             // Time labels: every hour on the widget, every 3 h (6 h past a day) on the screen
             labelPaint.textAlign = android.graphics.Paint.Align.CENTER
             val span = endSec - startSec
-            val step = if (compact) 3600L else if (span <= 24 * 3600L) 3 * 3600L else 6 * 3600L
+            val labelStep = when {
+                compact || span <= 6 * 3600L -> 3600L
+                span <= 24 * 3600L -> 3 * 3600L
+                else -> 6 * 3600L
+            }
             val nowX = xOf(nowSec)
-            for (t in SkyGeometry.ticks(startSec, endSec, step)) {
+            for (t in SkyGeometry.ticks(startSec, endSec, labelStep)) {
                 val x = xOf(t)
-                if (!compact && abs(x - nowX) < 18f * density) continue
+                // Room for "now" (about 30 dp): at 360 dp "now" and "12:00" read as one label
+                if (!compact && abs(x - nowX) < 30f * density) continue
                 drawContext.canvas.nativeCanvas.drawText(hhmm.format(Date(t * 1000)), x, h - 3f * density, labelPaint)
             }
             if (!compact) {
@@ -301,18 +331,16 @@ fun SkyChart(
                 }
             }
         }
-        // Legend, as on the Bridge
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
+        // Legend, as on the Bridge; it wraps on a narrow screen instead of being cut off
+        FlowRow(
+            modifier = Modifier.fillMaxWidth().padding(top = 4.dp, start = 4.dp, end = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                LegendItem("▲", Indigo.copy(alpha = 0.6f), "Pass")
-                LegendItem("●", SignalGreen, if (compact) "Signal" else "Signal")
-                LegendItem("●", SessionOk, if (compact) "Session" else "Session OK")
-                if (!compact) LegendItem("●", SessionFail, "Session failed")
-            }
+            LegendItem("\u25B2", Indigo.copy(alpha = 0.7f), "Pass")
+            LegendItem("\u25CF", SignalGreen, "Signal")
+            LegendItem("\u25CF", SessionOk, if (compact) "Session" else "Session sent")
+            if (!compact) LegendItem("\u25CF", SessionFail, "Session failed")
             if (windowLabel != null) {
                 Text(windowLabel, style = MaterialTheme.typography.labelSmall, color = Color(0xFF6B7280))
             }

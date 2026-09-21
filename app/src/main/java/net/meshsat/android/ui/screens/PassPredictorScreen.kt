@@ -1,5 +1,12 @@
 package net.meshsat.android.ui.screens
 
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material3.Icon
+import androidx.compose.material3.TextButton
 import net.meshsat.android.ui.components.SkyChart
 import net.meshsat.android.ui.components.SkySession
 import net.meshsat.android.ui.components.SkySignal
@@ -89,13 +96,14 @@ import net.meshsat.android.ui.theme.PlexMono
 private data class ElevPreset(val value: Int, val label: String, val desc: String)
 
 private val ELEV_PRESETS = listOf(
-    ElevPreset(5, "Clear Sky", "Open field, rooftop"),
-    ElevPreset(20, "Partial", "Some trees, low buildings"),
-    ElevPreset(40, "Urban", "Tall buildings, narrow streets"),
-    ElevPreset(60, "Canyon", "Deep valley, dense urban"),
+    ElevPreset(5, "Open", "Open field or rooftop"),
+    ElevPreset(20, "Trees", "Some trees or low buildings"),
+    ElevPreset(40, "City", "Tall buildings, narrow streets"),
+    ElevPreset(60, "Canyon", "Deep valley or dense city"),
 )
 
-private val WINDOW_OPTIONS = listOf(12, 24, 48, 72)
+// 72 h is gone: on a phone its passes are hairlines (MESHSAT-1300). 12 h is the default for the same reason.
+private val WINDOW_OPTIONS = listOf(6, 12, 24, 48)
 
 @Composable
 fun PassPredictorScreen() {
@@ -110,7 +118,7 @@ fun PassPredictorScreen() {
     var refreshing by remember { mutableStateOf(false) }
     var cacheAgeSec by remember { mutableLongStateOf(-1L) }
     var tleSource by remember { mutableStateOf(TleFetcher.Source.None) }
-    var windowHours by remember { mutableIntStateOf(24) }
+    var windowHours by remember { mutableIntStateOf(12) }
     var skySignals by remember { mutableStateOf<List<SkySignal>>(emptyList()) }
     var skySessions by remember { mutableStateOf<List<SkySession>>(emptyList()) }
     // The past half of the window: what the modem actually heard, and its sessions.
@@ -216,26 +224,180 @@ fun PassPredictorScreen() {
     val nextPass = passes.firstOrNull { it.aosUnix > nowUnix }
     val activePass = passes.firstOrNull { it.aosUnix <= nowUnix && it.losUnix >= nowUnix }
 
+    // Laid out for a small phone (MESHSAT-1300): what matters first - the pass overhead or the
+    // next one - then the chart, then the settings that change it, and the bookkeeping last.
     LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp),
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        // Header
+        if (activePass != null) {
+            item {
+                PassBanner(
+                    label = "Overhead now",
+                    pass = activePass,
+                    accentColor = SignalExcellent,
+                    subtitle = "A message can go out now.",
+                )
+            }
+        } else if (nextPass != null) {
+            item {
+                PassBanner(
+                    label = "Next pass",
+                    pass = nextPass,
+                    accentColor = ColorIridium,
+                    showCountdown = true,
+                    countdownText = countdownText,
+                )
+            }
+        }
+
         item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(horizontalAlignment = Alignment.End) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                SegmentedChoice(
+                    options = WINDOW_OPTIONS,
+                    selected = windowHours,
+                    label = { "$it h" },
+                    onSelect = { windowHours = it },
+                )
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MeshSatSurface, RoundedCornerShape(8.dp))
+                        .border(1.dp, MeshSatBorder, RoundedCornerShape(8.dp))
+                        .padding(horizontal = 6.dp, vertical = 8.dp),
+                ) {
+                    when {
+                        loading -> Row(
+                            modifier = Modifier.fillMaxWidth().height(220.dp),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            CircularProgressIndicator(color = ColorIridium, modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Working out the passes", color = MeshSatTextMuted, style = MaterialTheme.typography.bodySmall)
+                        }
+                        passes.isEmpty() -> Text(
+                            when {
+                                errorMsg != null -> errorMsg!!
+                                !hasLocation -> "No position yet. Allow location, or wait for a fix."
+                                else -> "No passes above ${minElevDeg}\u00B0 in this window."
+                            },
+                            color = if (errorMsg != null) MeshSatRed else MeshSatTextMuted,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.fillMaxWidth().padding(24.dp),
+                        )
+                        else -> SkyChart(
+                            passes = passes,
+                            signals = skySignals,
+                            sessions = skySessions,
+                            startSec = nowUnix - windowHours * 3600L / 2,
+                            endSec = nowUnix + windowHours * 3600L / 2,
+                            nowSec = nowUnix,
+                            compact = false,
+                        )
+                    }
+                }
+            }
+        }
+
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("Your surroundings", style = MaterialTheme.typography.labelMedium, color = MeshSatTextSecondary)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+                    ELEV_PRESETS.forEach { p ->
+                        val on = minElevDeg == p.value
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (on) ColorIridium.copy(alpha = 0.18f) else MeshSatSurface)
+                                .border(1.dp, if (on) ColorIridium.copy(alpha = 0.5f) else MeshSatBorder, RoundedCornerShape(8.dp))
+                                .clickable { minElevDeg = p.value }
+                                .padding(vertical = 8.dp),
+                        ) {
+                            Text(
+                                "${p.value}\u00B0",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontFamily = PlexMono,
+                                color = if (on) ColorIridium else MeshSatTextSecondary,
+                            )
+                            Text(
+                                p.label,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (on) ColorIridium else MeshSatTextMuted,
+                            )
+                        }
+                    }
+                }
+                val chosen = ELEV_PRESETS.firstOrNull { it.value == minElevDeg }
+                Text(
+                    "${chosen?.desc ?: "Custom"}: counts the passes that climb above ${minElevDeg}\u00B0.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MeshSatTextMuted,
+                )
+            }
+        }
+
+        if (!loading && passes.isNotEmpty()) {
+            item {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(MeshSatSurface)
+                        .border(1.dp, MeshSatBorder, RoundedCornerShape(8.dp))
+                        .clickable { expandedPassList = !expandedPassList }
+                        .padding(horizontal = 12.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     Text(
-                        text = "TLE: ${formatTleSource(tleSource, cacheAgeSec)}",
+                        text = "Every pass in the window (${passes.size})",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MeshSatTextPrimary,
+                    )
+                    Icon(
+                        if (expandedPassList) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+                        contentDescription = if (expandedPassList) "Hide the passes" else "Show the passes",
+                        tint = MeshSatTextMuted,
+                    )
+                }
+            }
+        }
+        if (expandedPassList && !loading) {
+            items(passes, key = { "${it.satellite}-${it.aosUnix}" }) { pass -> PassRow(pass) }
+        }
+
+        // The bookkeeping, quiet and last
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp), modifier = Modifier.padding(top = 4.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Box(
+                        modifier = Modifier
+                            .size(6.dp)
+                            .clip(CircleShape)
+                            .background(if (hasLocation) SignalExcellent else MeshSatRed),
+                    )
+                    Text(
+                        text = if (hasLocation)
+                            "Position from $locationSource, ${String.format(java.util.Locale.ROOT, "%.4f, %.4f", lat, lon)}"
+                        else
+                            "No position: allow location for predictions",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (hasLocation) MeshSatTextMuted else MeshSatRed,
+                    )
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "Orbit data: ${formatTleSource(tleSource, cacheAgeSec)}",
                         style = MaterialTheme.typography.labelSmall,
                         color = MeshSatTextMuted,
+                        modifier = Modifier.weight(1f),
                     )
-                    Button(
+                    TextButton(
+                        enabled = !refreshing,
                         onClick = {
                             scope.launch {
                                 refreshing = true
@@ -244,228 +406,51 @@ fun PassPredictorScreen() {
                                 if (got == null) {
                                     android.widget.Toast.makeText(
                                         context,
-                                        "Could not download new elements (Celestrak or TLE API); predicting offline with the ones on the phone.",
+                                        "Could not download new orbit data; predicting with the data on the phone.",
                                         android.widget.Toast.LENGTH_LONG,
                                     ).show()
                                 }
                                 computePasses()
                             }
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = MeshSatSurface),
-                        enabled = !refreshing,
-                        modifier = Modifier.height(32.dp),
                     ) {
-                        Text(
-                            if (refreshing) "Refreshing..." else "Refresh TLEs",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = ColorIridium,
-                        )
+                        Text(if (refreshing) "Updating" else "Update", style = MaterialTheme.typography.labelMedium, color = ColorIridium)
                     }
                 }
             }
         }
+    }
+}
 
-        // Location indicator
-        item {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+/** A row of equal choices, the chosen one filled: sized to the screen, never cut off. */
+@Composable
+private fun <T> SegmentedChoice(options: List<T>, selected: T, label: (T) -> String, onSelect: (T) -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(36.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(MeshSatSurface)
+            .border(1.dp, MeshSatBorder, RoundedCornerShape(8.dp))
+            .padding(3.dp),
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
+    ) {
+        options.forEach { o ->
+            val on = o == selected
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(if (on) ColorIridium.copy(alpha = 0.22f) else Color.Transparent)
+                    .clickable { onSelect(o) },
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(8.dp)
-                        .clip(CircleShape)
-                        .background(if (hasLocation) SignalExcellent else MeshSatRed)
-                )
                 Text(
-                    text = if (hasLocation)
-                        "$locationSource: ${String.format("%.4f", lat)}, ${String.format("%.4f", lon)}"
-                    else
-                        "No location — grant GPS permission",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = if (hasLocation) MeshSatTextSecondary else MeshSatRed,
-                )
-            }
-        }
-
-        // Time window buttons
-        item {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                WINDOW_OPTIONS.forEach { h ->
-                    Button(
-                        onClick = { windowHours = h },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (windowHours == h)
-                                ColorIridium.copy(alpha = 0.2f) else MeshSatSurface,
-                        ),
-                        modifier = Modifier.height(32.dp),
-                    ) {
-                        Text(
-                            "${h}h",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = if (windowHours == h) ColorIridium else MeshSatTextMuted,
-                            fontWeight = if (windowHours == h) FontWeight.Bold else FontWeight.Normal,
-                        )
-                    }
-                }
-            }
-        }
-
-        // Elevation presets
-        item {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("Min Elev", style = MaterialTheme.typography.labelSmall, color = MeshSatTextMuted)
-                ELEV_PRESETS.forEach { p ->
-                    Button(
-                        onClick = { minElevDeg = p.value },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (minElevDeg == p.value)
-                                ColorIridium.copy(alpha = 0.2f) else MeshSatSurface,
-                        ),
-                        modifier = Modifier.height(32.dp),
-                    ) {
-                        Text(
-                            "${p.label} ${p.value}°",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = if (minElevDeg == p.value) ColorIridium else MeshSatTextMuted,
-                            fontWeight = if (minElevDeg == p.value) FontWeight.Bold else FontWeight.Normal,
-                        )
-                    }
-                }
-            }
-        }
-
-        // Active pass banner
-        if (activePass != null) {
-            item {
-                PassBanner(
-                    label = "ACTIVE PASS",
-                    pass = activePass,
-                    accentColor = SignalExcellent,
-                    subtitle = "Satellite overhead — transmit now!",
-                )
-            }
-        }
-
-        // Next pass countdown
-        if (nextPass != null && activePass == null) {
-            item {
-                PassBanner(
-                    label = "NEXT PASS",
-                    pass = nextPass,
-                    accentColor = ColorIridium,
-                    subtitle = if (countdownText.isNotEmpty()) "T-$countdownText" else null,
-                    showCountdown = true,
-                    countdownText = countdownText,
-                )
-            }
-        }
-
-        // Signal vs passes, as on the Bridge (MESHSAT-1300)
-        if (!loading && passes.isNotEmpty()) {
-            item {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(MeshSatSurface, RoundedCornerShape(8.dp))
-                        .border(1.dp, MeshSatBorder, RoundedCornerShape(8.dp))
-                        .padding(8.dp),
-                ) {
-                    Text(
-                        "Signal vs passes",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MeshSatTextSecondary,
-                        modifier = Modifier.padding(bottom = 4.dp),
-                    )
-                    SkyChart(
-                        passes = passes,
-                        signals = skySignals,
-                        sessions = skySessions,
-                        startSec = nowUnix - windowHours * 3600L / 2,
-                        endSec = nowUnix + windowHours * 3600L / 2,
-                        nowSec = nowUnix,
-                        compact = false,
-                    )
-                }
-            }
-        }
-
-        // Loading / Error
-        if (loading) {
-            item {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.Center,
-                ) {
-                    CircularProgressIndicator(
-                        color = ColorIridium,
-                        modifier = Modifier.size(24.dp),
-                        strokeWidth = 2.dp,
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text("Calculating passes...", color = MeshSatTextMuted)
-                }
-            }
-        }
-
-        if (errorMsg != null) {
-            item {
-                Text(errorMsg!!, color = MeshSatRed, style = MaterialTheme.typography.bodySmall)
-            }
-        }
-
-        // Pass list header (collapsible)
-        if (!loading && passes.isNotEmpty()) {
-            item {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(MeshSatSurface.copy(alpha = 0.5f))
-                        .border(1.dp, MeshSatBorder.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
-                        .clickable { expandedPassList = !expandedPassList }
-                        .padding(12.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = "${passes.size} passes",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MeshSatTextSecondary,
-                    )
-                    Text(
-                        text = if (expandedPassList) "▼" else "▶",
-                        color = MeshSatTextMuted,
-                    )
-                }
-            }
-        }
-
-        // Pass list items
-        if (expandedPassList && !loading) {
-            items(passes, key = { "${it.satellite}-${it.aosUnix}" }) { pass ->
-                PassRow(pass)
-            }
-        }
-
-        // Empty state
-        if (!loading && passes.isEmpty() && hasLocation && errorMsg == null) {
-            item {
-                Text(
-                    "No passes found for this location and time window.",
-                    color = MeshSatTextMuted,
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(MeshSatSurface.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
-                        .border(1.dp, MeshSatBorder, RoundedCornerShape(8.dp))
-                        .padding(24.dp),
+                    label(o),
+                    style = MaterialTheme.typography.labelLarge,
+                    fontFamily = PlexMono,
+                    color = if (on) ColorIridium else MeshSatTextMuted,
                 )
             }
         }
@@ -497,9 +482,8 @@ private fun PassBanner(
             Column {
                 Text(
                     label,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = accentColor.copy(alpha = 0.6f),
-                    letterSpacing = 1.sp,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = accentColor.copy(alpha = 0.8f),
                 )
                 Text(
                     pass.satellite,
