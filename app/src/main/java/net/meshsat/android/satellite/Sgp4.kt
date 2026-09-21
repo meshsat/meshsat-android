@@ -36,7 +36,10 @@ object Sgp4 {
     private const val CK4 = -0.375 * J4
     private const val QOMS2T = 1.880279159015271e-9  // ((120-78)/EARTH_RADIUS_KM)^4
     private const val S = 1.01222928  // (1 + 78/EARTH_RADIUS_KM)
-    private const val A3OVK2 = J3 / CK2
+    // Vallado's j3oj2. This file had A3OVK2 = J3 / CK2, twice j3oj2 and without the sign the
+    // Spacetrack report gives it, so two long-period terms came out doubled and a drag term had its
+    // sign flipped (MESHSAT-1302).
+    private const val J3OJ2 = J3 / J2
 
     data class EciPosition(val x: Double, val y: Double, val z: Double)
 
@@ -50,7 +53,7 @@ object Sgp4 {
     }
 
     private class SatRec(
-        val no: Double,       // mean motion (rad/min)
+        var no: Double,       // mean motion (rad/min); set to the un-Kozai'd value in init
         val ecco: Double,     // eccentricity
         val inclo: Double,    // inclination (rad)
         val nodeo: Double,    // RAAN (rad)
@@ -83,6 +86,7 @@ object Sgp4 {
         var mdot: Double = 0.0,
         var nodedot: Double = 0.0,
         var xlcof: Double = 0.0,
+        var aycof: Double = 0.0,
         var xmcof: Double = 0.0,
         var xnodcf: Double = 0.0,
         var delmo: Double = 0.0,
@@ -106,9 +110,9 @@ object Sgp4 {
         val sinio = sin(inclo)
         val cosio2 = cosio * cosio
         rec.x1mth2 = 1.0 - cosio2
-        rec.con41 = -rec.x1mth2 - cosio2 - cosio2
-        rec.x7thm1 = 7.0 * cosio2 - 1.0
         rec.con42 = 1.0 - 5.0 * cosio2
+        rec.con41 = -rec.con42 - cosio2 - cosio2   // 3 cos^2 i - 1 (Vallado initl); was -1 - cos^2 i
+        rec.x7thm1 = 7.0 * cosio2 - 1.0
 
         val theta2 = cosio2
         val theta4 = theta2 * theta2
@@ -120,6 +124,8 @@ object Sgp4 {
         val delo = 1.5 * CK2 * (3.0 * theta2 - 1.0) / (ao * ao * betao * betao2)
         val xnodp = no / (1.0 + delo)
         rec.aodp = ao / (1.0 - delo)
+        // Propagation uses the recovered ("un-Kozai'd") mean motion, as Vallado's no_unkozai.
+        rec.no = xnodp
 
         // Perigee check
         val perigee = (rec.aodp * (1.0 - ecco) - 1.0) * EARTH_RADIUS_KM
@@ -142,36 +148,40 @@ object Sgp4 {
         val coef = qoms24 * tsi.pow(4.0)
         val coef1 = coef / psisq.pow(3.5)
         val c2 = coef1 * xnodp * (rec.aodp * (1.0 + 1.5 * etasq + eeta * (4.0 + etasq)) +
-                0.75 * CK2 * tsi / psisq * (3.0 * (3.0 * theta2 - 1.0)) * (8.0 + 3.0 * etasq * (8.0 + etasq)))
+                0.75 * CK2 * tsi / psisq * rec.con41 * (8.0 + 3.0 * etasq * (8.0 + etasq)))
         rec.cc1 = bstar * c2
-        val c3 = if (ecco > 1.0e-4) coef * tsi * A3OVK2 * xnodp * sinio / ecco else 0.0
+        val c3 = if (ecco > 1.0e-4) -2.0 * coef * tsi * J3OJ2 * xnodp * sinio / ecco else 0.0
         rec.cc4 = 2.0 * xnodp * coef1 * rec.aodp * betao2 *
                 (rec.eta * (2.0 + 0.5 * etasq) + ecco * (0.5 + 2.0 * etasq) -
                         2.0 * CK2 * tsi / (rec.aodp * psisq) *
-                        (-3.0 * (3.0 * (1.0 - 2.0 * eeta + etasq * (1.5 - 0.5 * eeta)) * rec.con41 +
-                                0.75 * rec.x1mth2 * (2.0 * etasq - eeta * (1.0 + etasq)) * cos(2.0 * argpo))))
+                        (-3.0 * rec.con41 * (1.0 - 2.0 * eeta + etasq * (1.5 - 0.5 * eeta)) +
+                                0.75 * rec.x1mth2 * (2.0 * etasq - eeta * (1.0 + etasq)) * cos(2.0 * argpo)))
         rec.cc5 = 2.0 * coef1 * rec.aodp * betao2 * (1.0 + 2.75 * (etasq + eeta) + eeta * etasq)
 
         rec.sinmao = sin(mo)
         rec.xlcof = if (abs(cosio + 1.0) > 1.5e-12)
-            -0.25 * A3OVK2 * sinio * (3.0 + 5.0 * cosio) / (1.0 + cosio)
+            -0.25 * J3OJ2 * sinio * (3.0 + 5.0 * cosio) / (1.0 + cosio)
         else
-            -0.25 * A3OVK2 * sinio * (3.0 + 5.0 * cosio) / 1.5e-12
+            -0.25 * J3OJ2 * sinio * (3.0 + 5.0 * cosio) / 1.5e-12
+        rec.aycof = -0.5 * J3OJ2 * sinio
 
-        rec.xmcof = if (ecco > 1.0e-4) -TWO_PI * coef * bstar / eeta / 3.0 else 0.0
-        rec.xnodcf = 3.5 * betao2 * CK2 * xnodp * pinvsq * sinio * cosio
+        rec.xmcof = if (ecco > 1.0e-4) -(2.0 / 3.0) * coef * bstar / eeta else 0.0
         rec.t2cof = 1.5 * rec.cc1
 
-        rec.mdot = xnodp + 0.5 * CK2 * pinvsq * betao * (3.0 * theta2 - 1.0) +
-                0.0625 * CK2 * CK2 * pinvsq * pinvsq * betao *
-                (13.0 - 78.0 * theta2 + 137.0 * theta4)
-        rec.argpdot = -0.5 * CK2 * pinvsq * rec.con42 +
-                0.0625 * CK2 * CK2 * pinvsq * pinvsq *
-                (7.0 - 114.0 * theta2 + 395.0 * theta4) +
-                CK4 * pinvsq * pinvsq * (3.0 - 36.0 * theta2 + 49.0 * theta4)
-        val xhdot1 = -CK2 * pinvsq * cosio
-        rec.nodedot = xhdot1 + (0.5 * CK2 * CK2 * pinvsq * pinvsq * (4.0 - 19.0 * theta2) +
-                2.0 * CK4 * pinvsq * pinvsq * (3.0 - 7.0 * theta2)) * cosio
+        // Secular rates as the Spacetrack report and Vallado write them. The J2 and J4 terms scale
+        // with the mean motion (temp1 = 3 CK2 pinvsq n); this file left the factor out, so the
+        // satellite drifted from its orbit by tens of kilometres every ten minutes (MESHSAT-1302).
+        val temp1 = 3.0 * CK2 * pinvsq * xnodp
+        val temp2 = temp1 * CK2 * pinvsq
+        val temp3 = 1.25 * CK4 * pinvsq * pinvsq * xnodp
+        rec.mdot = xnodp + 0.5 * temp1 * betao * rec.con41 +
+                0.0625 * temp2 * betao * (13.0 - 78.0 * theta2 + 137.0 * theta4)
+        rec.argpdot = -0.5 * temp1 * rec.con42 +
+                0.0625 * temp2 * (7.0 - 114.0 * theta2 + 395.0 * theta4) +
+                temp3 * (3.0 - 36.0 * theta2 + 49.0 * theta4)
+        val xhdot1 = -temp1 * cosio
+        rec.nodedot = xhdot1 + (0.5 * temp2 * (4.0 - 19.0 * theta2) + 2.0 * temp3 * (3.0 - 7.0 * theta2)) * cosio
+        rec.xnodcf = 3.5 * betao2 * xhdot1 * rec.cc1
         rec.omgcof = bstar * c3 * cos(argpo)
         rec.delmo = (1.0 + rec.eta * cos(mo)).pow(3.0)
 
@@ -226,33 +236,33 @@ object Sgp4 {
         if (em < 1.0e-6) em = 1.0e-6
         if (em >= 1.0) return null  // orbit decayed
 
-        mm += nm2 * templ
-        var xlm = mm + argpm + nodem
+        mm += rec.no * templ
+        val xlm = mm + argpm + nodem
         val sinim = sin(inclm)
         val cosim = cos(inclm)
 
-        // Fix mean anomaly
+        // Long period periodics (Vallado): both terms scale with temp, which this file left out
         val axn = em * cos(argpm)
         var temp = 1.0 / (am * (1.0 - em * em))
-        val xlcof = rec.xlcof
-        val aycof = if (abs(cosim + 1.0) > 1.5e-12)
-            -0.5 * A3OVK2 * sinim
-        else
-            -0.5 * A3OVK2 * sinim
-        val ayn = em * sin(argpm) + aycof
-        val xl = xlm + xlcof * axn
+        val ayn = em * sin(argpm) + temp * rec.aycof
+        val xl = xlm + temp * rec.xlcof * axn
 
         // Kepler's equation
         var u = (xl - nodem) % TWO_PI
         if (u < 0) u += TWO_PI
         var eo1 = u
+        // Newton's method, stepping TOWARDS the root as Vallado does (eo1 + tem5). This file
+        // subtracted the step, so each iteration doubled the error and after ten the satellite
+        // was far along its orbit from where it is: 13,868 km off at epoch, two "passes" minutes
+        // apart for one satellite, three times the passes a day (MESHSAT-1302).
         for (i in 0 until 10) {
             val sineo1 = sin(eo1)
             val coseo1 = cos(eo1)
             val f = u - eo1 + axn * sineo1 - ayn * coseo1
             val fp = 1.0 - axn * coseo1 - ayn * sineo1
-            val delta = f / fp
-            eo1 -= delta
+            var delta = f / fp
+            if (abs(delta) >= 0.95) delta = if (delta > 0) 0.95 else -0.95
+            eo1 += delta
             if (abs(delta) < 1.0e-12) break
         }
 
