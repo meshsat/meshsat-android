@@ -39,6 +39,7 @@ import net.meshsat.android.data.Message
 import net.meshsat.android.data.NodePosition
 import net.meshsat.android.data.SettingsRepository
 import net.meshsat.android.data.SignalRecord
+import net.meshsat.android.engine.OutgoingText
 import net.meshsat.android.engine.AckTracker
 import net.meshsat.android.engine.Dispatcher
 import net.meshsat.android.engine.FailoverResolver
@@ -3232,22 +3233,7 @@ class GatewayService : Service() {
         val ble = meshtasticBle ?: return
         if (ble.state.value != MeshtasticBle.State.Connected) return
 
-        val compressMode = settings.compressMesh.first()
-        val stages = settings.msvqscStages.first().toIntOrNull() ?: 3
-        val outText: String
-        if (compressMode == "msvqsc" && msvqscEncoder != null) {
-            val wire = msvqscEncoder!!.encode(text, stages)
-            if (wire != null) {
-                val versioned = ProtocolVersion.prependVersionByte(wire)
-                outText = android.util.Base64.encodeToString(versioned, android.util.Base64.NO_WRAP)
-                Log.d("MeshSat", "Mesh TX compressed: ${text.length} chars → ${outText.length} chars (MSVQ-SC $stages stages)")
-            } else {
-                outText = text
-            }
-        } else {
-            outText = text
-        }
-
+        val outText = OutgoingText.onMesh(text)
         val proto = MeshtasticProtocol.encodeTextMessage(outText)
         ble.sendToRadio(proto)
 
@@ -3326,23 +3312,10 @@ class GatewayService : Service() {
         if (ble.state.value != MeshtasticBle.State.Connected) return
 
         scope.launch {
-            val compressMode = settings.compressMesh.first()
-            val stages = settings.msvqscStages.first().toIntOrNull() ?: 3
-            val outText: String
-            if (compressMode == "msvqsc" && msvqscEncoder != null) {
-                val wire = msvqscEncoder!!.encode(text, stages)
-                if (wire != null) {
-                    val versioned = ProtocolVersion.prependVersionByte(wire)
-                    outText = android.util.Base64.encodeToString(versioned, android.util.Base64.NO_WRAP)
-                    Log.d("MeshSat", "Mesh TX compressed: ${text.length} chars → ${outText.length} chars (MSVQ-SC $stages stages)")
-                } else {
-                    outText = text
-                }
-            } else {
-                outText = text
-            }
-
+            val outText = OutgoingText.onMesh(text)
             val proto = MeshtasticProtocol.encodeTextMessage(outText, to, channel)
+            // Writing to a node we have no name for: ask it, so the conversation gets one.
+            if (to != 0xFFFFFFFFL) ble.askWhoIs(to)
             ble.sendToRadio(proto)
 
             db.messageDao().insert(

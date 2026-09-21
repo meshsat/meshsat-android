@@ -135,9 +135,8 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
     val piPhone by settings.meshsatPiPhone.collectAsState(initial = "")
     val msvqscEnabled by settings.msvqscEnabled.collectAsState(initial = false)
     val msvqscStages by settings.msvqscStages.collectAsState(initial = "3")
-    val compressMesh by settings.compressMesh.collectAsState(initial = "msvqsc")
     val compressIridium by settings.compressIridium.collectAsState(initial = "off")
-    val compressSms by settings.compressSms.collectAsState(initial = "msvqsc")
+    val compressSms by settings.compressSms.collectAsState(initial = "off")
     val compressMqtt by settings.compressMqtt.collectAsState(initial = "off")
 
     val deadmanEnabled by settings.deadmanEnabled.collectAsState(initial = false)
@@ -864,8 +863,10 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
         if (section.shows(SetupSection.Messaging)) {
             SectionCard("Message compression") {
                 Text(
-                    text = "Per-channel compression mode. MSVQ-SC is lossy semantic compression. " +
-                            "Incoming compressed messages are always auto-detected regardless of these settings.",
+                    text = "Only for links where the other end is MeshSat too: anyone else sees a line of " +
+                            "letters. MSVQ-SC keeps the meaning, not the exact words. Mesh messages always go " +
+                            "out as typed, because a mesh channel is shared with other radios. Compressed " +
+                            "messages coming in are always read, whatever is set here.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MeshSatTextMuted,
                 )
@@ -874,7 +875,6 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
 
                 val channels = listOf(
                     "sms" to "SMS" to compressSms,
-                    "mesh" to "Mesh (LoRa)" to compressMesh,
                     "iridium" to "Iridium SBD" to compressIridium,
                     "mqtt" to "MQTT (Hub)" to compressMqtt,
                 )
@@ -914,7 +914,7 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
                 }
 
                 // MSVQ-SC stages (global, applies to all channels using MSVQ-SC)
-                val anyMsvqsc = compressSms == "msvqsc" || compressMesh == "msvqsc" || compressIridium == "msvqsc"
+                val anyMsvqsc = compressSms == "msvqsc" || compressIridium == "msvqsc"
                 if (anyMsvqsc) {
                     Spacer(Modifier.height(8.dp))
                     Text(
