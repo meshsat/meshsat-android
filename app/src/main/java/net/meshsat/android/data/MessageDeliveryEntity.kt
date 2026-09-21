@@ -47,6 +47,13 @@ data class MessageDeliveryEntity(
     // "imei:momsn" of the satellite session that carried this delivery, so the Hub's receipt
     // (meshsat/bridge/{id}/mo/ack) can be matched to it (MESHSAT-1246). Empty until sent.
     @ColumnInfo(name = "sat_ref", defaultValue = "''") val satRef: String = "",
+    /**
+     * Who the message came from, as the source link knows them: a phone number, a mesh node id,
+     * a callsign. Empty for a message written on this phone. A link that passes the message on
+     * to the Hub names this as the originator, not the modem that happened to be attached
+     * (MESHSAT-1274).
+     */
+    @ColumnInfo(name = "origin", defaultValue = "''") val origin: String = "",
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
