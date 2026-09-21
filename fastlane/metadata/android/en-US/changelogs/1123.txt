@@ -1,0 +1,1 @@
+Home: the satellite signal card now shows your signal over the predicted passes, three hours back and three ahead. The passes screen is laid out for small phones. Scanning a Hub QR code now waits for the Hub when it is not ready yet.
