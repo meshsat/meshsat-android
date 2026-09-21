@@ -61,6 +61,15 @@ class HubReporter(
     private val _state = MutableStateFlow(State.Disconnected)
     val state: StateFlow<State> = _state
 
+    private val _lastError = MutableStateFlow("")
+
+    /**
+     * Why the last connection attempt failed, in the library's words, or empty. The Settings card
+     * said only "Cannot reach the Hub" and the reason stayed in logcat, which is where the SNI
+     * fault of September sat unseen (MESHSAT-749).
+     */
+    val lastError: StateFlow<String> = _lastError
+
     private var client: MqttClient? = null
     private var healthJob: Job? = null
     private val startTime = SystemClock.elapsedRealtime()
@@ -236,6 +245,7 @@ class HubReporter(
                 mqttClient.connect(opts)
                 client = mqttClient
                 _state.value = State.Connected
+                _lastError.value = ""
                 Log.i(TAG, "Connected to Hub at ${config.hubUrl}")
 
                 subscribeAndAnnounce(mqttClient)
@@ -245,6 +255,7 @@ class HubReporter(
 
             } catch (e: Exception) {
                 Log.e(TAG, "Hub connect failed: ${e.message}", e)
+                _lastError.value = connectFailureText(e)
                 _state.value = State.Error
             }
         }
@@ -765,3 +776,15 @@ data class HubReporterConfig(
     val clientKeyPem: String = "",
     val caCertPem: String = "",
 )
+
+/**
+ * A connection failure as a person can read it: the outermost message and, when it differs, the
+ * innermost cause, which is where Paho puts the real reason ("Unable to connect to server" over
+ * a TLS or DNS error). Pure, so it has a test.
+ */
+internal fun connectFailureText(e: Throwable): String {
+    val chain = generateSequence(e) { it.cause }.take(8).toList()
+    val outer = chain.first().message?.trim().orEmpty().ifBlank { chain.first().javaClass.simpleName }
+    val inner = chain.last().let { it.message?.trim().orEmpty().ifBlank { it.javaClass.simpleName } }
+    return if (chain.size > 1 && inner != outer && !outer.contains(inner)) "$outer: $inner" else outer
+}
