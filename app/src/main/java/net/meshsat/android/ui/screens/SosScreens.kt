@@ -532,7 +532,7 @@ fun SosSettingsCard() {
                 Button(onClick = {
                     phoneError = null
                     try {
-                        pickContact.launch(Intent(Intent.ACTION_PICK, ContactsContract.CommonDataKinds.Phone.CONTENT_URI))
+                        pickContact.launch(contactPickIntent(context))
                     } catch (e: ActivityNotFoundException) {
                         typing = true
                         phoneError = "This phone has no contacts app. Type the number instead."
@@ -617,3 +617,29 @@ private fun readPickedContact(context: Context, uri: Uri): Pair<String, String>?
     null
 }
 
+/**
+ * The pick goes straight to the phone's own contacts app. Left open, Android asked "Contacts or
+ * Solid Explorer?" on the owner's phone, because a file manager also claims it can pick things -
+ * a question nobody adding an emergency contact should have to answer (MESHSAT-1291).
+ */
+private fun contactPickIntent(context: Context): Intent {
+    val intent = Intent(Intent.ACTION_PICK, ContactsContract.CommonDataKinds.Phone.CONTENT_URI)
+    val handlers = try {
+        context.packageManager.queryIntentActivities(intent, 0).map {
+            it.activityInfo.packageName to
+                ((it.activityInfo.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) != 0)
+        }
+    } catch (e: Exception) {
+        emptyList()
+    }
+    contactsAppAmong(handlers)?.let { intent.setPackage(it) }
+    return intent
+}
+
+/**
+ * Which app picks the contact, from (package, is it part of the system) pairs: the only handler
+ * when there is one, else the only system one. Null leaves the choice to Android, which is right
+ * when the person has two real contacts apps.
+ */
+internal fun contactsAppAmong(handlers: List<Pair<String, Boolean>>): String? =
+    handlers.singleOrNull()?.first ?: handlers.filter { it.second }.singleOrNull()?.first

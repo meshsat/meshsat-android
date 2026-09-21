@@ -28,6 +28,16 @@
     <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
     <uses-feature android:name="android.hardware.telephony" android:required="false" />
 
+    <!-- So the emergency-contact picker can find the phone's own contacts app and go straight to
+         it, instead of Android asking which of several apps should "pick" (MESHSAT-1291). This
+         lets the app SEE which apps answer that one intent; it reads no contacts. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.PICK" />
+            <data android:mimeType="vnd.android.cursor.dir/phone_v2" />
+        </intent>
+    </queries>
+
     <application
         android:name=".MeshSatApp"
         android:allowBackup="true"
