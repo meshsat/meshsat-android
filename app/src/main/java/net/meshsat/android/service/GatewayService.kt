@@ -39,6 +39,7 @@ import net.meshsat.android.data.Message
 import net.meshsat.android.data.NodePosition
 import net.meshsat.android.data.SettingsRepository
 import net.meshsat.android.data.SignalRecord
+import net.meshsat.android.engine.HubOrigin
 import net.meshsat.android.engine.OutgoingText
 import net.meshsat.android.engine.AckTracker
 import net.meshsat.android.engine.Dispatcher
@@ -2308,15 +2309,25 @@ class GatewayService : Service() {
                     val hub = hubReporter
                         ?: return "the Hub is not set up"
                     if (hub.state.value != HubReporter.State.Connected) return "not connected to the Hub"
-                    val imei = iridiumSpp?.modemInfo?.value?.imei.orEmpty()
-                    val deviceId = imei.ifBlank { settings.hubBridgeId.first() }
+                    // The id names who the message came from; bridge_id names this phone, which
+                    // carried it. Until v2.18.10 every forward went out under the modem's IMEI, so
+                    // a text from a phone number was filed as the RockBLOCK's (MESHSAT-1274).
+                    val bridgeId = settings.hubBridgeId.first()
+                    val origin = if (deliveryId != 0L) db.messageDeliveryDao().getById(deliveryId)?.origin.orEmpty() else ""
+                    val deviceId = HubOrigin.deviceIdFor(
+                        sourceBearer = sourceBearer,
+                        origin = origin,
+                        modemImei = iridiumSpp?.modemInfo?.value?.imei.orEmpty(),
+                        bridgeId = bridgeId,
+                    )
                     if (deviceId.isBlank()) return "no device id for the Hub"
                     val text = if (payload.isNotEmpty()) String(payload, Charsets.UTF_8) else textPreview
                     // The bearer it arrived on, not the one it leaves by: the Hub stores this
                     // verbatim and its routing engine reads it as the source of the message, so
                     // "mqtt" on a forwarded SMS both lost the provenance and stopped any Hub
                     // route scoped to sms from firing (MESHSAT-1274).
-                    if (!hub.publishMessage(deviceId, text, recipient, channel = hubChannelOf(sourceBearer))) {
+                    val messageId = if (deliveryId != 0L && bridgeId.isNotBlank()) "$bridgeId-d$deliveryId" else ""
+                    if (!hub.publishMessage(deviceId, text, recipient, channel = hubChannelOf(sourceBearer), messageId = messageId)) {
                         return "the Hub did not take the message"
                     }
                     db.messageDao().insert(

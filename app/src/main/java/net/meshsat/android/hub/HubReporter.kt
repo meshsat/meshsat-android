@@ -89,12 +89,19 @@ class HubReporter(
          * engine as the source of the message (MESHSAT-1274).
          */
         channel: String = "mqtt",
+        /** Stable across retries, so a resend is the same message to the Hub and not a new one. */
+        messageId: String = "",
     ): Boolean {
         val c = client
         if (c == null || !c.isConnected) return false
+        // The plain id in the body, the percent-encoded one in the topic: a raw "+" from a phone
+        // number is an MQTT wildcard, the broker refuses the publish and drops the connection,
+        // and paho resends it on every reconnect (meshsat-hub, MESHSAT-1274).
         val device = HubTopics.segment(deviceId)
         val decoded = JSONObject().apply {
+            if (messageId.isNotBlank()) put("id", messageId)
             put("imei", deviceId)
+            put("device_id", deviceId)
             put("bridge_id", config.bridgeId)
             put("text", text)
             put("sos", false)
