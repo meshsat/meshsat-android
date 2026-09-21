@@ -261,7 +261,8 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
     // QR provisioning state
     var provisionBundle by remember { mutableStateOf<net.meshsat.android.crypto.ProvisionImporter.ProvisionBundle?>(null) }
     var showProvisionDialog by remember { mutableStateOf(false) }
-    val hubReporterState = GatewayService.hubReporter?.state.collectOrNull()
+    val hubReporterNow by GatewayService.hubReporterNow.collectAsState()
+    val hubReporterState = hubReporterNow?.state.collectOrNull()
 
     // BLE state
     val meshState = GatewayService.meshtasticBle?.state.collectOrNull()
@@ -1659,7 +1660,7 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
                 val statusLabel = when {
                     !hubEnabled -> "Switched off"
                     hubState == net.meshsat.android.hub.HubReporter.State.Connected ->
-                        "Connected as ${GatewayService.hubReporter?.bridgeId ?: hubBridgeIdInput}"
+                        "Connected as ${hubReporterNow?.bridgeId ?: hubBridgeIdInput}"
                     hubState == net.meshsat.android.hub.HubReporter.State.Connecting -> "Connecting"
                     hubState == net.meshsat.android.hub.HubReporter.State.Error -> "Cannot reach the Hub"
                     hubState == net.meshsat.android.hub.HubReporter.State.Disconnected -> "Not connected"
@@ -1687,7 +1688,7 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
                 }
                 // Why, when it failed: the library's own words, not only "Cannot reach the Hub"
                 // (MESHSAT-749; the SNI fault sat in logcat for a day).
-                val hubWhy = GatewayService.hubReporter?.lastError.collectOrNull()?.value.orEmpty()
+                val hubWhy = hubReporterNow?.lastError.collectOrNull()?.value.orEmpty()
                 if (hubEnabled && hubState == net.meshsat.android.hub.HubReporter.State.Error && hubWhy.isNotBlank()) {
                     Text(
                         text = "Why: $hubWhy",
