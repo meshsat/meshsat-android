@@ -51,6 +51,15 @@ class RelayTunnel(
     private val log: (String) -> Unit = {},
 ) {
     companion object {
+        /**
+         * Where the tunnel listens and where [RelayHttp] dials: IPv4 127.0.0.1, named, never
+         * `InetAddress.getLoopbackAddress()`. That returns 127.0.0.1 on a desktop JVM and ::1 on
+         * Android, so the tunnel listened on ::1 while the client dialled 127.0.0.1 and every
+         * request was refused. The live test ran on a JVM and passed; the first request from a
+         * phone failed (MESHSAT-616, 21 Sep 2026).
+         */
+        val LOOPBACK: InetAddress = InetAddress.getByAddress("localhost", byteArrayOf(127, 0, 0, 1))
+
         /** Largest frame the Hub accepts from either end. */
         const val MAX_FRAME = 64 * 1024
 
@@ -174,7 +183,7 @@ class RelayTunnel(
     fun open() {
         if (!opened.compareAndSet(false, true)) return
         if (frameListener == null) {
-            val ss = ServerSocket(0, 1, InetAddress.getLoopbackAddress())
+            val ss = ServerSocket(0, 1, LOOPBACK)
             server = ss
         }
         val request = Request.Builder()

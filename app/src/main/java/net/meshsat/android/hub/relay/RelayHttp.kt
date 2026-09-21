@@ -42,7 +42,7 @@ class RelayHttp(
     /** Build an unsent connection for [path] (must start with `/`). */
     fun open(path: String, method: String = "GET"): HttpsURLConnection {
         require(path.startsWith("/")) { "path must start with /" }
-        val conn = URL("https://127.0.0.1:$localPort$path").openConnection() as HttpsURLConnection
+        val conn = URL("https://${RelayTunnel.LOOPBACK.hostAddress}:$localPort$path").openConnection() as HttpsURLConnection
         conn.sslSocketFactory = socketFactory
         conn.hostnameVerifier = verifier
         conn.requestMethod = method
