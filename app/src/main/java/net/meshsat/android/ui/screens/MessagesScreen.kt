@@ -5,10 +5,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.widget.Toast
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -80,6 +77,8 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import net.meshsat.android.ui.components.goToSettingsText
+import net.meshsat.android.ui.components.rememberPermissionAsk
 import net.meshsat.android.ble.MeshtasticBle
 import net.meshsat.android.bt.IridiumSpp
 import net.meshsat.android.crypto.AesGcmCrypto
@@ -133,23 +132,9 @@ fun MessagesScreen(openChat: (String) -> Unit = {}) {
     }
     var selectedTab by remember { mutableStateOf("all") }
 
-    // SMS permission state
-    var smsPermissionGranted by remember {
-        mutableStateOf(
-            ContextCompat.checkSelfPermission(context, Manifest.permission.RECEIVE_SMS) == PackageManager.PERMISSION_GRANTED &&
-            ContextCompat.checkSelfPermission(context, Manifest.permission.SEND_SMS) == PackageManager.PERMISSION_GRANTED
-        )
-    }
-    val smsPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { results ->
-        smsPermissionGranted = results.values.all { it }
-        if (smsPermissionGranted) {
-            Toast.makeText(context, "SMS enabled", Toast.LENGTH_SHORT).show()
-        } else {
-            Toast.makeText(context, "SMS permissions denied — you can grant them later in Settings", Toast.LENGTH_LONG).show()
-        }
-    }
+    // SMS permission state; Android may refuse without asking (MESHSAT-1295)
+    val sms = rememberPermissionAsk(arrayOf(Manifest.permission.RECEIVE_SMS, Manifest.permission.SEND_SMS))
+    val smsPermissionGranted = sms.granted
 
 
     val allMessages by (if (searchQuery.isBlank()) {
@@ -216,21 +201,17 @@ fun MessagesScreen(openChat: (String) -> Unit = {}) {
                         color = MeshSatAmber,
                     )
                     Text(
-                        text = "Grant SMS permission to send and receive SMS messages through MeshSat.",
+                        text = if (sms.needsSettings) goToSettingsText("SMS")
+                        else "Grant SMS permission to send and receive SMS messages through MeshSat.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MeshSatTextMuted,
                     )
                 }
                 Button(
-                    onClick = {
-                        smsPermissionLauncher.launch(arrayOf(
-                            Manifest.permission.RECEIVE_SMS,
-                            Manifest.permission.SEND_SMS,
-                        ))
-                    },
+                    onClick = sms.ask,
                     colors = ButtonDefaults.buttonColors(containerColor = MeshSatAmber),
                 ) {
-                    Text("Enable", style = MaterialTheme.typography.bodySmall)
+                    Text(if (sms.needsSettings) "Settings" else "Enable", style = MaterialTheme.typography.bodySmall)
                 }
             }
         }

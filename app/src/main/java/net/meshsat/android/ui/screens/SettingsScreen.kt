@@ -67,6 +67,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import net.meshsat.android.ui.components.goToSettingsText
+import net.meshsat.android.ui.components.rememberPermissionAsk
 import net.meshsat.android.ble.MeshtasticBle
 import net.meshsat.android.ble.IridiumPipeContract
 import net.meshsat.android.bt.IridiumSpp
@@ -1898,17 +1900,11 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
             // and a permission that is not declared can never be granted - so this card said
             // "Not allowed yet" for ever on a phone that sends and receives texts perfectly well,
             // and its button asked for something Android would not give (MESHSAT-1261 session).
-            val smsPermissions = arrayOf(
+            val sms = rememberPermissionAsk(arrayOf(
                 Manifest.permission.SEND_SMS,
                 Manifest.permission.RECEIVE_SMS,
-            )
-            fun smsAllowed() = smsPermissions.all {
-                ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
-            }
-            var smsGranted by remember { mutableStateOf(smsAllowed()) }
-            val smsLauncher = rememberLauncherForActivityResult(
-                ActivityResultContracts.RequestMultiplePermissions(),
-            ) { smsGranted = smsAllowed() }
+            ))
+            val smsGranted = sms.granted
             SectionCard("Text messages") {
                 ConnectionStatusRow(
                     label = "SMS",
@@ -1923,11 +1919,18 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
                     color = MeshSatTextSecondary,
                 )
                 if (!smsGranted) {
+                    if (sms.needsSettings) {
+                        Text(
+                            text = goToSettingsText("SMS"),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MeshSatAmber,
+                        )
+                    }
                     Button(
-                        onClick = { smsLauncher.launch(smsPermissions) },
+                        onClick = sms.ask,
                         modifier = Modifier.fillMaxWidth(),
                     ) {
-                        Text("Allow SMS")
+                        Text(if (sms.needsSettings) "Open MeshSat settings" else "Allow SMS")
                     }
                 }
             }
