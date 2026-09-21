@@ -1,0 +1,1 @@
+When the phone's Bluetooth is switched off, the app now says so, on every screen and on Home, and a tap offers to switch it back on. Before, it only said it could not reach the node.
