@@ -1,0 +1,1 @@
+A message the phone passes on to the Hub is now filed under the person or radio that sent it, not under the satellite modem, so the Hub shows where it really came from and its sender rules work.
