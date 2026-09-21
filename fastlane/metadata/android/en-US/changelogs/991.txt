@@ -1,0 +1,1 @@
+Messages typed to the mesh now go out as plain text, so every radio on the channel can read them; before, they went out compressed and other radios showed a line of letters. SMS compression now starts switched off. A node met on the air now shows its name instead of its number.
