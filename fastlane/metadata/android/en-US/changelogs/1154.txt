@@ -1,0 +1,1 @@
+After scanning the Hub's code, the phone shows that it is waiting for the Hub, with the seconds counting, and keeps waiting if you leave the screen. Restarting the gateway no longer leaves an old Hub connection behind that could push the new one off.
