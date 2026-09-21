@@ -1,0 +1,1 @@
+After scanning the Hub's QR code the phone keeps trying until the Hub accepts it, instead of giving up after one try, and the Hub settings show the connection as it is. The QR scanner now opens upright.
