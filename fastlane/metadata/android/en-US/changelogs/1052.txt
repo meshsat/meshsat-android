@@ -1,0 +1,1 @@
+A satellite message is now one message of at most 340 bytes. The message box tells you when yours is too long and will not send it; before, a longer message was cut into parts that could arrive garbled.
