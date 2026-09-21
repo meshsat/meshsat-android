@@ -682,7 +682,10 @@ private fun NodeRow(
                             add("${Words.count(info.hopsAway, "hop")} away")
                     }
                 }
-                if (info != null && info.batteryLevel in 0..100) add("Battery ${info.batteryLevel}%")
+                if (info != null) when {
+                    info.batteryLevel in 0..100 -> add("Battery ${info.batteryLevel}%")
+                    info.batteryLevel > 100 -> add("On USB power")
+                }
             }
             if (details.isNotEmpty()) {
                 Text(

@@ -24,6 +24,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -45,6 +46,7 @@ import kotlinx.coroutines.withContext
 import net.meshsat.android.R
 import net.meshsat.android.ble.IridiumPipeContract
 import net.meshsat.android.ble.MeshtasticBle
+import net.meshsat.android.ble.NodeBattery
 import net.meshsat.android.bt.IridiumSpp
 import net.meshsat.android.data.AppDatabase
 import net.meshsat.android.data.SettingsRepository
@@ -140,6 +142,9 @@ fun HomeLanes(navigate: (String) -> Unit) {
     val myNum = ble?.myInfo?.value?.myNodeNum ?: 0L
     val myName = nodes.firstOrNull { it.nodeNum == myNum }?.longName.orEmpty()
     val rssi = ble?.rssi?.value ?: 0
+    // The node's own battery (MESHSAT-1315), only while it is the node this phone is on.
+    val battery = GatewayService.nodeBattery.collectAsState().value?.takeIf { it.nodeNum == myNum }
+    val batteryText = battery?.let { NodeBattery.describe(it.level, it.voltage, it.hoursLeft, withVoltage = false) }
     val reconnecting = !meshUp && savedNode.isNotBlank()
 
     // --- Satellite ---
@@ -189,6 +194,7 @@ fun HomeLanes(navigate: (String) -> Unit) {
             append(if (myName.isNotBlank()) "Connected to $myName" else "Connected")
             if (rssi != 0) append(", signal $rssi dBm")
             append('.')
+            batteryText?.let { append(if ((battery?.level ?: 0) > 100) " $it." else " Battery $it.") }
         }
         meshState == MeshtasticBle.State.Connecting || meshState == MeshtasticBle.State.Scanning ->
             LaneState.Trying to "Connecting to your node."

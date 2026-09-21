@@ -245,6 +245,21 @@ class GatewayService : Service() {
                 _hubReporterNow.value = value
             }
 
+        /** The battery of the node this phone is connected to, as it last reported it (MESHSAT-1315). */
+        data class NodeBatteryNow(
+            val nodeNum: Long,
+            val level: Int,
+            val voltage: Float,
+            val hoursLeft: Double?,
+            val atMs: Long,
+        )
+
+        private val _nodeBattery = MutableStateFlow<NodeBatteryNow?>(null)
+        val nodeBattery: StateFlow<NodeBatteryNow?> = _nodeBattery
+
+        /** One stored battery reading a minute is plenty for an estimate over hours. */
+        private const val NODE_BATTERY_SAMPLE_MS = 60_000L
+
         // Hub relay client — Reticulum over a Hub WebSocket tunnel to one kit (MESHSAT-1157)
         var hubRelayTransport: net.meshsat.android.hub.relay.RelayBridgeTransport? = null
             private set
@@ -2747,6 +2762,30 @@ class GatewayService : Service() {
      * after any drop through mesh_0's auto-reconnect, which uses the same address. Only the
      * user's Disconnect forgets it.
      */
+    private var nodeBatteryStoredMs = 0L
+
+    /**
+     * The phone's own node reported its battery: keep a reading a minute, per node, and work out
+     * how long it has left from how fast it has actually been falling (MESHSAT-1315).
+     */
+    private fun onOwnNodeBattery(nodeNum: Long, level: Int, voltage: Float) {
+        scope.launch {
+            val source = "node_battery:%08x".format(nodeNum)
+            val nowMs = System.currentTimeMillis()
+            if (nowMs - nodeBatteryStoredMs >= NODE_BATTERY_SAMPLE_MS) {
+                nodeBatteryStoredMs = nowMs
+                db.signalDao().insert(SignalRecord(source = source, value = level))
+                Log.i("MeshSat", "Node battery: level $level, ${"%.2f".format(java.util.Locale.ROOT, voltage)} V")
+            }
+            val readings = db.signalDao().getSince(source, nowMs - net.meshsat.android.ble.NodeBattery.WINDOW_MS).first()
+                .map { net.meshsat.android.ble.NodeBattery.Reading(it.timestamp, it.value) }
+            _nodeBattery.value = NodeBatteryNow(
+                nodeNum, level, voltage,
+                net.meshsat.android.ble.NodeBattery.hoursLeft(readings, nowMs), nowMs,
+            )
+        }
+    }
+
     private fun reconnectSavedNode() {
         val ble = meshtasticBle ?: return
         scope.launch {
@@ -2882,8 +2921,12 @@ class GatewayService : Service() {
                     // --- Device telemetry (battery level) ---
                     result.telemetry?.let { telemetry ->
                         ble.touchNode(telemetry.from)
-                        if (telemetry.batteryLevel in 0..100) {
+                        // 101 is Meshtastic's "on external power", kept so it can be shown as such.
+                        if (telemetry.batteryLevel in 0..net.meshsat.android.ble.NodeBattery.EXTERNAL_POWER) {
                             ble.updateNodeBattery(telemetry.from, telemetry.batteryLevel)
+                            if (telemetry.from == ble.myInfo.value?.myNodeNum) {
+                                onOwnNodeBattery(telemetry.from, telemetry.batteryLevel, telemetry.voltage)
+                            }
                         }
                         return@collect
                     }
