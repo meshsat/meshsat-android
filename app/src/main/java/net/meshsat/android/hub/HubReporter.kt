@@ -16,6 +16,7 @@ import net.meshsat.android.BuildConfig
 import net.meshsat.android.ble.MeshtasticBle
 import net.meshsat.android.bt.IridiumSpp
 import net.meshsat.android.mqtt.CertificatePinner
+import net.meshsat.android.mqtt.PahoClients
 import net.meshsat.android.service.GatewayService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -241,6 +242,13 @@ class HubReporter(
                 mqttClient.setCallback(object : MqttCallbackExtended {
                     override fun connectComplete(reconnect: Boolean, serverURI: String?) {
                         if (!reconnect) return
+                        if (stopped || client !== mqttClient) {
+                            // A client that was stopped got back in on its own (MESHSAT-1305):
+                            // it must not announce, or hold the session under our client id.
+                            Log.w(TAG, "A stopped Hub client reconnected; closing it")
+                            PahoClients.retire(mqttClient)
+                            return
+                        }
                         // Automatic reconnect on a clean session: the broker has forgotten
                         // the subscriptions and the Hub has marked the bridge offline on the
                         // LWT, so do what the first connect did (MESHSAT-1235). Off the Paho
@@ -271,6 +279,11 @@ class HubReporter(
                 })
 
                 mqttClient.connect(opts)
+                if (stopped) {
+                    // stop() came while this connect was in flight (MESHSAT-1305).
+                    PahoClients.retire(mqttClient)
+                    return false
+                }
                 client = mqttClient
                 _state.value = State.Connected
                 _lastError.value = ""
@@ -322,6 +335,9 @@ class HubReporter(
             }
         }
         client = null
+        // Closed in every state: a client that lost its connection is still reconnecting on
+        // its own, and disconnect() neither reaches it nor stops that (MESHSAT-1305).
+        PahoClients.retire(c)
         _state.value = State.Disconnected
     }
 

@@ -72,6 +72,11 @@ class MqttTransport(
             return
         }
         this.deviceId = deviceId
+        // A reconnect replaces the client: the old one is closed, not left reconnecting
+        // under the same client id (MESHSAT-1305).
+        PahoClients.retire(client)
+        client = null
+        stopped = false
         _state.value = State.Connecting
 
         scope.launch {
@@ -130,6 +135,10 @@ class MqttTransport(
                 })
 
                 mqttClient.connect(opts)
+                if (stopped) {
+                    PahoClients.retire(mqttClient)
+                    return@launch
+                }
                 client = mqttClient
                 _state.value = State.Connected
                 Log.i(TAG, "Connected to $brokerUrl as $clientId")
@@ -147,14 +156,15 @@ class MqttTransport(
      * Disconnect from the broker.
      */
     fun disconnect() {
-        try {
-            client?.disconnect(1000)
-        } catch (e: Exception) {
-            Log.w(TAG, "Disconnect error: ${e.message}")
-        }
+        stopped = true
+        // Closed, not only disconnected: a client that lost its connection keeps reconnecting
+        // on its own until it is closed (MESHSAT-1305).
+        PahoClients.retire(client)
         client = null
         _state.value = State.Disconnected
     }
+
+    @Volatile private var stopped = false
 
     /**
      * Publish a position update to the Hub.
