@@ -1,0 +1,1 @@
+Emergency contacts can now be chosen from your phone's contacts, with search, instead of typing the number. The app reads only the contact you pick and asks for no permission to your address book.
