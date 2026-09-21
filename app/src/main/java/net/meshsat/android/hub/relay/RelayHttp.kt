@@ -51,6 +51,12 @@ class RelayHttp(
         conn.useCaches = false
         conn.instanceFollowRedirects = false
         conn.setRequestProperty("User-Agent", "meshsat-android-relay")
+        // One request per tunnel, and say so. The bridge keeps one TLS session per client id and
+        // is never told by the Hub that a tunnel closed; it drops the session only when its HTTP
+        // server hangs up. With keep-alive the server waited for a second request, the session
+        // stayed, and the next tunnel's handshake landed in it and failed - every other request
+        // to the kit, exactly alternating (MESHSAT-616, 21 Sep 2026).
+        conn.setRequestProperty("Connection", "close")
         return conn
     }
 

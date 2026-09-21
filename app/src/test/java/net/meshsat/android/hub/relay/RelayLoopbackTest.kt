@@ -19,4 +19,11 @@ class RelayLoopbackTest {
         assertArrayEquals(byteArrayOf(127, 0, 0, 1), RelayTunnel.LOOPBACK.address)
         assertEquals("127.0.0.1", RelayTunnel.LOOPBACK.hostAddress)
     }
+
+    @Test
+    fun `each request closes its connection, so the bridge drops its session with it`() {
+        val conn = RelayHttp(12345, "kit-a", RelayTestPki.PHONE_1_CERT, RelayTestPki.PHONE_1_KEY, RelayTestPki.CA_CERT)
+            .open("/health")
+        assertEquals("close", conn.getRequestProperty("Connection"))
+    }
 }
