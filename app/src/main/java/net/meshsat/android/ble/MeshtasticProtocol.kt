@@ -339,8 +339,9 @@ object MeshtasticProtocol {
             Portnums.PortNum.REPLY_APP ->
                 FromRadioResult(reply = MeshtasticProtoAdapter.extractReply(fromRadio))
             Portnums.PortNum.NODEINFO_APP -> {
-                // NodeInfo can also come as a mesh packet (not just FromRadio.node_info)
-                FromRadioResult(nodeInfo = MeshtasticProtoAdapter.extractNodeInfo(fromRadio))
+                // A node announcing itself on the air: the User is the packet's payload, not
+                // FromRadio.node_info (MESHSAT-1287).
+                FromRadioResult(nodeInfo = MeshtasticProtoAdapter.extractNodeInfoFromPacket(fromRadio))
             }
             else -> FromRadioResult() // Unhandled portnum
         }

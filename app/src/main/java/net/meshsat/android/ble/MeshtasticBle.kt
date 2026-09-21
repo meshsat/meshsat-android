@@ -56,6 +56,23 @@ class MeshtasticBle(private val context: Context) {
 
     enum class State { Disconnected, Scanning, Connecting, Connected }
 
+    /** One question per node per [EVERY_MS]; pure, so the pacing has a test. */
+    class WhoIsLimiter {
+        private val lastAskedMs = HashMap<Long, Long>()
+
+        @Synchronized
+        fun mayAsk(nodeNum: Long, nowMs: Long): Boolean {
+            val last = lastAskedMs[nodeNum]
+            if (last != null && nowMs - last < EVERY_MS) return false
+            lastAskedMs[nodeNum] = nowMs
+            return true
+        }
+
+        companion object {
+            const val EVERY_MS = 10 * 60_000L
+        }
+    }
+
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val adapter: BluetoothAdapter? =
         (context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter
@@ -224,6 +241,24 @@ class MeshtasticBle(private val context: Context) {
             current[idx] = current[idx].copy(lastHeard = System.currentTimeMillis())
             _nodes.value = current
         }
+        if (idx < 0 || current[idx].longName.isBlank()) askWhoIs(nodeNum)
+    }
+
+    private val whoIsAsked = WhoIsLimiter()
+
+    /**
+     * Ask a node we have no name for who it is (MESHSAT-1287), at most once every
+     * [WhoIsLimiter.EVERY_MS] per node: a name is worth one small packet, not a stream of them.
+     */
+    fun askWhoIs(nodeNum: Long) {
+        val me = _myInfo.value?.myNodeNum ?: return
+        if (_state.value != State.Connected || nodeNum == me || nodeNum == 0xFFFFFFFFL) return
+        if (_nodes.value.any { it.nodeNum == nodeNum && it.longName.isNotBlank() }) return
+        if (!whoIsAsked.mayAsk(nodeNum, System.currentTimeMillis())) return
+        Log.i(TAG, "Asking ${MeshtasticProtocol.formatNodeId(nodeNum)} who it is")
+        sendToRadio(
+            MeshtasticProtoAdapter.encodeNodeInfoRequest(me, nodeNum, _ownerName.value, _ownerShortName.value),
+        )
     }
 
     /** Update battery level for a node. */
