@@ -1,0 +1,1 @@
+Requests to a MeshSat kit through the Hub now succeed every time; before, every other one failed.
