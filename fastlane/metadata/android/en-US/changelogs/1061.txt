@@ -1,0 +1,1 @@
+When Android blocks SMS for MeshSat without asking, which it does for an app installed from a downloaded file, the app now says how to allow it and opens the right settings page.
