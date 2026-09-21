@@ -104,6 +104,9 @@ class LocalApiServer(
             // Billed: one satellite session, like the Check Mailbox button (MESHSAT-400)
             method == Method.POST && uri == "/api/iridium/mailbox" -> handleIridiumMailbox()
 
+            // A kit's own API through the Hub relay, timed (MESHSAT-616)
+            method == Method.POST && uri == "/api/relay/probe" -> handleRelayProbe(session)
+
             // The node's whole configuration, read and written in one go (MESHSAT-1285)
             method == Method.GET && uri == "/api/mesh/config" -> handleMeshConfig()
             method == Method.POST && uri == "/api/mesh/profile" -> handleMeshProfile(session)
@@ -462,6 +465,48 @@ class LocalApiServer(
             network = ble.networkConfig.value,
             primaryChannel = primary,
         )
+    }
+
+    /**
+     * Reach a kit's API through the Hub relay and time it. `?path=/health` by default and
+     * `?target=<bridge id>` to name a kit other than the relay target in settings. Displaces the
+     * phone's relay link for its duration; that link returns by itself a minute later.
+     */
+    private fun handleRelayProbe(session: IHTTPSession): Response {
+        val ctx = net.meshsat.android.service.GatewayService.appContext
+            ?: return jsonError(Response.Status.SERVICE_UNAVAILABLE, "service not running")
+        val s = net.meshsat.android.data.SettingsRepository(ctx)
+        val result = runBlocking {
+            val hubApiBase = net.meshsat.android.hub.relay.RelayTunnel.deriveHubApiBase(s.hubUrl.first(), s.hubRelayUrl.first())
+            val target = session.parms["target"]?.takeIf { it.isNotBlank() } ?: s.hubRelayTarget.first()
+            val ownId = s.hubBridgeId.first()
+            val cert = s.hubClientCertPem.first()
+            val key = s.hubClientKeyPem.first()
+            if (hubApiBase.isBlank() || target.isBlank() || ownId.isBlank() || cert.isBlank() || key.isBlank()) {
+                return@runBlocking null
+            }
+            val ca = s.hubCaCertPem.first().ifBlank {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    net.meshsat.android.hub.relay.RelayHttp.fetchHubCa(hubApiBase)
+                }
+            }
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                net.meshsat.android.hub.relay.RelayProbe.run(
+                    hubApiBase, target, ownId, s.hubPassword.first(), cert, key, ca,
+                    path = session.parms["path"]?.takeIf { it.startsWith("/") } ?: "/health",
+                )
+            }
+        } ?: return jsonError(Response.Status.SERVICE_UNAVAILABLE, "Hub, relay target or Hub certificate not configured")
+        return jsonOk(JSONObject().apply {
+            put("target", result.target)
+            put("path", result.path)
+            put("code", result.code)
+            put("body", result.body)
+            put("tunnel_ms", result.tunnelMs)
+            put("request_ms", result.requestMs)
+            put("total_ms", result.totalMs)
+            if (result.error.isNotBlank()) put("error", result.error)
+        })
     }
 
     /** Everything the node has reported about itself. A channel key is shown as a fingerprint only. */
