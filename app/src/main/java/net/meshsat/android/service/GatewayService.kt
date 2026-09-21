@@ -119,6 +119,9 @@ class GatewayService : Service() {
             private set
 
         private var service: GatewayService? = null
+
+        /** The running service as a Context, for the local API's diagnostics (MESHSAT-616). */
+        val appContext: android.content.Context? get() = service
         private const val IRIDIUM_STATUS_NOTIFICATION_ID = 7603
         const val IRIDIUM_QUEUED = "iridium:queued"
         /** A satellite send that reported a failure after the upload, so it may have arrived. */
@@ -259,7 +262,11 @@ class GatewayService : Service() {
                 android.os.SystemClock.elapsedRealtime() + delayMs,
                 pi,
             )
-            (context as? android.app.Service)?.stopSelf()
+            // Called from a screen, not from the service, this used to set the alarm and stop
+            // nothing: the alarm then "started" a service that was already running, so Settings'
+            // Restart button restarted nothing (found 21 Sep 2026 on MESHSAT-749).
+            if (context is android.app.Service) context.stopSelf()
+            else context.stopService(android.content.Intent(context, GatewayService::class.java))
         }
     }
 

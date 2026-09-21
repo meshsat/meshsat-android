@@ -1627,7 +1627,11 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
                                     hubPasswordInput = bundle.password
                                     hubCallsignInput = "" // reset callsign
                                     hubHealthIntervalInput = "30"
-                                    Toast.makeText(context, "$msg — restart app to connect", Toast.LENGTH_LONG).show()
+                                    // The gateway reads the Hub settings when it starts, so start it
+                                    // again rather than telling the person to (MESHSAT-749): it is a
+                                    // foreground service and survives the app being swiped away.
+                                    GatewayService.scheduleRestart(context)
+                                    Toast.makeText(context, "$msg. Connecting to the Hub.", Toast.LENGTH_LONG).show()
                                 } catch (e: Exception) {
                                     Toast.makeText(context, "Provision failed: ${e.message}", Toast.LENGTH_LONG).show()
                                 }
@@ -1679,6 +1683,16 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
                         onCheckedChange = { scope.launch { settings.setHubEnabled(it) } },
                         colors = SwitchDefaults.colors(checkedTrackColor = MeshSatTeal),
                         modifier = Modifier.semantics { contentDescription = "Use the Hub" },
+                    )
+                }
+                // Why, when it failed: the library's own words, not only "Cannot reach the Hub"
+                // (MESHSAT-749; the SNI fault sat in logcat for a day).
+                val hubWhy = GatewayService.hubReporter?.lastError.collectOrNull()?.value.orEmpty()
+                if (hubEnabled && hubState == net.meshsat.android.hub.HubReporter.State.Error && hubWhy.isNotBlank()) {
+                    Text(
+                        text = "Why: $hubWhy",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MeshSatRed,
                     )
                 }
 

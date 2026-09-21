@@ -77,7 +77,9 @@ fun ProvisionLinkDialog(url: String, onDone: () -> Unit) {
                                 ProvisionImporter.claimBundle(request)
                             }
                             val msg = ProvisionImporter.apply(bundle, context)
-                            Toast.makeText(context, "$msg — restart app to connect", Toast.LENGTH_LONG).show()
+                            // Start the gateway again so it reads the new Hub settings (MESHSAT-749).
+                            net.meshsat.android.service.GatewayService.scheduleRestart(context)
+                            Toast.makeText(context, "$msg. Connecting to the Hub.", Toast.LENGTH_LONG).show()
                         } catch (e: ProvisionImporter.ProvisionException) {
                             Toast.makeText(context, e.message, Toast.LENGTH_LONG).show()
                         } catch (e: Exception) {
