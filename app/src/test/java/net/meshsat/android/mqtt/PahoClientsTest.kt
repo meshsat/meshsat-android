@@ -79,7 +79,11 @@ class PahoClientsTest {
                 while (c.isConnected) Thread.sleep(5)
                 runCatching { c.disconnect(200) }
                 val before = broker.connects.get()
-                Thread.sleep(3_000)
+                // Paho doubles its reconnect delay on every drop (1, 2, 4, 8 s...), so after the
+                // third connect the next one can be 8 s away; a fixed 3 s wait failed on the CI
+                // runner once in a while (pipeline 56142). Wait for it, within its own maximum.
+                val deadline = System.currentTimeMillis() + 20_000
+                while (broker.connects.get() <= before && System.currentTimeMillis() < deadline) Thread.sleep(50)
                 assertTrue("still reconnecting after disconnect()", broker.connects.get() > before)
             } finally {
                 PahoClients.retire(c)
