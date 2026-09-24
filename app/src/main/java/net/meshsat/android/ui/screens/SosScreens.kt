@@ -97,6 +97,8 @@ private data class SosReach(
     val mesh: Boolean,
     val contacts: List<EmergencyContact>,
     val canSms: Boolean,
+    /** Why [canSms] is false, for the screen; null when SMS works (MESHSAT-1335). */
+    val smsWhyNot: String?,
     val smsAllowed: Boolean,
     val hub: Boolean,
 ) {
@@ -133,12 +135,14 @@ private fun rememberSosReach(): SosReach {
     val liveImei by remember(spp) { spp?.modemInfo?.map { it.imei } ?: flowOf("") }.collectAsState(initial = "")
     val node by settings.meshtasticBleAddress.collectAsState(initial = "")
     val canSms = remember { net.meshsat.android.sms.SmsCapability.canSend(context) }
+    val smsWhyNot = remember { net.meshsat.android.sms.SmsCapability.unavailableReason(context) }
     val smsAllowed = ContextCompat.checkSelfPermission(context, Manifest.permission.SEND_SMS) == PackageManager.PERMISSION_GRANTED
     return SosReach(
         satellite = liveImei.isNotBlank() || imei.isNotBlank(),
         mesh = node.isNotBlank(),
         contacts = contacts,
         canSms = canSms,
+        smsWhyNot = smsWhyNot,
         smsAllowed = smsAllowed,
         hub = GatewayService.hubReporter != null,
     )
@@ -578,7 +582,12 @@ fun SosSettingsCard() {
             }
 
         } else {
-            Text("This device cannot send SMS, so an SOS goes by satellite, the mesh and the Hub only.", style = MaterialTheme.typography.bodySmall, color = MeshSatTextMuted)
+            Text(
+                (reach.smsWhyNot ?: net.meshsat.android.sms.SmsCapability.NO_TELEPHONY) +
+                    " An SOS goes by satellite, the mesh and the Hub.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MeshSatTextMuted,
+            )
         }
 
         Text("Test the alarm", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 4.dp))

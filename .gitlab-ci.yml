@@ -4,6 +4,12 @@
 # - Push to main: build debug APK (verify)
 # - Tag push (v*): build signed release APK + AAB → upload to GitLab Package
 #                  Registry → create GitLab Release → create GitHub Release
+#
+# Two editions since 2.19.0 (MESHSAT-1335): the fdroid flavor is the full app and is what the
+# APKs, GitHub and F-Droid carry; the play flavor is the Google Play edition without SMS and
+# leaves here only as an AAB. Gradle task names carry the flavor (assembleFdroidRelease,
+# testFdroidDebugUnitTest); the fdroid APK file names are unchanged, which F-Droid's recipe
+# and its byte-for-byte comparison depend on.
 # =============================================================================
 
 stages:
@@ -66,15 +72,22 @@ test:
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
     - if: '$CI_COMMIT_TAG =~ /^v/'
+  # Both flavors: the play run is what proves the play manifest, BuildConfig, Room and protobuf
+  # generation before a tag build, and SmsEditionTest checks the SMS gate under each.
+  # One worker: the two Kotlin compiles side by side ran the compiler daemon out of heap
+  # ("GC overhead limit exceeded") on the 8 GB SDK VM.
   script:
-    - bash ./gradlew testDebugUnitTest
+    - bash ./gradlew --max-workers=1 testFdroidDebugUnitTest testPlayDebugUnitTest
   artifacts:
     when: always
     expire_in: 7 days
     reports:
-      junit: app/build/test-results/testDebugUnitTest/TEST-*.xml
+      junit:
+        - app/build/test-results/testFdroidDebugUnitTest/TEST-*.xml
+        - app/build/test-results/testPlayDebugUnitTest/TEST-*.xml
     paths:
-      - app/build/reports/tests/testDebugUnitTest
+      - app/build/reports/tests/testFdroidDebugUnitTest
+      - app/build/reports/tests/testPlayDebugUnitTest
 
 # =============================================================================
 # Build debug APK (every push to main — verification only)
@@ -85,9 +98,9 @@ build-debug:
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
   script:
-    - bash ./gradlew assembleDebug
+    - bash ./gradlew assembleFdroidDebug
     - |
-      APK_PATH=$(find app/build/outputs/apk/debug -name "*.apk" | head -1)
+      APK_PATH=$(find app/build/outputs/apk/fdroid/debug -name "*.apk" | head -1)
       VERSION="dev-${CI_COMMIT_SHORT_SHA}"
       APK_NAME="meshsat-android-${VERSION}-debug.apk"
       cp "$APK_PATH" "$APK_NAME"
@@ -154,23 +167,27 @@ build-release:
       echo "$KEYSTORE_B64" | base64 -d > /tmp/meshsat-upload.p12
       export ANDROID_KEYSTORE_FILE="/tmp/meshsat-upload.p12"
 
-      # ── Build signed release APK + AAB ──
-      echo "Building signed release APK + AAB..."
-      bash ./gradlew assembleRelease bundleRelease
+      # ── Build the signed fdroid APKs and the play AAB ──
+      # The full app as APKs (GitHub, F-Droid, the phone); the Google Play edition only as the
+      # AAB Play wants, signed with the upload key and re-signed by Play (MESHSAT-1335).
+      echo "Building signed release APKs (fdroid) + AAB (play)..."
+      bash ./gradlew assembleFdroidRelease bundlePlayRelease
 
       # ── Collect artifacts ──
       # One APK per processor type plus a universal one; gradle already names each file
       # meshsat-android-<version>-<abi>-<versionCode>.apk (MESHSAT-1260).
-      cp app/build/outputs/apk/release/meshsat-android-*.apk .
-      AAB_PATH=$(find app/build/outputs/bundle/release -name "*.aab" | head -1)
-      AAB_NAME="meshsat-android-${VERSION}-release.aab"
+      cp app/build/outputs/apk/fdroid/release/meshsat-android-*.apk .
+      AAB_PATH=$(find app/build/outputs/bundle/playRelease -name "*.aab" | head -1)
+      AAB_NAME="meshsat-android-${VERSION}-play.aab"
       cp "$AAB_PATH" "$AAB_NAME"
 
-      APK_UNIVERSAL=$(ls meshsat-android-*-universal-*.apk)
-      APK_ARM64=$(ls meshsat-android-*-arm64-v8a-*.apk)
-      APK_ARM32=$(ls meshsat-android-*-armeabi-v7a-*.apk)
-      APK_X86=$(ls meshsat-android-*-x86-*.apk)
-      APK_X86_64=$(ls meshsat-android-*-x86_64-*.apk)
+      # The version sits between the prefix and the ABI, so a file of another edition
+      # (meshsat-android-<version>-play-<abi>-<code>.apk) can never match.
+      APK_UNIVERSAL=$(ls meshsat-android-${VERSION}-universal-*.apk)
+      APK_ARM64=$(ls meshsat-android-${VERSION}-arm64-v8a-*.apk)
+      APK_ARM32=$(ls meshsat-android-${VERSION}-armeabi-v7a-*.apk)
+      APK_X86=$(ls meshsat-android-${VERSION}-x86-*.apk)
+      APK_X86_64=$(ls meshsat-android-${VERSION}-x86_64-*.apk)
       APK_NAMES="$APK_UNIVERSAL $APK_ARM64 $APK_ARM32 $APK_X86 $APK_X86_64"
 
       {
@@ -199,7 +216,7 @@ build-release:
   artifacts:
     paths:
       - "meshsat-android-*.apk"
-      - "meshsat-android-*-release.aab"
+      - "meshsat-android-*-play.aab"
     reports:
       dotenv: build.env
     expire_in: 7 days
@@ -251,14 +268,16 @@ create-gitlab-release:
       ## Download
 
       Pick the APK for your phone's processor; nearly every phone since 2016 is arm64-v8a.
-      The universal APK works on all of them and is bigger.
+      The universal APK works on all of them and is bigger. The APKs are the full app, SMS
+      included. The AAB is the Google Play edition, which has no SMS: it is for Play, not
+      for sideloading.
 
       - [${APK_ARM64}](${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/meshsat-android/${VERSION}/${APK_ARM64}) — arm64-v8a, the usual choice
       - [${APK_ARM32}](${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/meshsat-android/${VERSION}/${APK_ARM32}) — armeabi-v7a, older 32-bit phones
       - [${APK_X86}](${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/meshsat-android/${VERSION}/${APK_X86}) — x86, emulators
       - [${APK_X86_64}](${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/meshsat-android/${VERSION}/${APK_X86_64}) — x86_64, emulators
       - [${APK_UNIVERSAL}](${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/meshsat-android/${VERSION}/${APK_UNIVERSAL}) — every processor in one file
-      - [${AAB_NAME}](${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/meshsat-android/${VERSION}/${AAB_NAME}) — Signed AAB
+      - [${AAB_NAME}](${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/meshsat-android/${VERSION}/${AAB_NAME}) — Google Play edition (no SMS), upload-key signed AAB
     assets:
       links:
         - name: "${APK_ARM64}"
@@ -322,7 +341,7 @@ deploy-to-phone:
       chmod 600 ~/.ssh/id_ed25519
       ssh-keyscan -H "$DEPLOY_SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
 
-      APK=$(ls meshsat-android-*-arm64-v8a-*.apk | head -1)
+      APK=$(ls meshsat-android-${VERSION}-arm64-v8a-*.apk | head -1)
       if [ -z "$APK" ]; then echo "no arm64-v8a APK in the build artifacts"; exit 1; fi
       echo "Deploying ${APK} through ${DEPLOY_SSH_HOST}"
       if ! scp -q -o IdentitiesOnly=yes -o ConnectTimeout=20 "$APK" "${DEPLOY_SSH_USER}@${DEPLOY_SSH_HOST}:/tmp/${APK}"; then
@@ -402,8 +421,10 @@ create-github-release:
       ### Download
 
       Pick the APK for your phone's processor. Nearly every phone since 2016 is **arm64-v8a**.
-      The **universal** APK runs on all of them and is about 20 MB larger.
-      The AAB is not for sideloading.
+      The **universal** APK runs on all of them and is about 20 MB larger. The APKs are the
+      full app, SMS included, the same build F-Droid ships.
+      The AAB is the Google Play edition, which has no SMS (Play's policy for an app that is
+      not the phone's SMS app); it is signed with the upload key and is not for sideloading.
 
       ### What it does
       - Meshtastic mesh over Bluetooth LE

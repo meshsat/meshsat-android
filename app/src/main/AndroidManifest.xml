@@ -5,9 +5,8 @@
     <!-- Internet for map tiles -->
     <uses-permission android:name="android.permission.INTERNET" />
 
-    <!-- SMS (receive copies + send — no default SMS app role needed) -->
-    <uses-permission android:name="android.permission.RECEIVE_SMS" />
-    <uses-permission android:name="android.permission.SEND_SMS" />
+    <!-- SMS: only the fdroid edition. Its permissions and receivers are in
+         src/fdroid/AndroidManifest.xml; the play edition has none of them (MESHSAT-1335). -->
 
     <!-- Bluetooth (Meshtastic BLE + HC-05 SPP) -->
     <uses-permission android:name="android.permission.BLUETOOTH" />
@@ -75,21 +74,6 @@
                 <data android:scheme="meshsat" android:host="provision" />
             </intent-filter>
         </activity>
-
-        <!-- SMS Receiver (non-default: SMS_RECEIVED) -->
-        <receiver
-            android:name=".sms.SmsReceiver"
-            android:exported="true"
-            android:permission="android.permission.BROADCAST_SMS">
-            <intent-filter android:priority="999">
-                <action android:name="android.provider.Telephony.SMS_RECEIVED" />
-            </intent-filter>
-        </receiver>
-
-        <!-- An SMS the app sent: left the phone, and the carrier's delivery report (MESHSAT-1246) -->
-        <receiver
-            android:name=".sms.SmsStatusReceiver"
-            android:exported="false" />
 
         <!-- Start after a phone restart or an app update, when the user chose it (MESHSAT-1249) -->
         <receiver

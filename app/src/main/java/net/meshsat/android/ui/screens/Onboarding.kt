@@ -88,7 +88,7 @@ fun WelcomeScreen(onContinue: () -> Unit) {
         Text("Keeping people connected when the network is not.", style = MaterialTheme.typography.headlineMedium)
         Text(
             "This phone becomes a gateway. With a MeshSat node it sends and receives over the mesh radio and by " +
-                "satellite, and by SMS while there is a mobile signal.",
+                "satellite" + if (net.meshsat.android.sms.SmsCapability.included) ", and by SMS while there is a mobile signal." else ".",
             style = MaterialTheme.typography.bodyLarge,
             color = MeshSatTextSecondary,
         )
@@ -96,7 +96,9 @@ fun WelcomeScreen(onContinue: () -> Unit) {
         PermissionReason(Icons.Outlined.Bluetooth, "Nearby devices", "To find your MeshSat node and talk to it over Bluetooth.")
         PermissionReason(Icons.Outlined.LocationOn, "Location", "Your position for an SOS and the map. Android also asks for it before an app may look for Bluetooth radios.")
         PermissionReason(Icons.Outlined.Notifications, "Notifications", "Incoming messages, the satellite signal in the status bar, and an SOS in progress.")
-        PermissionReason(Icons.Outlined.Sms, "SMS, later", "Asked for only when you set up SMS or emergency contacts.")
+        if (net.meshsat.android.sms.SmsCapability.included) {
+            PermissionReason(Icons.Outlined.Sms, "SMS, later", "Asked for only when you set up SMS or emergency contacts.")
+        }
         Spacer(Modifier.height(8.dp))
         Button(
             onClick = onContinue,

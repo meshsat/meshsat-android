@@ -18,9 +18,11 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import net.meshsat.android.BuildConfig
+import net.meshsat.android.sms.SmsCapability
 import net.meshsat.android.ui.theme.MeshSatBorder
 import net.meshsat.android.ui.theme.MeshSatSurface
 import net.meshsat.android.ui.theme.MeshSatTeal
@@ -28,6 +30,7 @@ import net.meshsat.android.ui.theme.MeshSatTextMuted
 
 @Composable
 fun AboutScreen() {
+    val targetSdk = LocalContext.current.applicationInfo.targetSdkVersion
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -49,7 +52,7 @@ fun AboutScreen() {
         )
 
         Text(
-            text = "Mobile gateway for Meshtastic mesh + Iridium satellite + SMS",
+            text = "Mobile gateway for Meshtastic mesh + Iridium satellite" + if (SmsCapability.included) " + SMS" else "",
             style = MaterialTheme.typography.bodyMedium,
             color = MeshSatTextMuted,
             modifier = Modifier.padding(top = 8.dp, bottom = 16.dp),
@@ -59,7 +62,7 @@ fun AboutScreen() {
             InfoItem("Meshtastic", "BLE (Bluetooth Low Energy)")
             InfoItem("Iridium 9603N", "The MeshSat node's BLE pipe")
             InfoItem("RockBLOCK 9704", "Bluetooth SPP via HC-05/HC-06")
-            InfoItem("Cellular SMS", "Native Android SMS")
+            if (SmsCapability.included) InfoItem("Cellular SMS", "Native Android SMS")
         }
 
         Spacer(modifier = Modifier.height(12.dp))
@@ -75,9 +78,12 @@ fun AboutScreen() {
 
         InfoSection("Build") {
             InfoItem("Package", BuildConfig.APPLICATION_ID)
+            // Two editions since 2.19.0 (MESHSAT-1335): Google Play's SMS policy keeps SMS out
+            // of the one it distributes. The edition on a screenshot tells support what to expect.
+            InfoItem("Edition", if (SmsCapability.included) "Full (F-Droid, GitHub)" else "Google Play, without SMS")
             InfoItem("Build type", BuildConfig.BUILD_TYPE)
             InfoItem("Min SDK", "26 (Android 8.0)")
-            InfoItem("Target SDK", "35 (Android 15)")
+            InfoItem("Target SDK", targetSdk.toString())
         }
 
         Spacer(modifier = Modifier.height(12.dp))

@@ -706,12 +706,14 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
                     )
                 }
 
-                SettingRow("Auto-decrypt incoming SMS") {
-                    Switch(
-                        checked = autoDecrypt,
-                        onCheckedChange = { scope.launch { settings.setAutoDecryptSms(it) } },
-                        colors = SwitchDefaults.colors(checkedTrackColor = MeshSatTeal),
-                    )
+                if (net.meshsat.android.sms.SmsCapability.included) {
+                    SettingRow("Auto-decrypt incoming SMS") {
+                        Switch(
+                            checked = autoDecrypt,
+                            onCheckedChange = { scope.launch { settings.setAutoDecryptSms(it) } },
+                            colors = SwitchDefaults.colors(checkedTrackColor = MeshSatTeal),
+                        )
+                    }
                 }
 
                 OutlinedTextField(
@@ -872,7 +874,7 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
                     "sms" to "SMS" to compressSms,
                     "iridium" to "Iridium SBD" to compressIridium,
                     "mqtt" to "MQTT (Hub)" to compressMqtt,
-                )
+                ).filter { it.first.first != "sms" || net.meshsat.android.sms.SmsCapability.included }
 
                 channels.forEach { (channelPair, currentMode) ->
                     val (channelKey, channelLabel) = channelPair
@@ -1038,7 +1040,7 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
                     )
                 } else {
                     val interfaceStates = GatewayService.meshtasticBle?.let { "mesh_0" } ?: ""
-                    val channels = listOf("mesh_0", "iridium_0", "sms_0")
+                    val channels = listOfNotNull("mesh_0", "iridium_0", "sms_0".takeIf { net.meshsat.android.sms.SmsCapability.included })
 
                     // Compute live health scores
                     var healthScores by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
@@ -1861,7 +1863,7 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
             }
         }
 
-        if (section.shows(SetupSection.Sms)) {
+        if (section.shows(SetupSection.Sms) && net.meshsat.android.sms.SmsCapability.included) {
             // SMS was only ever offered from a banner in Messages; Setup is where people look for it.
             // Only what the app actually uses, and what the manifest declares. READ_SMS was in
             // this list and in neither: nothing reads the inbox, the manifest never asked for it,
@@ -1903,7 +1905,7 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
                 }
             }
         }
-        if (section.shows(SetupSection.Sms)) {
+        if (section.shows(SetupSection.Sms) && net.meshsat.android.sms.SmsCapability.included) {
             // Was "Kit phone number": one global number, from when this app was a companion to
             // a single Raspberry Pi kit. There is never just one other device, so it is named for
             // what it actually does - the fallback when a text has no recipient of its own.

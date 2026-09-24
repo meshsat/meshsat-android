@@ -7,10 +7,10 @@
 3. Clone the repo and build:
 
 ```bash
-./gradlew assembleDebug
+./gradlew assembleFdroidDebug
 ```
 
-The debug APK will be in `app/build/outputs/apk/debug/`.
+The debug APK will be in `app/build/outputs/apk/fdroid/debug/`. There are two flavors: `fdroid` is the full app, `play` the Google Play edition without SMS (`assemblePlayDebug`).
 
 ## Code Style
 
@@ -63,7 +63,7 @@ When reporting test results for hardware, include:
 - Describe what changed and why
 - If the change touches a transport (BLE, SPP, SMS), test on real hardware before submitting
 - Keep PRs focused -- one feature or fix per PR
-- Ensure `./gradlew assembleDebug` passes before submitting
+- Ensure `./gradlew assembleFdroidDebug` passes before submitting
 
 ## License
 

@@ -183,8 +183,8 @@ fun MessagesScreen(openChat: (String) -> Unit = {}) {
             modifier = Modifier.padding(bottom = 4.dp),
         )
 
-        // SMS permission banner
-        if (!smsPermissionGranted) {
+        // SMS permission banner; the Google Play edition has no SMS to ask for (MESHSAT-1335)
+        if (net.meshsat.android.sms.SmsCapability.included && !smsPermissionGranted) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -221,7 +221,9 @@ fun MessagesScreen(openChat: (String) -> Unit = {}) {
             modifier = Modifier.padding(bottom = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            listOf("all" to "All", "mesh" to "Mesh", "iridium" to "Satellite", "sms" to "SMS").forEach { (key, label) ->
+            listOf("all" to "All", "mesh" to "Mesh", "iridium" to "Satellite", "sms" to "SMS")
+                .filter { it.first != "sms" || net.meshsat.android.sms.SmsCapability.included }
+                .forEach { (key, label) ->
                 FilterChip(
                     selected = selectedTab == key,
                     onClick = { selectedTab = key },
@@ -1123,20 +1125,25 @@ private fun NewMessageDialog(onPick: (String) -> Unit, onDismiss: () -> Unit) {
                         onClick = { onPick(id) },
                     )
                 }
-                Spacer(Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = number,
-                    onValueChange = { number = it },
-                    label = { Text("Or a phone number, e.g. +31612345678") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Phone),
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                // A phone number is an SMS peer; the Google Play edition has no SMS (MESHSAT-1335).
+                if (net.meshsat.android.sms.SmsCapability.included) {
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = number,
+                        onValueChange = { number = it },
+                        label = { Text("Or a phone number, e.g. +31612345678") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Phone),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
             }
         },
         confirmButton = {
-            TextButton(onClick = { onPick(number.trim().replace(" ", "")) }, enabled = numberOk) {
-                Text("Text this number")
+            if (net.meshsat.android.sms.SmsCapability.included) {
+                TextButton(onClick = { onPick(number.trim().replace(" ", "")) }, enabled = numberOk) {
+                    Text("Text this number")
+                }
             }
         },
         dismissButton = {
