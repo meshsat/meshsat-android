@@ -21,12 +21,13 @@ val splitAbis = gradle.startParameter.taskNames.any { it.contains("Release") || 
 
 android {
     namespace = "net.meshsat.android"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "net.meshsat.android"
         minSdk = 26
-        targetSdk = 35
+        // 36 is what Google Play requires of an upload after 31 Aug 2026 (MESHSAT-1335).
+        targetSdk = 36
         // Keep these literal: F-Droid's checkupdates reads them out of this file with a
         // regex that only matches a number, and falls back to an older tag otherwise.
         versionCode = 116
