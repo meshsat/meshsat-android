@@ -130,14 +130,16 @@ fun SetupScreen(navigate: (String) -> Unit) {
             },
             onClick = { navigate("setup/hub") },
         )
-        NavRow(
-            icon = Icons.Outlined.Sms,
-            title = "SMS",
-            detail = if (smsAllowed) "Allowed" else "Not allowed yet",
-            iconTint = ColorCellular,
-            stateColor = if (smsAllowed) MeshSatGreen else MeshSatTextMuted,
-            onClick = { navigate("setup/sms") },
-        )
+        if (net.meshsat.android.sms.SmsCapability.included) {
+            NavRow(
+                icon = Icons.Outlined.Sms,
+                title = "SMS",
+                detail = if (smsAllowed) "Allowed" else "Not allowed yet",
+                iconTint = ColorCellular,
+                stateColor = if (smsAllowed) MeshSatGreen else MeshSatTextMuted,
+                onClick = { navigate("setup/sms") },
+            )
+        }
 
         GroupTitle("Using MeshSat")
         NavRow(Icons.Outlined.HealthAndSafety, "Safety", "SOS, check-in timer, zones", { navigate("setup/safety") })

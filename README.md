@@ -52,6 +52,8 @@ It also works with any plain Meshtastic radio, for the mesh only.
 
 ## Install
 
+The app comes in two editions. The **full app**, SMS included, is what the releases here and F-Droid carry. The **Google Play edition** is the same app without SMS, because Google Play does not allow SMS in an app that is not the phone's SMS app; it goes on Play only. Both are `net.meshsat.android`, but Play signs its edition with its own key, so a Play install and a GitHub or F-Droid install cannot update each other: to switch, uninstall one and install the other, and provision with the Hub again.
+
 1. Download the APK for your phone from the [latest release](https://github.com/meshsat/meshsat-android/releases/latest). There is one per processor: take **arm64-v8a** unless you know otherwise, since nearly every phone since 2016 is that. **armeabi-v7a** is for older 32-bit phones, **x86** and **x86_64** for emulators, and **universal** works on all of them. A per-processor download is about 47 MB, the universal one about 67 MB. Settings > About phone, or an app like Droid Hardware Info, tells you which one a phone is.
 2. Let your browser or file manager install unknown apps. Android asks the first time.
 3. Open the APK and tap **Install**. Play Protect may warn about an unknown developer, because the app is not on the Play Store: tap **More details**, then **Install anyway**. The APK is signed, and you can [check the signature](#release-signing) first.
@@ -108,6 +110,7 @@ The map works without internet down to country level, from a world overview buil
 | SOS by satellite to the Hub | The frame matches the Bridge's byte for byte in tests. **Not sent through the Hub yet**: it would page the on-call chain |
 | SOS over the mesh and to the Hub online, and Test the alarm on the phone | **Not exercised yet** |
 | SMS on Android 8 to 12 | Broken before 2.13.0 (the app said the phone could not send SMS). Fixed; verified on the Android 11 emulator |
+| SMS on the Google Play edition | **Not included**, by Google Play's SMS policy. Setup, Home and the SOS screen say so; an SOS goes by satellite, the mesh and the Hub |
 | Starting after a phone restart (option) | Verified on the Android 11 emulator |
 | A second tick when the Hub confirms a satellite message arrived | Verified 20 September 2026 on four messages, receipt back from the Hub within seconds |
 | Contact cards swapped by QR code | Shown, read and stored on one phone. **Not yet swapped between two phones** |
@@ -135,9 +138,11 @@ You need JDK 17 and the Android SDK (compile SDK 35).
 ```bash
 git clone https://github.com/meshsat/meshsat-android.git
 cd meshsat-android
-./gradlew assembleDebug        # app/build/outputs/apk/debug/app-debug.apk
-./gradlew testDebugUnitTest    # JVM unit tests, no device needed
+./gradlew assembleFdroidDebug        # app/build/outputs/apk/fdroid/debug/meshsat-android-<version>-universal-<code>.apk
+./gradlew testFdroidDebugUnitTest    # JVM unit tests, no device needed
 ```
+
+There are two product flavors: `fdroid` is the full app and the default, `play` is the Google Play edition without SMS (`assemblePlayDebug`, `bundlePlayRelease`). The SMS permissions and receivers live in `app/src/fdroid/AndroidManifest.xml`, so the Play manifest never mentions them, and `SmsCapability` gates every SMS code path on `BuildConfig.SMS_INCLUDED`.
 
 It is Kotlin 2.1 and Jetpack Compose, with Room for storage, ONNX Runtime for the compression model, osmdroid for maps, Eclipse Paho for MQTT, BouncyCastle for Ed25519 and X25519, and NanoHTTPD for the local API. Library versions are in `app/build.gradle.kts`.
 
@@ -146,7 +151,7 @@ It is Kotlin 2.1 and Jetpack Compose, with Room for storage, ONNX Runtime for th
 Releases are built and signed in CI, with the signing key held in OpenBao, and published on the Releases page. To check an APK before you install it:
 
 ```bash
-apksigner verify --print-certs meshsat-android-2.12.0-release.apk
+apksigner verify --print-certs meshsat-android-2.19.0-arm64-v8a-1172.apk
 ```
 
 Every release since 2.8.0 shows:
@@ -157,7 +162,7 @@ Signer #1 certificate SHA-256 digest: 8ca78b6c33bd9796bb05f40fec2a0ab801e0297e75
 Signer #1 certificate SHA-1 digest:   9040570a7bf4d33890bf82ad85a7debf24fa57ab
 ```
 
-All releases use the same key, so a new version installs over the old one. The one exception is the 2.9.0 rename described under [Install](#install). Debug builds are signed with the Android debug key.
+All releases use the same key, so a new version installs over the old one. The one exception is the 2.9.0 rename described under [Install](#install). Debug builds are signed with the Android debug key. The Google Play edition is signed by Play with a different key, so it neither updates nor is updated by these releases.
 
 ## Troubleshooting
 

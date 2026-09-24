@@ -28,7 +28,7 @@ The system shall persist bearer JWTs in `EncryptedSharedPreferences` (AndroidX S
 
 ## Article C-VII — DAO interfaces must be JVM-testable
 
-The system shall expose every Room DAO as an `interface` with abstract methods (Room generates the impl). Tests use the actual Room generated impl with in-memory database (`Room.inMemoryDatabaseBuilder`). No Android-instrumentation tests for DAO logic — JVM-only via `:app:testDebugUnitTest`.
+The system shall expose every Room DAO as an `interface` with abstract methods (Room generates the impl). Tests use the actual Room generated impl with in-memory database (`Room.inMemoryDatabaseBuilder`). No Android-instrumentation tests for DAO logic — JVM-only via `:app:testFdroidDebugUnitTest` (and `:app:testPlayDebugUnitTest` for the Google Play flavor).
 
 ## Article C-VIII — Flat test layout
 

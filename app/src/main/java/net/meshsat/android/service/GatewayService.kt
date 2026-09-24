@@ -645,7 +645,10 @@ class GatewayService : Service() {
                 }
                 configManager = cfgMgr
 
-                // Local API server (localhost:6051)
+                // Local API server (localhost:6051). An edition without SMS has no send callback,
+                // so POST /api/sms/send answers 503 instead of pretending (MESHSAT-1335).
+                val smsSend: ((String, String) -> Unit)? =
+                    if (net.meshsat.android.sms.SmsCapability.included) { to, text -> scope.launch { sendSmsMessage(text, to) } } else null
                 val server = LocalApiServer(
                     scope = scope,
                     interfaceManager = interfaceManager,
@@ -664,9 +667,7 @@ class GatewayService : Service() {
                             scheduleRestart(this@GatewayService)
                         }
                     },
-                    smsSendCallback = { to, text ->
-                        scope.launch { sendSmsMessage(text, to) }
-                    },
+                    smsSendCallback = smsSend,
                     hubSettingsCallback = { settings ->
                         scope.launch {
                             val s = net.meshsat.android.data.SettingsRepository(this@GatewayService)
@@ -1310,7 +1311,9 @@ class GatewayService : Service() {
                         val json = org.json.JSONObject(payload)
                         val to = json.optString("to", "")
                         val text = json.optString("text", "")
-                        if (to.isNotBlank() && text.isNotBlank()) {
+                        if (!net.meshsat.android.sms.SmsCapability.included) {
+                            Log.i("MeshSat", "Hub asked for an SMS to $to: this edition has no SMS")
+                        } else if (to.isNotBlank() && text.isNotBlank()) {
                             SmsSender.send(this@GatewayService, to, text)
                             db.messageDao().insert(
                                 Message(
@@ -1364,6 +1367,10 @@ class GatewayService : Service() {
      * the message to meshsat/{deviceId}/sms/inbound on MQTT.
      */
     private fun initSmsRelay() {
+        if (!net.meshsat.android.sms.SmsCapability.included) {
+            Log.i("MeshSat", "SMS relay not started: this edition has no SMS")
+            return
+        }
         net.meshsat.android.sms.SmsReceiver.relayCallback =
             net.meshsat.android.sms.SmsRelayCallback { sender, text, rawText, wasEncrypted, wasCompressed ->
                 mqttTransport?.publishSmsInbound(
@@ -1971,7 +1978,7 @@ class GatewayService : Service() {
         mgr.register(InterfaceConfig(
             id = "sms_0", channelType = "sms",
             autoReconnect = false,
-            alwaysOnline = true, // SMS is always available via Android
+            alwaysOnline = true, // Android sends texts whenever the phone has a signal; disabled below where it cannot
         ))
         // The Hub link the phone actually uses is HubReporter, and until MESHSAT-1261 nothing
         // showed it here: the list said the Hub was offline while messages were flowing over it,
@@ -2143,6 +2150,10 @@ class GatewayService : Service() {
                 mgr.disable(net.meshsat.android.hub.relay.RelayBridgeTransport.INTERFACE_ID)
             }
             if (!settings.hubEnabled.first()) mgr.disable("hub_0")
+            // No telephony, or the Google Play edition, which has no SMS at all (MESHSAT-1335).
+            // Until then sms_0 sat Online on every phone, tablets included, and /api/health
+            // counted a link that could never carry anything.
+            if (!net.meshsat.android.sms.SmsCapability.canSend(this@GatewayService)) mgr.disable("sms_0")
         }
 
         // Observe BLE errors → drive InterfaceManager
@@ -2216,7 +2227,7 @@ class GatewayService : Service() {
                             iridiumSpp?.state?.value == IridiumSpp.State.Connected
                         interfaceId == "iridium9704_0" ->
                             iridium9704Spp?.state?.value == net.meshsat.android.bt.Iridium9704Spp.State.Ready
-                        interfaceId.startsWith("sms") -> true
+                        interfaceId.startsWith("sms") -> net.meshsat.android.sms.SmsCapability.canSend(this@GatewayService)
                         interfaceId.startsWith("mqtt") ->
                             mqttTransport?.isConnected == true
                         interfaceId.startsWith("aprs") ->
@@ -3277,6 +3288,7 @@ class GatewayService : Service() {
     }
 
     private suspend fun forwardToSms(text: String, encrypt: Boolean) {
+        if (!net.meshsat.android.sms.SmsCapability.included) return
         val phone = settings.meshsatPiPhone.first()
         if (phone.isBlank()) return
 
@@ -3464,6 +3476,10 @@ class GatewayService : Service() {
 
     /** Send SMS message to a specific recipient (called from conversation compose). */
     private suspend fun sendSmsMessage(text: String, recipient: String) {
+        if (!net.meshsat.android.sms.SmsCapability.included) {
+            Log.i("MeshSat", "SMS to $recipient not sent: this edition has no SMS")
+            return
+        }
         // Key resolution: per-recipient → Hub wildcard (sms:*) → global key [MESHSAT-447]
         val convKeyRepo = net.meshsat.android.data.ConversationKeyRepository(db.conversationKeyDao(), net.meshsat.android.crypto.SecureKeyStore.getInstance(this))
         val convKey = convKeyRepo.getBySender(recipient)?.hexKey
@@ -3683,9 +3699,13 @@ class GatewayService : Service() {
         val statusParts = mutableListOf<String>()
         if (meshState == MeshtasticBle.State.Connected) statusParts.add("Mesh")
         if (iridiumState == IridiumSpp.State.Connected) statusParts.add("Iridium")
-        statusParts.add("SMS")
+        if (net.meshsat.android.sms.SmsCapability.canSend(this)) statusParts.add("SMS")
 
-        val text = if (statusParts.size == 1) "SMS only" else statusParts.joinToString(" + ")
+        val text = when {
+            statusParts.isEmpty() -> "Waiting for a link"
+            statusParts == listOf("SMS") -> "SMS only"
+            else -> statusParts.joinToString(" + ")
+        }
 
         val notification = NotificationCompat.Builder(this, MeshSatApp.CHANNEL_GATEWAY)
             .setContentTitle("MeshSat Gateway")

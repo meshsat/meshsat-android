@@ -4,10 +4,10 @@
 
 ```bash
 # Build runs on nllei01androidsdk01 only — ADR-0002
-ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:assembleDebug'
-ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:testDebugUnitTest'
-ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:lintDebug'
-ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:assembleRelease'   # signed APK
+ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:assembleFdroidDebug'
+ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:testFdroidDebugUnitTest'
+ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:lintFdroidDebug'
+ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:assembleFdroidRelease'   # signed APKs (full edition); bundlePlayRelease for the Google Play AAB
 ```
 
 ## Version conventions
@@ -65,6 +65,6 @@ git -c user.name="Kyriakos Papadopoulos" -c user.email="ncpjfuzl@mxmx.email" com
 ## Release
 
 - Tag `v<X.Y.Z>` on the bump commit.
-- Build signed APK via `assembleRelease` (signing keys in CI variables vault).
+- Build the signed fdroid APKs via `assembleFdroidRelease` and the Google Play AAB via `bundlePlayRelease` (signing keys in OpenBao). Two flavors: `fdroid` (full) and `play` (no SMS, MESHSAT-1335).
 - Upload APK to GitLab Releases under the tag.
-- Optionally push to Play Store via the standard upload flow (separate concern — out of CI for now).
+- The play AAB is uploaded to the Play Console by hand for now; a Publisher API job is a follow-up once the app exists there.

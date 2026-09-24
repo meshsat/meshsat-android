@@ -193,6 +193,7 @@ class SosController(
                 // SMS to each emergency contact
                 val telephony = net.meshsat.android.sms.SmsCapability.canSend(context)
                 when {
+                    !net.meshsat.android.sms.SmsCapability.included -> skipped += "SMS: not part of the Google Play edition."
                     !telephony -> skipped += "SMS: this device cannot send SMS."
                     contacts.isEmpty() -> skipped += "SMS: you have no emergency contacts. Add them in Setup, Safety."
                     else -> {

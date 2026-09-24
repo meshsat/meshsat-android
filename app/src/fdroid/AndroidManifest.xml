@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The SMS half of the app: everything here is merged into the fdroid edition only. The play
+     edition (Google Play) is built without this file, so its manifest never mentions SMS, which
+     is what Google's SMS policy requires of an app that is not the phone's SMS app
+     (MESHSAT-1335). Do not add SMS permissions or components to src/main. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- SMS (receive copies + send — no default SMS app role needed) -->
+    <uses-permission android:name="android.permission.RECEIVE_SMS" />
+    <uses-permission android:name="android.permission.SEND_SMS" />
+
+    <application>
+
+        <!-- SMS Receiver (non-default: SMS_RECEIVED) -->
+        <receiver
+            android:name=".sms.SmsReceiver"
+            android:exported="true"
+            android:permission="android.permission.BROADCAST_SMS">
+            <intent-filter android:priority="999">
+                <action android:name="android.provider.Telephony.SMS_RECEIVED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- An SMS the app sent: left the phone, and the carrier's delivery report (MESHSAT-1246) -->
+        <receiver
+            android:name=".sms.SmsStatusReceiver"
+            android:exported="false" />
+
+    </application>
+</manifest>

@@ -36,22 +36,22 @@ Flat is what the repo already does. Mixing flat + nested would require IDE confi
 
 ```bash
 # Whole suite
-ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:testDebugUnitTest'
+ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:testFdroidDebugUnitTest'
 
 # Single test class
-ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:testDebugUnitTest --tests net.meshsat.android.KeyBundleImporterTest'
+ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:testFdroidDebugUnitTest --tests net.meshsat.android.KeyBundleImporterTest'
 
 # Lint
-ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:lintDebug'
+ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:lintFdroidDebug'
 ```
 
 ## Coverage expectation
 
 - Every PR touching `crypto/`, `engine/`, `codec/`, `data/` shall have corresponding tests at the flat layout.
-- UI screens may rely on `@Preview` parameter-passing tests + Compose-test instrumentation (separate from `testDebugUnitTest`).
+- UI screens may rely on `@Preview` parameter-passing tests + Compose-test instrumentation (separate from `testFdroidDebugUnitTest`).
 
 ## Anti-patterns
 
 - Nested test packages — re-flatten before merge per Article C-VIII.
 - Tests calling `Log.d` for assertions — use `assertEquals` / `assertTrue`.
-- Tests requiring an emulator boot to pass `testDebugUnitTest` — those belong in `androidTest/` (instrumentation), not the unit-test suite.
+- Tests requiring an emulator boot to pass `testFdroidDebugUnitTest` — those belong in `androidTest/` (instrumentation), not the unit-test suite.

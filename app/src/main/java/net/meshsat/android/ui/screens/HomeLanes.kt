@@ -203,10 +203,10 @@ fun HomeLanes(navigate: (String) -> Unit) {
     }
 
     // --- SMS ---
-    val canText = net.meshsat.android.sms.SmsCapability.canSend(context)
+    val smsWhyNot = net.meshsat.android.sms.SmsCapability.unavailableReason(context)
     val smsAllowed = ContextCompat.checkSelfPermission(context, Manifest.permission.SEND_SMS) == PackageManager.PERMISSION_GRANTED
     val (smsLane, smsDetail) = when {
-        !canText -> LaneState.Off to "This phone cannot send SMS."
+        smsWhyNot != null -> LaneState.Off to smsWhyNot
         !smsAllowed -> LaneState.Off to "Allow SMS to send and receive texts."
         smsQueue > 0 -> LaneState.Working to "${Words.count(smsQueue, "message")} waiting to go out."
         else -> LaneState.Working to "Ready."
@@ -271,17 +271,20 @@ fun HomeLanes(navigate: (String) -> Unit) {
                 inFlight = meshQueue > 0,
                 onClick = { navigate(if (meshUp) "people" else "setup/node") },
             )
-            HorizontalDivider(color = MeshSatBorder)
-            TransportLane(
-                icon = Icons.Outlined.Sms,
-                name = "SMS",
-                color = ColorCellular,
-                state = smsLane,
-                metric = if (smsLane == LaneState.Working) "$smsToday today" else null,
-                detail = smsDetail,
-                inFlight = smsQueue > 0,
-                onClick = { navigate("setup/sms") },
-            )
+            // The Google Play edition has no SMS (MESHSAT-1335): no lane for it either.
+            if (net.meshsat.android.sms.SmsCapability.included) {
+                HorizontalDivider(color = MeshSatBorder)
+                TransportLane(
+                    icon = Icons.Outlined.Sms,
+                    name = "SMS",
+                    color = ColorCellular,
+                    state = smsLane,
+                    metric = if (smsLane == LaneState.Working) "$smsToday today" else null,
+                    detail = smsDetail,
+                    inFlight = smsQueue > 0,
+                    onClick = { navigate("setup/sms") },
+                )
+            }
             HorizontalDivider(color = MeshSatBorder)
             TransportLane(
                 icon = Icons.Outlined.Cloud,

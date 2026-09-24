@@ -35,6 +35,26 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    // Two editions of one app (MESHSAT-1335). fdroid is the full app and the default: it is what
+    // GitHub releases and F-Droid ship. play is the Google Play edition and has no SMS at all,
+    // because Play does not allow SEND_SMS or RECEIVE_SMS in an app that is not the phone's SMS
+    // app: its manifest (src/main only; the SMS half lives in src/fdroid/AndroidManifest.xml)
+    // declares neither, and everything that would send a text asks SmsCapability first. Same
+    // applicationId and versionCode scheme, no versionNameSuffix: F-Droid's checkupdates reads
+    // the version out of this file, and BuildConfig.FLAVOR already says which edition this is.
+    flavorDimensions += "store"
+    productFlavors {
+        create("fdroid") {
+            dimension = "store"
+            isDefault = true
+            buildConfigField("boolean", "SMS_INCLUDED", "true")
+        }
+        create("play") {
+            dimension = "store"
+            buildConfigField("boolean", "SMS_INCLUDED", "false")
+        }
+    }
+
     signingConfigs {
         create("release") {
             val ksFile = System.getenv("ANDROID_KEYSTORE_FILE")
@@ -115,6 +135,11 @@ val baseVersionName = android.defaultConfig.versionName!!
 
 androidComponents {
     onVariants { variant ->
+        // fdroid keeps the name it has always had: F-Droid's recipe and the GitHub release assets
+        // are matched on meshsat-android-<version>-<abi>-<code>.apk, and F-Droid compares the
+        // bytes of the file it builds with the one on GitHub. Any other edition says its name
+        // after the version, so no glob for the fdroid files can pick it up.
+        val edition = if (variant.flavorName == "fdroid") "" else "-${variant.flavorName}"
         variant.outputs.forEach { output ->
             val abi = output.filters
                 .find { it.filterType == FilterConfiguration.FilterType.ABI }
@@ -122,7 +147,7 @@ androidComponents {
             val code = baseVersionCode * 10 + (abiVersionCodes[abi] ?: 0)
             output.versionCode.set(code)
             (output as? VariantOutputImpl)?.outputFileName?.set(
-                "meshsat-android-$baseVersionName-${abi ?: "universal"}-$code.apk"
+                "meshsat-android-$baseVersionName$edition-${abi ?: "universal"}-$code.apk"
             )
         }
     }

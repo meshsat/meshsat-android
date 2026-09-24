@@ -341,7 +341,7 @@ private fun StatusStrip() {
             "Satellite " + if (satState == IridiumSpp.State.Connected) "signal $bars of 5" else "not connected")
         StripItem(ImageVector.vectorResource(R.drawable.ic_transport_mesh), meshColor, if (meshState == MeshtasticBle.State.Connected) "$nodeCount" else null,
             "Mesh " + if (meshState == MeshtasticBle.State.Connected) "$nodeCount nodes" else "not connected")
-        StripItem(Icons.Outlined.Sms, smsColor, null, "SMS")
+        if (net.meshsat.android.sms.SmsCapability.included) StripItem(Icons.Outlined.Sms, smsColor, null, "SMS")
         StripItem(Icons.Outlined.Cloud, hubColor, null, "Hub")
         StripItem(Icons.Outlined.MyLocation, gpsColor, null, "Location")
         Spacer(Modifier.weight(1f))

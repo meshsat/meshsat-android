@@ -1,5 +1,6 @@
 package net.meshsat.android.sms
 
+import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
@@ -38,6 +39,9 @@ object SmsSender {
      * @param msvqscEncoder MSVQ-SC encoder (null = no compression)
      * @param msvqscStages Number of VQ stages (fewer = more compression)
      */
+    // The play edition declares no SMS permission, so lint sees these SmsManager calls as
+    // unguarded; SmsCapability.manager answers null there and nothing is ever sent (MESHSAT-1335).
+    @SuppressLint("MissingPermission")
     fun send(
         context: Context,
         to: String,
@@ -120,6 +124,7 @@ object SmsSender {
      * to emergency contacts): null once the SMS has left the phone, otherwise why not, so the
      * delivery queue tries again. "Left the phone" says nothing about the other phone.
      */
+    @SuppressLint("MissingPermission")
     suspend fun sendAndWait(
         context: Context,
         to: String,
