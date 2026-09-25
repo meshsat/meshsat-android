@@ -127,6 +127,14 @@ android {
         includeInApk = false
         includeInBundle = false
     }
+
+    // No META-INF/version-control-info.textproto either: since AGP 8.10 a release build
+    // writes the git commit into the APK, so a build from a checkout and one from an archive
+    // without .git can never match byte for byte, which F-Droid's verification requires
+    // (found on v2.19.0, MESHSAT-1335). The tag says which commit an APK is.
+    vcsInfo {
+        include = false
+    }
 }
 
 // Give every APK its own versionCode and a file name that carries it, so each one can be
