@@ -246,6 +246,54 @@ upload-package:
       done
 
 # =============================================================================
+# Upload the Play edition to the Play Console (tag push only, MESHSAT-1341)
+# =============================================================================
+# The service account key lives in OpenBao at secret/ci/android-play (field
+# service_account_json), fetched with the same JWT role as the signing keystore. Until that
+# secret exists the job says so and passes, so a tag pipeline is never red for it. The account
+# may only release to testing tracks, so PLAY_TRACK is alpha (reviewed) or internal (not).
+publish-play:
+  stage: release
+  image: python:3.12-slim
+  id_tokens:
+    BAO_ID_TOKEN:
+      aud: https://gitlab.nuclearlighters.net
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v/'
+  needs:
+    - job: build-release
+      artifacts: true
+  allow_failure: true
+  variables:
+    PLAY_TRACK: "alpha"
+  script:
+    - apt-get update -qq && apt-get install -y -qq --no-install-recommends curl jq ca-certificates > /dev/null
+    - |
+      set -euo pipefail
+      if [ -n "${BAO_CA_CERT:-}" ]; then
+        echo "$BAO_CA_CERT" > /usr/local/share/ca-certificates/openbao-ca.crt
+        update-ca-certificates > /dev/null
+      fi
+      BAO_TOKEN=$(curl -sf --request POST \
+        --data "{\"role\": \"gitlab-ci\", \"jwt\": \"${BAO_ID_TOKEN}\"}" \
+        "${BAO_ADDR}/v1/auth/jwt/login" | jq -r '.auth.client_token')
+      [ -n "$BAO_TOKEN" ] && [ "$BAO_TOKEN" != "null" ] || { echo "ERROR: OpenBao JWT login failed"; exit 1; }
+      CODE=$(curl -s -o /tmp/play.json -w '%{http_code}' --header "X-Vault-Token: ${BAO_TOKEN}" \
+        "${BAO_ADDR}/v1/secret/data/ci/android-play")
+      if [ "$CODE" = "404" ]; then
+        echo "No Play credentials in OpenBao yet (secret/ci/android-play): nothing uploaded."
+        curl -sf --header "X-Vault-Token: ${BAO_TOKEN}" --request POST "${BAO_ADDR}/v1/auth/token/revoke-self" || true
+        exit 0
+      fi
+      [ "$CODE" = "200" ] || { echo "ERROR: OpenBao answered $CODE for secret/ci/android-play"; exit 1; }
+      jq -r '.data.data.service_account_json' /tmp/play.json > /tmp/play-sa.json
+      curl -sf --header "X-Vault-Token: ${BAO_TOKEN}" --request POST "${BAO_ADDR}/v1/auth/token/revoke-self" || true
+      pip install -q google-auth requests
+      python3 scripts/publish-play.py --aab "${AAB_NAME}" --track "${PLAY_TRACK}" \
+        --version-name "${VERSION}" --service-account /tmp/play-sa.json
+      rm -f /tmp/play-sa.json /tmp/play.json
+
+# =============================================================================
 # Create GitLab Release (tag push only)
 # =============================================================================
 create-gitlab-release:
