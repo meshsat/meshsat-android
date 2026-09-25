@@ -1,0 +1,1 @@
+Two editions: the full app for F-Droid and GitHub, and a Google Play edition without SMS, as Play's policy requires. The app now targets Android 16. A phone with no telephony no longer counts SMS as an online link.
