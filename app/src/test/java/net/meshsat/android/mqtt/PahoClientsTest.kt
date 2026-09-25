@@ -69,27 +69,12 @@ class PahoClientsTest {
         return c
     }
 
-    @Test
-    fun `disconnect alone leaves a dropped client reconnecting`() {
-        DroppingBroker().use { broker ->
-            val c = reconnectingClient(broker, "paho-disconnect-only")
-            try {
-                // Between connections, as the Hub client was: a client that is connected at
-                // that moment would simply disconnect.
-                while (c.isConnected) Thread.sleep(5)
-                runCatching { c.disconnect(200) }
-                val before = broker.connects.get()
-                // Paho doubles its reconnect delay on every drop (1, 2, 4, 8 s...), so after the
-                // third connect the next one can be 8 s away; a fixed 3 s wait failed on the CI
-                // runner once in a while (pipeline 56142). Wait for it, within its own maximum.
-                val deadline = System.currentTimeMillis() + 20_000
-                while (broker.connects.get() <= before && System.currentTimeMillis() < deadline) Thread.sleep(50)
-                assertTrue("still reconnecting after disconnect()", broker.connects.get() > before)
-            } finally {
-                PahoClients.retire(c)
-            }
-        }
-    }
+    // There used to be a second test here showing the bug itself: that disconnect() alone
+    // leaves a dropped client reconnecting. Whether Paho reconnects after a disconnect() that
+    // lands between two attempts depends on where its connect bookkeeping was when the broker
+    // dropped it, and on the CI runner it went either way (pipelines 56142 and 56174, one flavor
+    // each, with a 3 s and then a 20 s wait). The behaviour is documented in MESHSAT-1305; what
+    // the app depends on is the test below.
 
     @Test
     fun `a retired client stops reconnecting`() {
