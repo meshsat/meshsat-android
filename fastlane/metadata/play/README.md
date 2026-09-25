@@ -11,8 +11,7 @@ promise SMS three times.
 - `en-US/images/phoneScreenshots/1-4.png`: F-Droid screenshots 3 to 6 (passes, node, satellite,
   safety), padded to 1212 x 2424 by extending the edge pixels: Play rejects a screenshot whose
   long side is more than twice its short side, and the phone is 1080 x 2424. 24-bit PNG, no alpha.
-  They are the same screens as
-  safety). Home and Setup are left out because they show the SMS lane and row of the full
+  Home and Setup are left out because they show the SMS lane and row of the full
   edition; retake them from a `play` build when the listing gets its own set.
 - Release notes come from `fastlane/metadata/android/en-US/changelogs/<versionCode>.txt`, which
   `scripts/bump-version.sh` writes; the Play upload job passes that directory.
