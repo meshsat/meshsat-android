@@ -1,0 +1,1 @@
+Google Play edition: store listing added, and every release now uploads itself to Play's testing track. No change to the app itself.
