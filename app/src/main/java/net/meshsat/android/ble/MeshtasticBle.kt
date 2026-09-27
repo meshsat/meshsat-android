@@ -54,6 +54,8 @@ class MeshtasticBle(private val context: Context) {
         private const val ATT_HEADER_BYTES = 3
         private const val TAG = "MeshtasticBle"
         private const val FORCE_RECONNECT_PAUSE_MS = 1_000L
+        /** After a cache refresh the stack wants a moment before a discovery lands. */
+        private const val GATT_REFRESH_PAUSE_MS = 300L
     }
 
     enum class State { Disconnected, Scanning, Connecting, Connected }
@@ -84,6 +86,9 @@ class MeshtasticBle(private val context: Context) {
     private var toRadioChar: BluetoothGattCharacteristic? = null
     private var fromRadioChar: BluetoothGattCharacteristic? = null
     @Volatile private var logRadioChar: BluetoothGattCharacteristic? = null
+
+    /** Android's GATT cache was refreshed once on this connection (MESHSAT-1378); never twice. */
+    @Volatile private var gattCacheRefreshed = false
 
     /** Last connected BLE address, used for reconnect(). */
     @Volatile var lastAddress: String? = null
@@ -492,6 +497,7 @@ class MeshtasticBle(private val context: Context) {
         logRadioChar = null
         _logRadioAvailable.value = false
         _securityConfig.value = null
+        gattCacheRefreshed = false
         mtu = 23
         _state.value = State.Disconnected
     }
@@ -571,6 +577,18 @@ class MeshtasticBle(private val context: Context) {
         }
     }
 
+    /**
+     * Ask the Bluetooth stack to forget this device's cached attribute table. Not a public
+     * API: BluetoothGatt.refresh() is reached by reflection, as the Meshtastic app and most
+     * others do. False when the method is not there or refused.
+     */
+    private fun refreshGattCache(g: BluetoothGatt): Boolean = try {
+        g.javaClass.getMethod("refresh").invoke(g) as? Boolean ?: false
+    } catch (e: Exception) {
+        Log.w(TAG, "GATT cache refresh not available: ${e.message}")
+        false
+    }
+
     // --- GATT Callback ---
 
     private val gattCallback = object : BluetoothGattCallback() {
@@ -608,6 +626,26 @@ class MeshtasticBle(private val context: Context) {
                 scope.launch { _error.emit("Meshtastic BLE service not found") }
                 disconnect()
                 return
+            }
+
+            // Android keeps a bonded peripheral's attribute table across reconnects and even a
+            // Bluetooth restart, until the peripheral sends Service Changed or the bond is removed.
+            // A node whose firmware gained STATS and PASS (contract v2, MESHSAT-1378) therefore
+            // came back without them on the owner's phone on 27 Sep 2026: the pipe was there, the
+            // new characteristics were not. Once per connection, a pipe service without STATS is
+            // taken as that stale cache: drop it and discover again. On a node that truly lacks
+            // STATS this costs one extra discovery per connect and nothing else.
+            g.getService(IridiumBlePipe.SERVICE_UUID)?.let { pipeService ->
+                val statsMissing = pipeService.getCharacteristic(UUID.fromString(IridiumPipeContract.STATS_UUID)) == null
+                if (statsMissing && !gattCacheRefreshed && refreshGattCache(g)) {
+                    gattCacheRefreshed = true
+                    Log.i(TAG, "The cached GATT table has the Iridium pipe without STATS; refreshing Android's cache and discovering again")
+                    scope.launch {
+                        delay(GATT_REFRESH_PAUSE_MS)
+                        g.discoverServices()
+                    }
+                    return
+                }
             }
 
             toRadioChar = service.getCharacteristic(TO_RADIO_UUID)
