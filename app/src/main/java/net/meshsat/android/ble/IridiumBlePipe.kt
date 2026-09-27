@@ -142,6 +142,11 @@ class IridiumBlePipe internal constructor(
         GattCompat.read(queue, gatt, c)
     }
 
+    /** Read STATS once more, e.g. while a screen shows it: the node notifies only on a change of substance. */
+    fun readStats() {
+        statsChar?.let { GattCompat.read(queue, gatt, it) }
+    }
+
     /**
      * Give the node the next pass windows (MESHSAT-1378): one write with response, replacing
      * its list. False when the node has no PASS characteristic or the write failed. Advice for

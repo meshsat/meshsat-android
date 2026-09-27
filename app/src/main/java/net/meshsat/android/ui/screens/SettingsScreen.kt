@@ -596,6 +596,15 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
             val pipe = iridiumPipe
             if (pipe != null && pipe.hasStats) {
                 val stats by pipe.stats.collectAsState()
+                // The node notifies STATS on a change of substance, not on the clock: while the
+                // card is on screen the uptime and the ages are read again every 10 s (seen on
+                // the Pixel, 27 Sep 2026: "uptime 19 s" four minutes after boot).
+                LaunchedEffect(pipe) {
+                    while (true) {
+                        kotlinx.coroutines.delay(10_000)
+                        pipe.readStats()
+                    }
+                }
                 SectionCard("Node health") {
                     val s = stats
                     if (s == null) {
