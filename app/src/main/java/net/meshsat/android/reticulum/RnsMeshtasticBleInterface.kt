@@ -2,6 +2,7 @@ package net.meshsat.android.reticulum
 
 import android.util.Log
 import net.meshsat.android.ble.MeshtasticBle
+import net.meshsat.android.ble.MeshtasticProtoAdapter
 import net.meshsat.android.ble.MeshtasticProtocol
 import net.meshsat.android.routing.toHex
 import kotlinx.coroutines.CoroutineScope
@@ -305,23 +306,15 @@ class RnsMeshtasticBleInterface(
      * Encode a Reticulum fragment as a Meshtastic ToRadio protobuf
      * using portnum 256 (PRIVATE_APP).
      */
+    /**
+     * Through the generated protobuf types, never by hand: MeshPacket.to is a fixed32, and a
+     * varint there made the node drop every packet as malformed (MESHSAT-1372).
+     */
     private fun encodePrivateAppToRadio(
         payload: ByteArray,
         to: Long = BROADCAST_ADDR,
         channel: Int = 0,
-    ): ByteArray {
-        // Data: portnum=256, payload=fragment bytes
-        val dataProto = encodeVarintField(1, PORTNUM_PRIVATE_APP.toLong()) +
-            encodeBytesField(2, payload)
-
-        // MeshPacket: to, channel, decoded
-        val meshPacket = encodeVarintField(2, to) +
-            encodeVarintField(3, channel.toLong()) +
-            encodeBytesField(4, dataProto)
-
-        // ToRadio: field 1 = MeshPacket
-        return encodeBytesField(1, meshPacket)
-    }
+    ): ByteArray = MeshtasticProtoAdapter.encodePrivateApp(payload, to, channel)
 
     /**
      * Parse a FromRadio protobuf and extract the PRIVATE_APP payload.
@@ -405,25 +398,4 @@ class RnsMeshtasticBleInterface(
         }
     }
 
-    private fun encodeVarint(value: Long): ByteArray {
-        val result = mutableListOf<Byte>()
-        var v = value
-        do {
-            var b = (v and 0x7F).toInt()
-            v = v ushr 7
-            if (v != 0L) b = b or 0x80
-            result.add(b.toByte())
-        } while (v != 0L)
-        return result.toByteArray()
-    }
-
-    private fun encodeVarintField(fieldNumber: Int, value: Long): ByteArray {
-        val tag = (fieldNumber shl 3) or 0
-        return encodeVarint(tag.toLong()) + encodeVarint(value)
-    }
-
-    private fun encodeBytesField(fieldNumber: Int, data: ByteArray): ByteArray {
-        val tag = (fieldNumber shl 3) or 2
-        return encodeVarint(tag.toLong()) + encodeVarint(data.size.toLong()) + data
-    }
 }

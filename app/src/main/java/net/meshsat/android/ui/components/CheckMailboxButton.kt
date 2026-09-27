@@ -91,6 +91,7 @@ fun describeMailboxResult(result: MailboxResult): String = when (result) {
         if (result.moStatus == 32) "No network: the modem sees no satellite. No credit used."
         else "The session failed (status ${result.moStatus})."
     MailboxResult.NoAnswer -> "The modem did not answer."
+    MailboxResult.LinkLost -> "The link to the node dropped during the session; what it fetched is unknown."
     is MailboxResult.Checked -> buildString {
         append(
             when (result.received) {

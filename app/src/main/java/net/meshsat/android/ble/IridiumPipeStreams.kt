@@ -55,6 +55,13 @@ class PipeInputStream(capacity: Int = 8192) : InputStream() {
     private var size = 0
     private var closed = false
 
+    /**
+     * True once the connection behind this stream is gone. A reader that polls [available]
+     * never sees the -1 a blocking read would get, so the AT driver asks this instead of
+     * waiting out its command timeout (95 s for a session, MESHSAT-1372).
+     */
+    val isClosed: Boolean get() = synchronized(lock) { closed }
+
     /** Append [data]; returns how many bytes did not fit. */
     fun offer(data: ByteArray): Int = synchronized(lock) {
         var dropped = 0

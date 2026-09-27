@@ -499,6 +499,31 @@ object MeshtasticProtoAdapter {
             .toByteArray()
     }
 
+    /**
+     * Encode a PRIVATE_APP (portnum 256) payload as a ToRadio protobuf: how Reticulum packets
+     * ride the mesh. Built from the generated types on purpose (MESHSAT-1372): a hand-rolled
+     * encoder wrote MeshPacket.to as a varint, and the field is a fixed32, so the node answered
+     * every Reticulum announce with "Can't decode protobuf reason='wrong wire type'" and
+     * dropped it (node bench of 26 Sep, 20:45:17 and 21:05:17 UTC).
+     */
+    fun encodePrivateApp(payload: ByteArray, to: Long = 0xFFFFFFFFL, channel: Int = 0): ByteArray {
+        val data = MeshProtos.Data.newBuilder()
+            .setPortnum(Portnums.PortNum.PRIVATE_APP)
+            .setPayload(com.google.protobuf.ByteString.copyFrom(payload))
+            .build()
+
+        val meshPacket = MeshProtos.MeshPacket.newBuilder()
+            .setTo(to.toInt())
+            .setChannel(channel)
+            .setDecoded(data)
+            .build()
+
+        return MeshProtos.ToRadio.newBuilder()
+            .setPacket(meshPacket)
+            .build()
+            .toByteArray()
+    }
+
     /** Encode a waypoint as a ToRadio protobuf. */
     fun encodeWaypoint(
         name: String,
