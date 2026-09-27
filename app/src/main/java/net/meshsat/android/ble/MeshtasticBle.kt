@@ -17,6 +17,7 @@ import android.bluetooth.le.ScanSettings
 import android.content.Context
 import android.os.ParcelUuid
 import android.util.Log
+import com.geeksville.mesh.ConfigProtos
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -45,6 +46,7 @@ class MeshtasticBle(private val context: Context) {
         val TO_RADIO_UUID: UUID = UUID.fromString("f75c76d2-129e-4dad-a1dd-7866124401e7")
         val FROM_RADIO_UUID: UUID = UUID.fromString("2c55e69e-4993-11ed-b878-0242ac120002")
         val FROM_NUM_UUID: UUID = UUID.fromString("ed9da18c-a800-4f66-a670-aa7547de15e6")
+        val LOG_RADIO_UUID: UUID = UUID.fromString(NodeLog.LOG_RADIO_UUID)
         val CCC_DESCRIPTOR: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
 
         // What Meshtastic firmware asks for; Android caps the request at 517.
@@ -81,6 +83,7 @@ class MeshtasticBle(private val context: Context) {
     @Volatile private var gatt: BluetoothGatt? = null
     private var toRadioChar: BluetoothGattCharacteristic? = null
     private var fromRadioChar: BluetoothGattCharacteristic? = null
+    @Volatile private var logRadioChar: BluetoothGattCharacteristic? = null
 
     /** Last connected BLE address, used for reconnect(). */
     @Volatile var lastAddress: String? = null
@@ -127,6 +130,18 @@ class MeshtasticBle(private val context: Context) {
     val powerConfig: StateFlow<com.geeksville.mesh.ConfigProtos.Config.PowerConfig?> = _powerConfig
     private val _displayConfig = MutableStateFlow<com.geeksville.mesh.ConfigProtos.Config.DisplayConfig?>(null)
     val displayConfig: StateFlow<com.geeksville.mesh.ConfigProtos.Config.DisplayConfig?> = _displayConfig
+    private val _securityConfig = MutableStateFlow<com.geeksville.mesh.ConfigProtos.Config.SecurityConfig?>(null)
+
+    /** The node's security config from its config dump; carries debug_log_api_enabled (MESHSAT-1374). */
+    val securityConfig: StateFlow<com.geeksville.mesh.ConfigProtos.Config.SecurityConfig?> = _securityConfig
+
+    /** The node's live log lines (MESHSAT-1374), kept while the app runs. */
+    val nodeLog = NodeLogBuffer()
+
+    private val _logRadioAvailable = MutableStateFlow(false)
+
+    /** The connected node offers the LogRadio characteristic. */
+    val logRadioAvailable: StateFlow<Boolean> = _logRadioAvailable
 
     private val _channels = MutableStateFlow<List<MeshtasticProtocol.MeshChannel>>(emptyList())
     val channels: StateFlow<List<MeshtasticProtocol.MeshChannel>> = _channels
@@ -191,7 +206,39 @@ class MeshtasticBle(private val context: Context) {
             config.hasNetwork() -> _networkConfig.value = config.network
             config.hasPower() -> _powerConfig.value = config.power
             config.hasDisplay() -> _displayConfig.value = config.display
+            config.hasSecurity() -> _securityConfig.value = config.security
         }
+    }
+
+    /**
+     * Follow, or stop following, the node's log over LogRadio (MESHSAT-1374). Returns the GATT
+     * status of the CCCD write, or one of [GattOpQueue]'s negative codes. The node sends lines
+     * only while security.debug_log_api_enabled is set, see [setNodeDebugLog].
+     */
+    suspend fun followNodeLog(on: Boolean): Int {
+        val g = gatt ?: return GattOpQueue.STATUS_CLOSED
+        val q = queue ?: return GattOpQueue.STATUS_CLOSED
+        val c = logRadioChar ?: return GattOpQueue.STATUS_REFUSED
+        return GattCompat.setNotify(q, g, c, on).await()
+    }
+
+    /**
+     * Set security.debug_log_api_enabled on the node through the admin channel: the node's own
+     * security config, as it sent it, with that one flag changed, so its keys and admin keys
+     * stay as they are. A setting the node keeps until it is changed again. Returns why it could
+     * not be sent, or null.
+     */
+    fun setNodeDebugLog(on: Boolean): String? {
+        if (_state.value != State.Connected) return "The node is not connected."
+        val me = _myInfo.value?.myNodeNum ?: return "The node has not sent its security settings yet; try again in a moment."
+        val current = _securityConfig.value ?: return "The node has not sent its security settings yet; try again in a moment."
+        val config = ConfigProtos.Config.newBuilder()
+            .setSecurity(current.toBuilder().setDebugLogApiEnabled(on).build())
+            .build()
+        sendToRadio(MeshtasticProtoAdapter.buildAdminSetConfig(me, config))
+        // The node does not echo a set: keep the copy in step so the switch shows what was asked.
+        _securityConfig.value = config.security
+        return null
     }
 
     fun addChannel(channel: MeshtasticProtocol.MeshChannel) {
@@ -442,6 +489,9 @@ class MeshtasticBle(private val context: Context) {
         _iridiumPipe.value = null
         toRadioChar = null
         fromRadioChar = null
+        logRadioChar = null
+        _logRadioAvailable.value = false
+        _securityConfig.value = null
         mtu = 23
         _state.value = State.Disconnected
     }
@@ -504,6 +554,7 @@ class MeshtasticBle(private val context: Context) {
         when {
             uuid == FROM_RADIO_UUID -> if (value.isNotEmpty()) scope.launch { _receivedData.emit(value) }
             uuid == FROM_NUM_UUID -> readFromRadio()
+            uuid == LOG_RADIO_UUID -> NodeLog.parse(value, System.currentTimeMillis())?.let { nodeLog.add(it) }
             IridiumBlePipe.isPipeCharacteristic(uuid) -> _iridiumPipe.value?.onValue(uuid, value)
         }
     }
@@ -561,6 +612,8 @@ class MeshtasticBle(private val context: Context) {
 
             toRadioChar = service.getCharacteristic(TO_RADIO_UUID)
             fromRadioChar = service.getCharacteristic(FROM_RADIO_UUID)
+            logRadioChar = service.getCharacteristic(LOG_RADIO_UUID)
+            _logRadioAvailable.value = logRadioChar != null
 
             if (toRadioChar == null || fromRadioChar == null) {
                 scope.launch { _error.emit("Meshtastic characteristics not found") }

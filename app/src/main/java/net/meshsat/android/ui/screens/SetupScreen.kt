@@ -23,6 +23,7 @@ import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.LockOpen
 import androidx.compose.material.icons.outlined.Map
 import androidx.compose.material.icons.outlined.MonitorHeart
+import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material.icons.outlined.Outbox
 import androidx.compose.material.icons.outlined.Radio
 import androidx.compose.material.icons.outlined.Schedule
@@ -166,6 +167,7 @@ fun AdvancedScreen(navigate: (String) -> Unit) {
         NavRow(Icons.Outlined.Key, "Certificates and keys", "The Hub certificate and imported keys", { navigate("credentials") })
         NavRow(Icons.Outlined.LockOpen, "Encrypt or decrypt text", "By hand, with a conversation key", { navigate("decrypt") })
         NavRow(Icons.Outlined.MonitorHeart, "Diagnostics", "Link health, batch queue, crash reports, service", { navigate("setup/diagnostics") })
+        NavRow(Icons.Outlined.Terminal, "Node log", "The node's live log over Bluetooth, on demand", { navigate("nodelog") })
         HorizontalDivider(color = MeshSatBorder)
     }
 }
