@@ -2,6 +2,7 @@ package net.meshsat.android.reticulum
 
 import android.util.Log
 import net.meshsat.android.ble.MeshtasticBle
+import net.meshsat.android.ble.MeshtasticProtoAdapter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
@@ -75,29 +76,16 @@ class RnsMeshInterface(
         const val MESH_MTU = 237
 
         /**
-         * Encode Reticulum packet as a Meshtastic ToRadio protobuf
-         * with portnum=256 (PRIVATE_APP), broadcast.
-         *
-         * Protobuf encoding is inlined here to avoid depending on
-         * MeshtasticProtocol's private helper methods.
+         * Encode Reticulum packet as a Meshtastic ToRadio protobuf with portnum=256
+         * (PRIVATE_APP), broadcast. Through the generated types: the hand-rolled encoder that
+         * stood here wrote MeshPacket.to (a fixed32) as a varint, and the node dropped every
+         * packet as malformed (MESHSAT-1372).
          */
         fun encodePrivateApp(
             payload: ByteArray,
             to: Long = 0xFFFFFFFFL,
             channel: Int = 0,
-        ): ByteArray {
-            // Data: portnum=256 (field 1, varint), payload (field 2, bytes)
-            val dataProto = encodeVarintField(1, PORTNUM_PRIVATE_APP.toLong()) +
-                encodeBytesField(2, payload)
-
-            // MeshPacket: to (field 2), channel (field 3), decoded (field 4)
-            val meshPacket = encodeVarintField(2, to) +
-                encodeVarintField(3, channel.toLong()) +
-                encodeBytesField(4, dataProto)
-
-            // ToRadio: packet (field 1)
-            return encodeBytesField(1, meshPacket)
-        }
+        ): ByteArray = MeshtasticProtoAdapter.encodePrivateApp(payload, to, channel)
 
         /**
          * Extract Reticulum packet from a Meshtastic FromRadio protobuf.
@@ -111,28 +99,7 @@ class RnsMeshInterface(
             return extractBytesField(decoded, 2)
         }
 
-        // --- Minimal protobuf encoding/decoding ---
-
-        private fun encodeVarint(value: Long): ByteArray {
-            val result = mutableListOf<Byte>()
-            var v = value
-            while (v > 0x7F) {
-                result.add(((v and 0x7F) or 0x80).toByte())
-                v = v ushr 7
-            }
-            result.add((v and 0x7F).toByte())
-            return result.toByteArray()
-        }
-
-        private fun encodeVarintField(fieldNumber: Int, value: Long): ByteArray {
-            val tag = encodeVarint(((fieldNumber shl 3) or 0).toLong())
-            return tag + encodeVarint(value)
-        }
-
-        private fun encodeBytesField(fieldNumber: Int, data: ByteArray): ByteArray {
-            val tag = encodeVarint(((fieldNumber shl 3) or 2).toLong())
-            return tag + encodeVarint(data.size.toLong()) + data
-        }
+        // --- Minimal protobuf decoding ---
 
         private fun extractVarintField(data: ByteArray, fieldNumber: Int): Long? {
             var i = 0

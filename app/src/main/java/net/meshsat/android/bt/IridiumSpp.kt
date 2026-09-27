@@ -13,10 +13,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import net.meshsat.android.ble.LineWatcher
 import net.meshsat.android.ble.ModemLink
+import net.meshsat.android.ble.PipeInputStream
 import net.meshsat.android.ble.PipeWriteFailedException
 import java.io.ByteArrayOutputStream
 import java.io.IOException
-import java.io.InputStream
 import java.io.OutputStream
 
 /**
@@ -35,6 +35,14 @@ import java.io.OutputStream
  * knowing, so the retry sent it twice (19 Sep, MOMSN 228). An unsolicited "SBDRING" line (a
  * waiting MT message) is reported on [ringAlerts]; checking the mailbox is the caller's
  * decision, never a timer's.
+ *
+ * A command ends the moment its link is gone (MESHSAT-1372): the reads poll the link, and a
+ * closed pipe never answers, so before this a session cut by a Bluetooth drop held the command
+ * lock for its full 95 s and the next link's probe queued behind it ("cannot find the modem"
+ * for a minute after the reconnect, node bench of 26 Sep). A session cut that way is reported
+ * with [SbdixResult.linkLost]: the node finishes it on its own and the phone never learns the
+ * outcome, so the caller treats it as possibly sent, and the 3-minute hold runs from the
+ * session's start as it would after a 32 or 36 the node caught.
  *
  * Key AT commands:
  * - AT&K0     → flow control off (3-wire link; not every RockBLOCK stores it)
@@ -83,8 +91,15 @@ class IridiumSpp(private val clock: () -> Long = System::currentTimeMillis) {
          */
         val MO_MAYBE_SENT = setOf(10, 13, 17, 18, 19)
 
+        /**
+         * Not a modem status: the link to the node dropped while the session ran, so its outcome is
+         * unknown (MESHSAT-1372). Negative so it can never collide with an +SBDIX code.
+         */
+        const val MO_LINK_LOST = -1
+
         /** What an +SBDIX MO status means, in plain words. */
         fun moStatusText(code: Int): String = when (code) {
+            MO_LINK_LOST -> "the link to the node dropped during the session"
             in 0..4 -> "sent"
             10 -> "the gateway did not finish the call in time"
             11 -> "the modem's outgoing queue is full"
@@ -112,7 +127,6 @@ class IridiumSpp(private val clock: () -> Long = System::currentTimeMillis) {
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     @Volatile private var link: ModemLink? = null
-    private val inputStream: InputStream? get() = link?.input
     private val outputStream: OutputStream? get() = link?.output
 
     /** No SBDIX before this time: set after status 32/36. */
@@ -184,6 +198,18 @@ class IridiumSpp(private val clock: () -> Long = System::currentTimeMillis) {
     /** The modem reported a waiting MT message (unsolicited SBDRING). */
     val ringAlerts: SharedFlow<Unit> = _ringAlerts
 
+    private val _mailboxWaiting = MutableStateFlow(false)
+
+    /**
+     * The gateway holds a message for this modem, by the modem's last word on it: +SBDSX's ring
+     * alert flag or waiting count, or the queued count of a session that reached the gateway.
+     * A session that did not (32, 36, a cut link) leaves it as it was. The modem keeps its ring
+     * alert flag up until a session clears it, and the app used to answer that flag with a
+     * billed session at every reconnect (MESHSAT-1372); now it is a fact the service acts on
+     * under the same cues as a send.
+     */
+    val mailboxWaiting: StateFlow<Boolean> = _mailboxWaiting
+
     data class ModemInfo(
         val manufacturer: String = "",
         val model: String = "",
@@ -199,9 +225,19 @@ class IridiumSpp(private val clock: () -> Long = System::currentTimeMillis) {
         val mtQueued: Int,
         /** The message this session brought in, already read from the modem, or null. */
         val mt: ByteArray? = null,
+        /**
+         * The link to the node dropped while the session ran: [moStatus] is [MO_LINK_LOST] and
+         * nothing else in here is known. The node finishes the session by itself, so the message
+         * may well have been sent (MESHSAT-1372).
+         */
+        val linkLost: Boolean = false,
     ) {
         val moSuccess get() = moStatus in 0..4
         val mtAvailable get() = mtStatus == 1
+
+        companion object {
+            fun linkLost() = SbdixResult(MO_LINK_LOST, -1, -1, -1, 0, 0, linkLost = true)
+        }
     }
 
     data class SbdsxResult(
@@ -271,10 +307,19 @@ class IridiumSpp(private val clock: () -> Long = System::currentTimeMillis) {
 
     // --- AT Commands ---
 
+    /**
+     * True once [forLink] is no longer the driver's link, or its pipe has been closed under it:
+     * a command written on it can never be answered, and waiting for one holds the lock every
+     * other command needs (MESHSAT-1372).
+     */
+    private fun linkGone(forLink: ModemLink): Boolean =
+        link !== forLink || (forLink.input as? PipeInputStream)?.isClosed == true
+
     @Synchronized
     private fun sendAT(command: String, timeoutMs: Long = AT_TIMEOUT_MS): String {
-        val os = outputStream ?: throw IOException("Not connected")
-        val input = inputStream ?: throw IOException("Not connected")
+        val current = link ?: throw IOException("Not connected")
+        val os = current.output
+        val input = current.input
 
         // Drain anything pending; an unsolicited SBDRING in it was already seen by the watcher.
         while (input.available() > 0) input.read()
@@ -295,6 +340,7 @@ class IridiumSpp(private val clock: () -> Long = System::currentTimeMillis) {
         val deadline = clock() + timeoutMs
 
         while (clock() < deadline) {
+            if (linkGone(current)) throw LinkDroppedException(command)
             if (input.available() > 0) {
                 val b = input.read()
                 if (b == -1) break
@@ -405,7 +451,7 @@ class IridiumSpp(private val clock: () -> Long = System::currentTimeMillis) {
                 mtMsn = vals[3],
                 raFlag = vals[4] != 0,
                 msgWaiting = vals[5],
-            )
+            ).also { _mailboxWaiting.value = it.raFlag || it.msgWaiting > 0 }
         } catch (e: Exception) {
             _error.emit("SBDSX failed: ${e.message}")
             null
@@ -434,7 +480,7 @@ class IridiumSpp(private val clock: () -> Long = System::currentTimeMillis) {
             os.flush()
 
             // "0" is success; 1 timeout, 2 bad checksum, 3 wrong size.
-            val result = readUntilOkOrTimeout(AT_TIMEOUT_MS)
+            val result = readUntilOkOrTimeout(AT_TIMEOUT_MS, link ?: throw IOException("Not connected"))
             val code = Regex("^\\s*(\\d)\\s*$", RegexOption.MULTILINE).find(result)?.groupValues?.get(1)
             if (code != "0") _error.emit("SBDWB rejected: ${code ?: result.trim()}")
             code == "0"
@@ -458,6 +504,7 @@ class IridiumSpp(private val clock: () -> Long = System::currentTimeMillis) {
             _error.emit("SBDIX held for ${hold / 1000} s after a failed session")
             return null
         }
+        val startedAt = clock()
         return try {
             // +SBDIXA marks a session that answers a ring alert (MAN0009, +SBDIX[A]).
             val resp = sendAT(if (answeringRing) "AT+SBDIXA" else "AT+SBDIX", SBDIX_TIMEOUT_MS)
@@ -485,6 +532,8 @@ class IridiumSpp(private val clock: () -> Long = System::currentTimeMillis) {
                     "MT status ${result.mtStatus}, ${result.mtQueued} waiting",
             )
             if (result.moStatus == 32 || result.moStatus == 36) sbdixHeldUntil = clock() + SBDIX_HOLD_MS
+            // Only a session that reached the gateway says anything about what waits there.
+            if (result.moSuccess) _mailboxWaiting.value = result.mtQueued > 0
             _sessionOutcomes.tryEmit(result.moSuccess)
             clearMoBuffer()
             // A message came in with this session: read it now, before another session overwrites it.
@@ -507,6 +556,16 @@ class IridiumSpp(private val clock: () -> Long = System::currentTimeMillis) {
                 }
             }
             result.copy(mt = mt)
+        } catch (e: LinkDroppedException) {
+            // The node holds the modem and finishes the session on its own (firmware since
+            // bf2ba14); the outcome never reaches this phone. The ISU registers once every 3
+            // minutes and every SBDIX registers, so the hold runs from the session's start, as
+            // it would after a 32 or 36 the node caught. The caller keeps the message for a
+            // retry: it may have been sent, and a duplicate costs one credit, a loss costs more.
+            sbdixHeldUntil = maxOf(sbdixHeldUntil, startedAt + SBDIX_HOLD_MS)
+            Log.w(TAG, "SBDIX cut: ${e.message}")
+            _error.emit("The link to the node dropped during a satellite session; its outcome is unknown")
+            SbdixResult.linkLost()
         } catch (e: Exception) {
             _error.emit("SBDIX failed: ${e.message}")
             null
@@ -557,8 +616,9 @@ class IridiumSpp(private val clock: () -> Long = System::currentTimeMillis) {
 
     @Synchronized
     private fun readMtBinaryLocked(): ByteArray? {
-        val os = outputStream ?: throw IOException("Not connected")
-        val input = inputStream ?: throw IOException("Not connected")
+        val current = link ?: throw IOException("Not connected")
+        val os = current.output
+        val input = current.input
         while (input.available() > 0) input.read()
 
         val command = "AT+SBDRB\r".toByteArray(Charsets.US_ASCII)
@@ -570,6 +630,7 @@ class IridiumSpp(private val clock: () -> Long = System::currentTimeMillis) {
         var frameStart = -1
         var needed = -1
         while (clock() < deadline) {
+            if (linkGone(current)) throw LinkDroppedException("AT+SBDRB")
             if (input.available() == 0) {
                 Thread.sleep(10)
                 continue
@@ -595,7 +656,7 @@ class IridiumSpp(private val clock: () -> Long = System::currentTimeMillis) {
                 val len = needed - frameStart - 4
                 val msg = bytes.copyOfRange(frameStart + 2, frameStart + 2 + len)
                 val sum = ((bytes[needed - 2].toInt() and 0xFF) shl 8) or (bytes[needed - 1].toInt() and 0xFF)
-                readUntilOkOrTimeout(AT_TIMEOUT_MS)
+                readUntilOkOrTimeout(AT_TIMEOUT_MS, current)
                 if (msg.sumOf { it.toInt() and 0xFF } and 0xFFFF != sum) throw IOException("SBDRB checksum mismatch")
                 return msg
             }
@@ -614,6 +675,9 @@ class IridiumSpp(private val clock: () -> Long = System::currentTimeMillis) {
         data class SessionFailed(val moStatus: Int) : MailboxResult()
 
         object NoAnswer : MailboxResult()
+
+        /** The link to the node dropped while the session ran; what it fetched, if anything, is unknown. */
+        object LinkLost : MailboxResult()
 
         /** The session ran. [received] messages were handed over, [stillQueued] more wait at the gateway. */
         data class Checked(val received: Int, val stillQueued: Int) : MailboxResult()
@@ -638,6 +702,7 @@ class IridiumSpp(private val clock: () -> Long = System::currentTimeMillis) {
         if (status?.moFlag == true && !clearMoBuffer()) return MailboxResult.NoAnswer
         // The session's message is handed over here, not through mtSink, so it is stored once.
         val result = sbdix(deliverMt = false) ?: return MailboxResult.NoAnswer
+        if (result.linkLost) return MailboxResult.LinkLost
         result.mt?.let { onMessage(it); received++ }
         if (!result.moSuccess) return MailboxResult.SessionFailed(result.moStatus)
         return MailboxResult.Checked(received, result.mtQueued)
@@ -677,11 +742,12 @@ class IridiumSpp(private val clock: () -> Long = System::currentTimeMillis) {
         return String(data, Charsets.UTF_8)
     }
 
-    private fun readUntilOkOrTimeout(timeoutMs: Long): String {
-        val input = inputStream ?: return ""
+    private fun readUntilOkOrTimeout(timeoutMs: Long, forLink: ModemLink): String {
+        val input = forLink.input
         val buf = StringBuilder()
         val deadline = clock() + timeoutMs
         while (clock() < deadline) {
+            if (linkGone(forLink)) throw LinkDroppedException("reading the modem's answer")
             if (input.available() > 0) {
                 val b = input.read()
                 if (b == -1) break
@@ -694,3 +760,9 @@ class IridiumSpp(private val clock: () -> Long = System::currentTimeMillis) {
         return buf.toString()
     }
 }
+
+/**
+ * The link a command was written on went away before the modem answered: the driver was
+ * detached, re-attached to another link, or the pipe under it was closed (MESHSAT-1372).
+ */
+class LinkDroppedException(what: String) : IOException("the link to the node dropped during $what")

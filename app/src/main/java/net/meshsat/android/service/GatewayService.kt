@@ -2417,6 +2417,9 @@ class GatewayService : Service() {
                         val written = spp.writeMoBuffer(chunk)
                         if (!written) return "Could not hand the message to the modem$part"
                         val result = spp.sbdix() ?: return "The modem gave no readable answer$part"
+                        // The Bluetooth link dropped mid-session: the node finishes it alone and the
+                        // outcome never reaches the phone (MESHSAT-1372). Possibly sent, so unconfirmed.
+                        if (result.linkLost) return "${Dispatcher.UNCONFIRMED} ${IridiumSpp.moStatusText(result.moStatus)}$part"
                         if (!result.moSuccess) {
                             val why = "status ${result.moStatus}, ${IridiumSpp.moStatusText(result.moStatus)}, MOMSN ${result.moMsn}$part"
                             // The upload may have reached the gateway before the link was cut: say so,
@@ -3115,12 +3118,17 @@ class GatewayService : Service() {
             }
         }
 
-        // Listen for Iridium MT (mobile-terminated) messages: once the modem is up, and on every
-        // ring alert. Never on a timer, because every SBDIX is billed (MESHSAT-1236).
+        // Listen for Iridium MT (mobile-terminated) messages. Once the modem is up: the free
+        // part only, a status read and whatever already sits in the MT buffer. The modem keeps its
+        // ring alert flag raised until a session clears it, and answering that flag here opened a
+        // billed session at every reconnect (six of six on the node bench of 26 Sep, MESHSAT-1372);
+        // a message the gateway holds is fetched under the same cues as a send, see
+        // fetchIridiumMailboxOnSignal. A ring alert is the modem saying the satellite is there
+        // right now, so that one is answered at once. Never on a timer (MESHSAT-1236).
         iridiumSpp?.let { spp ->
             scope.launch {
                 spp.state.collect { state ->
-                    if (state == IridiumSpp.State.Connected) pollIridiumMt(ringAlert = false)
+                    if (state == IridiumSpp.State.Connected) readIridiumMtForFree()
                 }
             }
             scope.launch {
@@ -3176,7 +3184,10 @@ class GatewayService : Service() {
             scope.launch {
                 spp.signalReadings.collect { bars ->
                     if (bars >= IRIDIUM_MIN_SIGNAL_BARS && spp.sbdixHoldRemainingMs() == 0L) {
-                        dispatcher?.drainNow("iridium_0", "the modem sees a satellite ($bars/5)")
+                        val woke = dispatcher?.drainNow("iridium_0", "the modem sees a satellite ($bars/5)") ?: 0
+                        // A send's session brings the waiting message in anyway; only with nothing
+                        // to send is a session opened for the mailbox alone (MESHSAT-1372).
+                        if (woke == 0) fetchIridiumMailboxOnSignal(bars)
                     }
                 }
             }
@@ -3200,6 +3211,37 @@ class GatewayService : Service() {
             // answers a ring alert, as the ISU AT Command Reference asks.
             spp.sbdix(answeringRing = ringAlert || status.raFlag)
         }
+    }
+
+    /**
+     * The free part of a mailbox check, for a modem that has just come up: +SBDSX (which also
+     * records whether the gateway holds a message, [IridiumSpp.mailboxWaiting]) and a read of a
+     * message already in the MT buffer. No session: a reconnect is not a reason to be billed
+     * (MESHSAT-1372).
+     */
+    private suspend fun readIridiumMtForFree() {
+        val spp = iridiumSpp ?: return
+        val status = spp.sbdStatus() ?: return
+        if (status.mtFlag) receiveIridiumMt(spp)
+        if (spp.mailboxWaiting.value) {
+            Log.i("MeshSat", "Iridium: the gateway holds a message; it is fetched when the modem sees a satellite")
+        }
+    }
+
+    /**
+     * The modem sees a satellite and nothing waits to be sent: if the gateway holds a message
+     * (by the modem's last status), fetch it now, under exactly the rules a send follows (the
+     * 32/36 hold was checked by the caller, the pass scheduler paces the readings).
+     */
+    private suspend fun fetchIridiumMailboxOnSignal(bars: Int) {
+        val spp = iridiumSpp ?: return
+        if (!spp.mailboxWaiting.value) return
+        if (spp.state.value != IridiumSpp.State.Connected) return
+        Log.i("MeshSat", "Iridium: fetching the message the gateway holds ($bars/5)")
+        val status = spp.sbdStatus() ?: return
+        if (status.mtFlag) receiveIridiumMt(spp)
+        if (!spp.mailboxWaiting.value) return
+        spp.sbdix(answeringRing = status.raFlag)
     }
 
     /** Read the MT buffer, then store and forward the message. */
@@ -3385,6 +3427,7 @@ class GatewayService : Service() {
                 val why = when (result?.moStatus) {
                     null -> if (spp.sbdixHoldRemainingMs() > 0) "held after a failed session, try again in ${spp.sbdixHoldRemainingMs() / 1000} s" else "no answer from the modem"
                     32 -> "no network (status 32)"
+                    IridiumSpp.MO_LINK_LOST -> IridiumSpp.moStatusText(IridiumSpp.MO_LINK_LOST)
                     else -> "status ${result.moStatus}"
                 }
                 postMessageNotification("Iridium send failed", why)

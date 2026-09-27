@@ -53,8 +53,14 @@ class IridiumBlePipe internal constructor(
 
     /**
      * Take the modem: subscribe to STATUS and TX and wait until STATUS says the phone owns
-     * it. Returns false if the node's own logic holds it or nothing answered in time. A
-     * node without STATUS (firmware before a5038c8) counts as owned once TX is subscribed.
+     * it. Returns false when it did not within [timeoutMs]. A node without STATUS (firmware
+     * before a5038c8) counts as owned once TX is subscribed.
+     *
+     * STATUS saying the node owns it is "wait", never a failure (MESHSAT-1372): with no phone
+     * subscribed the node uses the modem itself (firmware a95e2e5), so for up to about a second
+     * after the TX subscribe it still reads 01 02, and with a session of its own in flight it
+     * releases only after the result, up to 90 s. The owner's STATUS notification is what ends
+     * the wait; the service keeps reading STATUS back while it lasts.
      */
     suspend fun claim(timeoutMs: Long = 8_000): Boolean {
         val tx = tx ?: return false
@@ -62,10 +68,10 @@ class IridiumBlePipe internal constructor(
         // One retry each: the first write can fail while the link is still being encrypted,
         // and without STATUS notifications the handover is never heard.
         if (status != null) {
-            val watching = (1..2).any { GattCompat.setNotify(queue, gatt, status, true).await() == GattOpQueue.STATUS_SUCCESS }
+            val watching = (1..2).any { subscribe(status) }
             if (!watching) Log.w(TAG, "Iridium pipe: STATUS notifications could not be enabled; reading it instead")
         }
-        val subscribed = (1..2).any { GattCompat.setNotify(queue, gatt, tx, true).await() == GattOpQueue.STATUS_SUCCESS }
+        val subscribed = (1..2).any { subscribe(tx) }
         if (!subscribed) {
             Log.w(TAG, "Iridium pipe: TX subscription failed")
             return false
@@ -73,9 +79,28 @@ class IridiumBlePipe internal constructor(
         // Subscribing to TX is what hands the modem over: read STATUS after it, so the answer
         // arrives even when its notification does not.
         if (status == null) _owner.value = Owner.Phone else refreshStatus()
-        val owner = withTimeoutOrNull(timeoutMs) { owner.first { it == Owner.Phone || it == Owner.Node } }
-        Log.i(TAG, "Iridium pipe: claim answered ${owner ?: "nothing within ${timeoutMs / 1000} s"}")
-        return owner == Owner.Phone
+        val owner = withTimeoutOrNull(timeoutMs) { owner.first { it == Owner.Phone } }
+        if (owner == Owner.Phone) {
+            Log.i(TAG, "Iridium pipe: the phone owns the modem")
+            return true
+        }
+        val seen = _owner.value
+        Log.i(
+            TAG,
+            "Iridium pipe: no handover within ${timeoutMs / 1000} s (STATUS says $seen" +
+                (if (seen == Owner.Node) ", the node is using the modem, waiting for its release)" else ")"),
+        )
+        return false
+    }
+
+    /**
+     * One CCCD write; the ATT status of a failure is logged, because 5 and 15 (authentication,
+     * encryption) mean the link is not yet bonded and the write is worth repeating.
+     */
+    private suspend fun subscribe(c: BluetoothGattCharacteristic): Boolean {
+        val result = GattCompat.setNotify(queue, gatt, c, true).await()
+        if (result != GattOpQueue.STATUS_SUCCESS) Log.w(TAG, "Iridium pipe: subscribing to ${c.uuid} failed, status $result")
+        return result == GattOpQueue.STATUS_SUCCESS
     }
 
     /** Ask STATUS again, for a notification that may have been lost. */

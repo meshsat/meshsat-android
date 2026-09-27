@@ -32,6 +32,8 @@ class IridiumSppOverPipeTest {
         val commands: MutableList<String> = Collections.synchronizedList(mutableListOf<String>())
         var echo = true
         var sbdixReply = "+SBDIX: 0, 219, 0, 0, 0, 0"
+        /** The session never answers: the link is going to drop under it. */
+        @Volatile var sbdixSilent = false
         var csqf = 2
         var sbdsxReply = "+SBDSX: 0, 218, 0, -1, 0, 0"
         var mt: ByteArray = ByteArray(0)
@@ -114,7 +116,7 @@ class IridiumSppOverPipeTest {
                     binary.reset()
                     reply(command, "READY\r\n")
                 }
-                command == "AT+SBDIX" || command == "AT+SBDIXA" -> reply(command, "\r\n$sbdixReply\r\n\r\nOK\r\n")
+                command == "AT+SBDIX" || command == "AT+SBDIXA" -> if (!sbdixSilent) reply(command, "\r\n$sbdixReply\r\n\r\nOK\r\n")
                 command == "AT+SBDD0" -> reply(command, "\r\n0\r\n\r\nOK\r\n")
                 command == "AT+SBDD2" -> { moWritten = null; mt = ByteArray(0); reply(command, "\r\n0\r\n\r\nOK\r\n") }
                 command == "AT+SBDTC" -> {
@@ -491,6 +493,93 @@ class IridiumSppOverPipeTest {
         val before = modem.commands.size
         assertEquals(IridiumSpp.MailboxResult.NotConnected, spp.checkMailbox { })
         assertEquals(before, modem.commands.size)
+    }
+
+    @Test
+    fun `a link drop mid-session ends the command at once and the next link is probed at once`() {
+        val modem = FakeModem().apply { sbdixSilent = true }
+        val spp = attached(modem)
+        var result: IridiumSpp.SbdixResult? = null
+        val session = Thread { result = runBlocking { spp.sbdix() } }.apply { start() }
+        Thread.sleep(300)
+        assertTrue(session.isAlive)
+
+        // Bluetooth goes: the service detaches the driver and, on the reconnect, attaches the
+        // new pipe. Before MESHSAT-1372 the first attach's probe queued behind the cut session
+        // for its full 95 s ("cannot find the modem" for a minute on the node bench of 26 Sep).
+        val dropped = System.currentTimeMillis()
+        spp.detach()
+        session.join(3_000)
+        assertFalse(session.isAlive)
+        assertTrue(result!!.linkLost)
+        assertEquals(IridiumSpp.MO_LINK_LOST, result!!.moStatus)
+        assertFalse(result!!.moSuccess)
+
+        val next = FakeModem()
+        attached(next)
+        assertTrue("probed within ${System.currentTimeMillis() - dropped} ms", System.currentTimeMillis() - dropped < 3_000)
+        assertEquals("300434067943980", spp.modemInfo.value.imei)
+
+        // The node finished that session on its own and the phone never learns the outcome: the
+        // hold runs the 3 minutes from the session's start, as after a 32 or 36 the node caught.
+        val hold = spp.sbdixHoldRemainingMs()
+        assertTrue("hold $hold", hold in 1..IridiumSpp.SBDIX_HOLD_MS)
+        assertNull(runBlocking { spp.sbdix() })
+        assertFalse(next.commands.contains("AT+SBDIX"))
+    }
+
+    @Test
+    fun `a pipe closed under the driver ends the command too`() {
+        val modem = FakeModem().apply { sbdixSilent = true }
+        val spp = attached(modem)
+        var result: IridiumSpp.SbdixResult? = null
+        val session = Thread { result = runBlocking { spp.sbdix() } }.apply { start() }
+        Thread.sleep(300)
+        modem.input.close()
+        session.join(3_000)
+        assertFalse(session.isAlive)
+        assertTrue(result!!.linkLost)
+    }
+
+    @Test
+    fun `a mailbox check cut by the link says so`() = runBlocking {
+        val modem = FakeModem().apply { sbdixSilent = true }
+        val spp = attached(modem)
+        var outcome: IridiumSpp.MailboxResult? = null
+        val checker = CoroutineScope(Dispatchers.IO).launch { outcome = spp.checkMailbox { } }
+        Thread.sleep(300)
+        spp.detach()
+        // Not "the modem did not answer": it may well have, to the node.
+        assertTrue(kotlinx.coroutines.withTimeoutOrNull(3_000) { checker.join() } != null)
+        assertEquals(IridiumSpp.MailboxResult.LinkLost, outcome)
+    }
+
+    @Test
+    fun `what the modem says the gateway holds is remembered, and only a session that got through updates it`() = runBlocking {
+        val modem = FakeModem()
+        val spp = attached(modem)
+        assertFalse(spp.mailboxWaiting.value)
+
+        // The ring alert flag stays up in the modem until a session clears it; a reconnect used
+        // to answer it with a billed session every time (MESHSAT-1372).
+        modem.sbdsxReply = "+SBDSX: 0, 218, 0, -1, 1, 0"
+        spp.sbdStatus()
+        assertTrue(spp.mailboxWaiting.value)
+
+        modem.sbdixReply = "+SBDIX: 32, 218, 0, 0, 0, 0"
+        spp.sbdix()
+        assertTrue("no network says nothing about the mailbox", spp.mailboxWaiting.value)
+
+        now += IridiumSpp.SBDIX_HOLD_MS
+        modem.sbdixReply = "+SBDIX: 0, 219, 0, 0, 0, 0"
+        spp.sbdix()
+        assertFalse(spp.mailboxWaiting.value)
+
+        modem.sbdixReply = "+SBDIX: 0, 220, 1, 7, 5, 2"
+        modem.mt = "one".toByteArray()
+        spp.mtSink = { }
+        spp.sbdix()
+        assertTrue("two more wait at the gateway", spp.mailboxWaiting.value)
     }
 
     @Test

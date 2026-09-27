@@ -32,6 +32,21 @@ class RnsInterfaceTest {
     }
 
     @Test
+    fun `mesh encodePrivateApp is what the node's decoder expects`() {
+        // The node answered the hand-rolled encoding with "wrong wire type" and dropped every
+        // Reticulum announce (MESHSAT-1372): MeshPacket.to is a fixed32, not a varint.
+        val payload = byteArrayOf(0x00, 0x7F, 0x00.toByte(), 0x11)
+        val toRadio = com.geeksville.mesh.MeshProtos.ToRadio.parseFrom(RnsMeshInterface.encodePrivateApp(payload, 0x12345678L, 3))
+        assertTrue(toRadio.hasPacket())
+        assertEquals(0x12345678, toRadio.packet.to)
+        assertEquals(3, toRadio.packet.channel)
+        assertEquals(com.geeksville.mesh.Portnums.PortNum.PRIVATE_APP, toRadio.packet.decoded.portnum)
+        assertArrayEquals(payload, toRadio.packet.decoded.payload.toByteArray())
+        val broadcast = com.geeksville.mesh.MeshProtos.ToRadio.parseFrom(RnsMeshInterface.encodePrivateApp(payload))
+        assertEquals(-1, broadcast.packet.to)
+    }
+
+    @Test
     fun `mesh encodePrivateApp round-trips with extractPrivateApp`() {
         val payload = "hello reticulum mesh".toByteArray()
         val toRadio = RnsMeshInterface.encodePrivateApp(payload)
