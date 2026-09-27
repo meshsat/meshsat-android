@@ -130,6 +130,25 @@ class GatewayService : Service() {
         const val IRIDIUM_DELIVERED = "iridium:delivered"
         /** A signal reading this strong sends what waits for the satellite at once (the Bridge's min_signal_bars). */
         const val IRIDIUM_MIN_SIGNAL_BARS = 1
+
+        /**
+         * The windows the node gets (MESHSAT-1378): passes not yet over at [nowSec], soonest
+         * first, at most [IridiumPipeContract.PASS_MAX_WINDOWS]. The predictor's own elevation
+         * mask (5 degrees) already applies; the node needs no lower one.
+         */
+        fun passWindowsForNode(passes: List<net.meshsat.android.satellite.PassPrediction>, nowSec: Long): List<IridiumPipeContract.PassWindow> =
+            passes.asSequence()
+                .filter { it.losUnix > nowSec && it.losUnix > it.aosUnix }
+                .sortedBy { it.aosUnix }
+                .take(IridiumPipeContract.PASS_MAX_WINDOWS)
+                .map {
+                    IridiumPipeContract.PassWindow(
+                        startEpochS = it.aosUnix,
+                        durationS = (it.losUnix - it.aosUnix).coerceAtMost(0xFFFF).toInt(),
+                        maxElevDeg = it.peakElevDeg.toInt().coerceIn(0, 90),
+                    )
+                }
+                .toList()
         /** How often the node is asked again for its modem while the phone does not hold it. */
         private const val PIPE_CLAIM_RETRY_MS = 15_000L
         private const val PIPE_CLAIM_FIRST_RETRY_MS = 3_000L
@@ -368,6 +387,7 @@ class GatewayService : Service() {
             observeTransports()
             reconnectSavedNode()
             observeIridiumPipe()
+            observePassWindows()
             observeIridiumStatusIcon()
             startSignalPolling()
             startLocationUpdates()
@@ -2846,6 +2866,8 @@ class GatewayService : Service() {
             }.collectLatest { (pipe, enabled, wanted) ->
                 spp.detach()
                 if (pipe == null) return@collectLatest
+                // The node's health (contract v2 STATS) is shown whoever holds the modem.
+                pipe.watchStats()
                 if (!enabled || !wanted) {
                     pipe.release()
                     return@collectLatest
@@ -2879,6 +2901,27 @@ class GatewayService : Service() {
                     }
                 }
             }
+        }
+    }
+
+    /**
+     * Give the node the next pass windows (contract v2 PASS, MESHSAT-1378) whenever the
+     * prediction changes or a new link comes up: the node's own routing, while no phone holds
+     * the modem, opens routine sessions inside them. Advice only; never a signal gate.
+     */
+    private fun observePassWindows() {
+        val ble = meshtasticBle ?: return
+        scope.launch {
+            combine(ble.iridiumPipe, passes) { pipe, passes -> pipe to passes }
+                .collectLatest { (pipe, passes) ->
+                    if (pipe == null || !pipe.hasPass) return@collectLatest
+                    val windows = passWindowsForNode(passes, System.currentTimeMillis() / 1000)
+                    if (windows == pipe.passesWritten) return@collectLatest
+                    if (pipe.writePasses(windows)) {
+                        pipe.passesWritten = windows
+                        Log.i("MeshSat", "Iridium: ${windows.size} pass windows given to the node")
+                    }
+                }
         }
     }
 

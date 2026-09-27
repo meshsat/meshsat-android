@@ -10,7 +10,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
+import net.meshsat.android.ble.IridiumPipeContract.NodeStats
+import net.meshsat.android.ble.IridiumPipeContract.NodeStatus
 import net.meshsat.android.ble.IridiumPipeContract.Owner
+import net.meshsat.android.ble.IridiumPipeContract.PassWindow
 import java.io.InputStream
 import java.io.OutputStream
 import java.util.UUID
@@ -33,13 +36,31 @@ class IridiumBlePipe internal constructor(
 ) {
     private val rx: BluetoothGattCharacteristic? = service.getCharacteristic(UUID.fromString(IridiumPipeContract.RX_UUID))
     private val tx: BluetoothGattCharacteristic? = service.getCharacteristic(UUID.fromString(IridiumPipeContract.TX_UUID))
-    private val status: BluetoothGattCharacteristic? = service.getCharacteristic(UUID.fromString(IridiumPipeContract.STATUS_UUID))
+    private val statusChar: BluetoothGattCharacteristic? = service.getCharacteristic(UUID.fromString(IridiumPipeContract.STATUS_UUID))
+    private val statsChar: BluetoothGattCharacteristic? = service.getCharacteristic(UUID.fromString(IridiumPipeContract.STATS_UUID))
+    private val passChar: BluetoothGattCharacteristic? = service.getCharacteristic(UUID.fromString(IridiumPipeContract.PASS_UUID))
 
     /** False when the service lacks RX or TX: nothing here can be used. */
     val usable: Boolean = rx != null && tx != null
 
+    /** The node serves contract v2's STATS (MESHSAT-1378); older firmware does not. */
+    val hasStats: Boolean = statsChar != null
+
+    /** The node takes pass windows (contract v2, MESHSAT-1378). */
+    val hasPass: Boolean = passChar != null
+
     private val _owner = MutableStateFlow(Owner.Unknown)
     val owner: StateFlow<Owner> = _owner
+
+    private val _status = MutableStateFlow<NodeStatus?>(null)
+
+    /** The whole STATUS value, flags and signal included on a v2 node; null until read. */
+    val status: StateFlow<NodeStatus?> = _status
+
+    private val _stats = MutableStateFlow<NodeStats?>(null)
+
+    /** The node's health as it reports it on STATS; null until read, or on a v1 node. */
+    val stats: StateFlow<NodeStats?> = _stats
 
     val input = PipeInputStream()
     val output: OutputStream = PipeOutputStream(
@@ -50,6 +71,9 @@ class IridiumBlePipe internal constructor(
 
     /** Sees every notified chunk too, for in-band lines such as SBDRING. */
     @Volatile var onReceive: ((ByteArray) -> Unit)? = null
+
+    /** The pass list this link last gave the node, so an unchanged prediction is not rewritten. */
+    @Volatile var passesWritten: List<PassWindow>? = null
 
     /**
      * Take the modem: subscribe to STATUS and TX and wait until STATUS says the phone owns
@@ -64,7 +88,7 @@ class IridiumBlePipe internal constructor(
      */
     suspend fun claim(timeoutMs: Long = 8_000): Boolean {
         val tx = tx ?: return false
-        val status = status
+        val status = statusChar
         // One retry each: the first write can fail while the link is still being encrypted,
         // and without STATUS notifications the handover is never heard.
         if (status != null) {
@@ -105,13 +129,39 @@ class IridiumBlePipe internal constructor(
 
     /** Ask STATUS again, for a notification that may have been lost. */
     fun refreshStatus() {
-        status?.let { GattCompat.read(queue, gatt, it) }
+        statusChar?.let { GattCompat.read(queue, gatt, it) }
+    }
+
+    /**
+     * Subscribe to STATS and read it once (MESHSAT-1378). Independent of the claim: the node's
+     * health is worth showing whoever holds the modem. A node without STATS is left alone.
+     */
+    suspend fun watchStats() {
+        val c = statsChar ?: return
+        if (!subscribe(c)) Log.w(TAG, "Iridium pipe: STATS notifications could not be enabled; reading it once")
+        GattCompat.read(queue, gatt, c)
+    }
+
+    /**
+     * Give the node the next pass windows (MESHSAT-1378): one write with response, replacing
+     * its list. False when the node has no PASS characteristic or the write failed. Advice for
+     * the node's own routing while no phone holds the modem; the node takes it from any client.
+     */
+    suspend fun writePasses(windows: List<PassWindow>): Boolean {
+        val c = passChar ?: return false
+        val value = IridiumPipeContract.encodePassList(windows)
+        val op = queue.enqueue("w:${c.uuid}") {
+            GattCompat.write(gatt, c, value, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)
+        }
+        val result = op.await()
+        if (result != GattOpQueue.STATUS_SUCCESS) Log.w(TAG, "Iridium pipe: PASS write of ${windows.size} windows failed, status $result")
+        return result == GattOpQueue.STATUS_SUCCESS
     }
 
     /** Hand the modem back to the node. */
     suspend fun release() {
         tx?.let { GattCompat.setNotify(queue, gatt, it, false).await() }
-        if (status == null) _owner.value = Owner.None
+        if (statusChar == null) _owner.value = Owner.None
         input.clear()
     }
 
@@ -122,9 +172,15 @@ class IridiumBlePipe internal constructor(
                 onReceive?.invoke(value)
             }
             IridiumPipeContract.STATUS_UUID -> {
-                val next = IridiumPipeContract.parseStatus(value)
+                val full = IridiumPipeContract.parseStatusFull(value)
+                val next = full?.owner ?: Owner.Unknown
                 if (next != Owner.Phone && _owner.value == Owner.Phone) input.clear()
+                _status.value = full
                 _owner.value = next
+            }
+            IridiumPipeContract.STATS_UUID -> {
+                IridiumPipeContract.parseStats(value)?.let { _stats.value = it }
+                    ?: Log.w(TAG, "Iridium pipe: STATS value of ${value.size} bytes not understood")
             }
         }
     }
@@ -162,7 +218,7 @@ class IridiumBlePipe internal constructor(
         val SERVICE_UUID: UUID = UUID.fromString(IridiumPipeContract.SERVICE_UUID)
 
         fun isPipeCharacteristic(uuid: UUID): Boolean = uuid.toString().let {
-            it == IridiumPipeContract.TX_UUID || it == IridiumPipeContract.STATUS_UUID
+            it == IridiumPipeContract.TX_UUID || it == IridiumPipeContract.STATUS_UUID || it == IridiumPipeContract.STATS_UUID
         }
     }
 }
