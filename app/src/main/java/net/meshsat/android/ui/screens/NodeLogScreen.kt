@@ -55,8 +55,9 @@ import net.meshsat.android.ui.theme.MeshSatTextPrimary
 /**
  * Settings > Advanced > Node log (MESHSAT-1374): the node's live log over Bluetooth, the same
  * lines its serial console prints, so a bench session needs no USB cable. The switch sets
- * security.debug_log_api_enabled on the node (a setting the node keeps); the screen follows
- * LogRadio only while it is open. Lines newest at the bottom, paused lines held and appended on
+ * security.debug_log_api_enabled on the node (a setting the node keeps; a security set makes
+ * the node restart once, upstream AdminModule behaviour, and the app reconnects); the screen
+ * follows LogRadio only while it is open. Lines newest at the bottom, paused lines held and appended on
  * resume, at most 2000 kept. Same screen on iOS.
  */
 @Composable
@@ -121,7 +122,7 @@ fun NodeLogScreen() {
             text = when {
                 !connected -> "Connect your MeshSat node first."
                 streaming -> "The node sends every log line while this switch is on; it may drop lines in a burst. Newest at the bottom."
-                else -> "Sets the node's debug log over Bluetooth (security.debug_log_api_enabled); a setting the node keeps."
+                else -> "Sets the node's debug log over Bluetooth (security.debug_log_api_enabled); a setting the node keeps. The node restarts once to apply it, and the link comes back by itself."
             },
             style = MaterialTheme.typography.bodySmall,
             color = MeshSatTextMuted,

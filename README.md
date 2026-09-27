@@ -91,7 +91,7 @@ Routing rules (Setup > Advanced > Routing rules) decide what is forwarded betwee
 - **Records.** A message queue with everything waiting, sent or given up, and config export and import in YAML or JSON, in the same format as the Bridge.
 - **Local API** on 127.0.0.1:6051, for testing and automation.
 
-The map works without internet down to country level, from a world overview built into the app. The gateway runs as a foreground service, so the phone keeps relaying with the screen off; to have it start again after a phone restart, switch on **Start after a phone restart** in Setup > Advanced > Diagnostics (off by default). Setup > Advanced > **Node log** shows the node's own log over Bluetooth, the same lines its USB console prints, with pause, clear and share; its switch sets the node's debug log setting, which the node keeps. **Night mode**, the moon on Home, turns the whole app red to keep your night vision.
+The map works without internet down to country level, from a world overview built into the app. The gateway runs as a foreground service, so the phone keeps relaying with the screen off; to have it start again after a phone restart, switch on **Start after a phone restart** in Setup > Advanced > Diagnostics (off by default). Setup > Advanced > **Node log** shows the node's own log over Bluetooth, the same lines its USB console prints, with pause, clear and share; its switch sets the node's debug log setting, which the node keeps; the node restarts once to apply it. **Night mode**, the moon on Home, turns the whole app red to keep your night vision.
 
 ## What works, and what does not
 
