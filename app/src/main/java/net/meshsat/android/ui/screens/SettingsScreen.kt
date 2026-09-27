@@ -591,6 +591,34 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
             }
         }
 
+        // --- The node's own view of its modem (contract v2 STATS, MESHSAT-1378) ---
+        if (section.shows(SetupSection.Satellite)) {
+            val pipe = iridiumPipe
+            if (pipe != null && pipe.hasStats) {
+                val stats by pipe.stats.collectAsState()
+                SectionCard("Node health") {
+                    val s = stats
+                    if (s == null) {
+                        Text(
+                            text = "Waiting for the node's report.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MeshSatTextMuted,
+                        )
+                    } else {
+                        for ((label, value) in net.meshsat.android.ble.NodeStatsText.rows(s)) InfoRow(label, value)
+                        net.meshsat.android.ble.NodeStatsText.warning(s)?.let {
+                            Text(text = it, style = MaterialTheme.typography.bodySmall, color = MeshSatAmber)
+                        }
+                        Text(
+                            text = "What the node reports about its own modem, whoever holds it. The signal here is information, never a reason to hold a send.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MeshSatTextMuted,
+                        )
+                    }
+                }
+            }
+        }
+
         // --- Iridium RockBLOCK 9704 (JSPR/IMT) Section ---
         // Few people have a 9704 on an HC-05: the card stays folded away until one has been
         // connected, or someone asks for it (MESHSAT-1249).

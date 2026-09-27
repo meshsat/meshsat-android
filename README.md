@@ -66,7 +66,7 @@ You need Android 8.0 or later.
 ## Getting started
 
 1. **Pair your node.** In Setup, open **Your MeshSat node**, tap **Scan for Meshtastic devices**, then **Connect** next to your node and enter its Bluetooth PIN. The scan lists every Meshtastic device in range, so pick the node by its name (a v0 node advertises as `MSIR_` plus four hex digits). A plain Meshtastic radio pairs the same way.
-2. **Satellite.** With **Use the node's modem** on (the default), the app uses the node's RockBLOCK while it is connected. Setup > Satellite shows the modem, with **Poll Signal** and **Check Mailbox**. After a restart the app reconnects to the same node and takes the modem back by itself.
+2. **Satellite.** With **Use the node's modem** on (the default), the app uses the node's RockBLOCK while it is connected. Setup > Satellite shows the modem, with **Poll Signal** and **Check Mailbox**, and a **Node health** card with what the node reports about its own modem: who holds it, its last signal reading, sessions and their results, and the node's own satellite routing. After a restart the app reconnects to the same node and takes the modem back by itself.
 3. **Hub (optional).** Setup > Hub > **Scan the Hub's QR code**, with the QR code from the Hub. That sets the Hub address, credentials and client certificate.
 4. **SMS.** In Setup > SMS, tap **Allow SMS** and fill in the **Kit phone number**.
 5. **Emergency contacts.** In Setup > Safety, add the people an SOS goes to by SMS, then tap **Test the alarm** to see every route work.

@@ -18,10 +18,36 @@ object IridiumPipeContract {
     /** Modem -> phone: notify. Subscribing is what takes the modem. */
     const val TX_UUID = "469354dc-4c89-41ed-b939-d707c7a11f49"
 
-    /** [version, owner], read + notify on every owner change. */
+    /**
+     * [version, owner] in contract v1; [version, owner, flags, csq] in v2 (MESHSAT-1378). Read +
+     * notify on every change. A client reads only what is there: 2 or 4 bytes.
+     */
     const val STATUS_UUID = "69a4064d-78b9-46e5-a30a-1862e553245a"
 
     const val STATUS_VERSION = 1
+
+    /** STATUS with the flags and signal bytes after the owner. */
+    const val STATUS_VERSION_2 = 2
+
+    /**
+     * Contract v2 (MESHSAT-1378): 52 bytes of node health, little-endian, read + notify (on
+     * change, at most every 2 s). Layout in meshsat-esp32/docs/IRIDIUM-BLE.md, "Version 2".
+     */
+    const val STATS_UUID = "9c22cf07-2256-4fc2-b6ee-ab0ceb12198d"
+
+    const val STATS_VERSION = 2
+    const val STATS_BYTES = 52
+
+    /**
+     * Contract v2 (MESHSAT-1378): pass windows from the phone, write with response:
+     * [01][n][n x (u32 start epoch s, u16 duration s, u8 peak elevation deg)], little-endian,
+     * n at most [PASS_MAX_WINDOWS]. A write replaces the node's list; it times the node's OWN
+     * sessions when no phone holds the modem, and is never a signal gate on either side.
+     */
+    const val PASS_UUID = "5c1000e8-f411-4f3d-a4c9-5ee0610a8e66"
+
+    const val PASS_VERSION = 1
+    const val PASS_MAX_WINDOWS = 8
 
     /** The node keeps 1024 bytes from the phone; writes go out acknowledged, in chunks. */
     const val NODE_INBOUND_BYTES = 1024
@@ -31,15 +57,124 @@ object IridiumPipeContract {
 
     enum class Owner { Unknown, None, Phone, Node }
 
-    /** Decode the STATUS value; an unknown contract version reads as [Owner.Unknown]. */
-    fun parseStatus(value: ByteArray?): Owner {
-        if (value == null || value.size < 2 || value[0].toInt() != STATUS_VERSION) return Owner.Unknown
-        return when (value[1].toInt()) {
-            0 -> Owner.None
-            1 -> Owner.Phone
-            2 -> Owner.Node
-            else -> Owner.Unknown
+    /** The flags byte of STATUS v2 and STATS. */
+    data class StatusFlags(
+        val sessionInFlight: Boolean,
+        val messageWaiting: Boolean,
+        val modemAnswers: Boolean,
+        val bufferCongested: Boolean,
+    ) {
+        companion object {
+            fun of(b: Int) = StatusFlags(
+                sessionInFlight = b and 0x01 != 0,
+                messageWaiting = b and 0x02 != 0,
+                modemAnswers = b and 0x04 != 0,
+                bufferCongested = b and 0x08 != 0,
+            )
         }
+    }
+
+    /** Everything a STATUS value carries; [flags] and [csq] are null on a v1 (2-byte) value. */
+    data class NodeStatus(val owner: Owner, val flags: StatusFlags?, val csq: Int?)
+
+    /** The STATS value (52 bytes). Null fields are the node's "unknown" markers. */
+    data class NodeStats(
+        val owner: Owner,
+        val flags: StatusFlags,
+        /** 0-5 as the modem last reported it; null when never read. */
+        val csq: Int?,
+        val csqAgeS: Long?,
+        val sessions: Long,
+        /** +SBDIX MO status of the last session, by any owner; null before the first. */
+        val lastMoStatus: Int?,
+        val lastMomsn: Int,
+        val lastMtStatus: Int?,
+        val lastMtQueued: Int,
+        val lastSessionAgeS: Long?,
+        val uptimeS: Long,
+        val watchdogReboots: Long,
+        val phoneBytesDropped: Long,
+        val nodeSessions: Long,
+        val nodeSent: Long,
+        val nodeReceived: Long,
+        val daySessionsUsed: Int,
+        val daySessionsCap: Int,
+    )
+
+    /** One pass window for the node: when a satellite is up, from the phone's prediction. */
+    data class PassWindow(val startEpochS: Long, val durationS: Int, val maxElevDeg: Int)
+
+    private fun ownerOf(b: Int): Owner = when (b) {
+        0 -> Owner.None
+        1 -> Owner.Phone
+        2 -> Owner.Node
+        else -> Owner.Unknown
+    }
+
+    /** Decode the STATUS value's owner; an unknown contract version reads as [Owner.Unknown]. */
+    fun parseStatus(value: ByteArray?): Owner = parseStatusFull(value)?.owner ?: Owner.Unknown
+
+    /**
+     * Decode a STATUS value of contract v1 (2 bytes) or v2 (4 bytes), reading only what is
+     * there (MESHSAT-1378). Null for a version this app does not know.
+     */
+    fun parseStatusFull(value: ByteArray?): NodeStatus? {
+        if (value == null || value.size < 2) return null
+        val version = value[0].toInt() and 0xFF
+        if (version != STATUS_VERSION && version != STATUS_VERSION_2) return null
+        val owner = ownerOf(value[1].toInt() and 0xFF)
+        if (value.size < 4) return NodeStatus(owner, null, null)
+        return NodeStatus(owner, StatusFlags.of(value[2].toInt() and 0xFF), csqOf(value[3]))
+    }
+
+    private fun csqOf(b: Byte): Int? = (b.toInt() and 0xFF).let { if (it > 5) null else it }
+
+    /** Decode a STATS value; null when shorter than [STATS_BYTES] or of another version. */
+    fun parseStats(value: ByteArray?): NodeStats? {
+        if (value == null || value.size < STATS_BYTES) return null
+        if ((value[0].toInt() and 0xFF) != STATS_VERSION) return null
+        fun u8(o: Int) = value[o].toInt() and 0xFF
+        fun u16(o: Int) = u8(o) or (u8(o + 1) shl 8)
+        fun i16(o: Int) = u16(o).toShort().toInt()
+        fun u32(o: Int) = u16(o).toLong() or (u16(o + 2).toLong() shl 16)
+        fun age(o: Int): Long? = u32(o).let { if (it == 0xFFFFFFFFL) null else it }
+        return NodeStats(
+            owner = ownerOf(u8(1)),
+            flags = StatusFlags.of(u8(2)),
+            csq = csqOf(value[3]),
+            csqAgeS = age(4),
+            sessions = u32(8),
+            lastMoStatus = i16(12).let { if (it < 0) null else it },
+            lastMomsn = u16(14),
+            lastMtStatus = i16(16).let { if (it < 0) null else it },
+            lastMtQueued = u16(18),
+            lastSessionAgeS = age(20),
+            uptimeS = u32(24),
+            watchdogReboots = u32(28),
+            phoneBytesDropped = u32(32),
+            nodeSessions = u32(36),
+            nodeSent = u32(40),
+            nodeReceived = u32(44),
+            daySessionsUsed = u8(48),
+            daySessionsCap = u8(49),
+        )
+    }
+
+    /** Encode the PASS value from the first [PASS_MAX_WINDOWS] of [windows]. */
+    fun encodePassList(windows: List<PassWindow>): ByteArray {
+        val kept = windows.take(PASS_MAX_WINDOWS)
+        val out = java.io.ByteArrayOutputStream(2 + 7 * kept.size)
+        out.write(PASS_VERSION)
+        out.write(kept.size)
+        for (w in kept) {
+            val start = w.startEpochS.coerceIn(0, 0xFFFFFFFFL)
+            for (i in 0 until 4) out.write(((start shr (8 * i)) and 0xFF).toInt())
+            val dur = w.durationS.coerceIn(0, 0xFFFF)
+            out.write(dur and 0xFF)
+            out.write((dur shr 8) and 0xFF)
+            out.write(w.maxElevDeg.coerceIn(0, 90))
+        }
+        return out.toByteArray()
     }
 }
 
