@@ -72,6 +72,7 @@ import net.meshsat.android.ui.components.NodeLinkBanner
 import net.meshsat.android.ui.screens.SosBanner
 import net.meshsat.android.ui.screens.SosScreen
 import net.meshsat.android.ui.screens.AdvancedScreen
+import net.meshsat.android.ui.screens.NodeLogScreen
 import net.meshsat.android.ui.screens.AuditScreen
 import net.meshsat.android.ui.screens.ConversationChatView
 import net.meshsat.android.ui.screens.CredentialsScreen
@@ -261,6 +262,7 @@ fun MeshSatUI(openRoute: String? = null, onRouteOpened: () -> Unit = {}) {
                 composable("audit") { SubScreen("Audit log", back) { AuditScreen() } }
                 composable("credentials") { SubScreen("Certificates and keys", back) { CredentialsScreen() } }
                 composable("decrypt") { SubScreen("Encrypt or decrypt text", back) { DecryptScreen() } }
+                composable("nodelog") { SubScreen("Node log", back) { NodeLogScreen() } }
                 composable("about") { SubScreen("About", back) { AboutScreen() } }
                 composable("sos") { SubScreen("SOS", back) { SosScreen(navigate) } }
             }
