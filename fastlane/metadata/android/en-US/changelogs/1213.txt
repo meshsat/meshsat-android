@@ -1,0 +1,1 @@
+Node health card and pass windows now appear on a node whose firmware gained them while the phone stayed paired: the app refreshes Android's cached Bluetooth table once and looks again.
