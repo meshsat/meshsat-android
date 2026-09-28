@@ -67,4 +67,4 @@ git -c user.name="Kyriakos Papadopoulos" -c user.email="ncpjfuzl@mxmx.email" com
 - Tag `v<X.Y.Z>` on the bump commit.
 - Build the signed fdroid APKs via `assembleFdroidRelease` and the Google Play AAB via `bundlePlayRelease` (signing keys in OpenBao). Two flavors: `fdroid` (full) and `play` (no SMS, MESHSAT-1335).
 - Upload APK to GitLab Releases under the tag.
-- The play AAB is uploaded to the Play Console by hand for now; a Publisher API job is a follow-up once the app exists there.
+- The play AAB goes to the Play Console through the `publish-play` job (`scripts/publish-play.py`, Publisher API, track `PLAY_TRACK`, MESHSAT-1341). The job is manual until the first production release is live on Google Play (MESHSAT-1395): Google counts review time from the last submitted change, so a tag does not upload by itself while a review is pending.
