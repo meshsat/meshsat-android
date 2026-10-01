@@ -65,6 +65,34 @@ object HubTopics {
     fun deviceSOS(deviceID: String) = "meshsat/$deviceID/sos"
     fun deviceMODecoded(deviceID: String) = "meshsat/$deviceID/mo/decoded"
 
+    /**
+     * Where this bridge exports the Cursor-on-Target it builds ("MQTT Export to Hub"). The bridge's
+     * own subtree: the broker lets every bridge publish there and nowhere device-shaped for TAK, and
+     * the Hub forwards what arrives to the tenant's TAK servers (MESHSAT-1463, meshsat-hub 1458).
+     */
+    fun takCotOut(bridgeID: String) = "meshsat/bridge/${segment(bridgeID)}/tak/cot/out"
+
+    /**
+     * What the Hub delivers back (meshsat-hub MESHSAT-1461): an event from one of the tenant's TAK
+     * servers on this topic, and an event another bridge of the tenant exported one level below it,
+     * with that bridge's id as the last segment.
+     */
+    const val TAK_COT_IN = "meshsat/broadcast/tak/cot/in"
+
+    /** The two subscriptions that receive what the Hub delivers. */
+    fun takCotInFilters(): Array<String> = arrayOf(TAK_COT_IN, "$TAK_COT_IN/+")
+
+    /**
+     * The bridge that exported a delivered event, as the topic names it (percent-encoded, as
+     * [segment] writes it), or "" for an event from a TAK server and for any other topic.
+     */
+    fun takCotSender(topic: String): String {
+        val prefix = "$TAK_COT_IN/"
+        if (!topic.startsWith(prefix)) return ""
+        val rest = topic.substring(prefix.length)
+        return if (rest.isEmpty() || rest.contains('/')) "" else rest
+    }
+
     /** A topic segment as the Hub writes it: + # / % percent-encoded (meshsat-hub hubmqtt.EncodeSegment). */
     fun segment(id: String): String =
         id.replace("%", "%25").replace("+", "%2B").replace("#", "%23").replace("/", "%2F")

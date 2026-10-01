@@ -392,6 +392,7 @@ class GatewayService : Service() {
             startSignalPolling()
             startLocationUpdates()
             initMsvqsc()
+            initTak()
             initMqtt()
             initSmsRelay()
             initAprs()
@@ -736,6 +737,53 @@ class GatewayService : Service() {
         }
     }
 
+    /** The id this phone has at the Hub: the provisioning bundle's, else the device's own. */
+    private suspend fun hubBridgeId(): String =
+        settings.hubBridgeId.first().ifEmpty {
+            android.provider.Settings.Secure.getString(
+                contentResolver,
+                android.provider.Settings.Secure.ANDROID_ID,
+            ) ?: "android-unknown"
+        }
+
+    /**
+     * Initialize TAK/CoT (MESHSAT-191, MESHSAT-451, MESHSAT-1463).
+     *
+     * On its own, not inside initMqtt: that is the generic MQTT client, which is off unless
+     * somebody configures it, and nothing does, so TAK was never built at all. The export rides the
+     * Hub session instead, as on iOS; hubReporter is read when an event is emitted, because the Hub
+     * session starts after this and may come and go.
+     *
+     * With "Enable TAK" off nothing is emitted, to the Hub or to ATAK. The object is still built so
+     * an inbound event can be parsed for the map.
+     */
+    private fun initTak() {
+        scope.launch {
+            try {
+                val takEn = settings.takEnabled.first()
+                val takPrefix = settings.takCallsignPrefix.first().ifBlank { "MESHSAT" }
+                val takAtak = settings.takAtakBroadcast.first()
+                val takMqtt = settings.takMqttExport.first()
+                takIntegration = net.meshsat.android.tak.TakIntegration(
+                    context = this@GatewayService,
+                    publish = { xml -> hubReporter?.publishTakCot(xml) },
+                    deviceId = hubBridgeId(),
+                    callsignPrefix = takPrefix,
+                    atakBroadcastEnabled = takAtak,
+                    mqttExportEnabled = takMqtt,
+                    enabled = takEn,
+                )
+                if (!takEn) {
+                    Log.d("MeshSat", "TAK/CoT disabled in settings")
+                } else {
+                    Log.i("MeshSat", "TAK/CoT integration initialized: callsign=${takIntegration?.callsign} atak=$takAtak hub=$takMqtt")
+                }
+            } catch (e: Exception) {
+                Log.e("MeshSat", "TAK/CoT init failed: ${e.message}")
+            }
+        }
+    }
+
     /** Initialize Hub MQTT transport if enabled in settings. */
     private fun initMqtt() {
         scope.launch {
@@ -776,25 +824,6 @@ class GatewayService : Service() {
                 )
                 Log.i("MeshSat", "RNS MQTT interface initialized for device $mqttDeviceId")
 
-                // Initialize TAK/CoT integration (MESHSAT-191, MESHSAT-451)
-                val takEn = settings.takEnabled.first()
-                val takPrefix = settings.takCallsignPrefix.first().ifBlank { "MESHSAT" }
-                val takAtak = settings.takAtakBroadcast.first()
-                val takMqtt = settings.takMqttExport.first()
-                takIntegration = net.meshsat.android.tak.TakIntegration(
-                    context = this@GatewayService,
-                    mqtt = if (takEn) transport else null,
-                    deviceId = deviceId,
-                    callsignPrefix = takPrefix,
-                    atakBroadcastEnabled = takAtak,
-                    mqttExportEnabled = takMqtt,
-                )
-                if (!takEn) {
-                    Log.d("MeshSat", "TAK/CoT disabled in settings")
-                } else {
-                    Log.i("MeshSat", "TAK/CoT integration initialized: callsign=${takIntegration?.callsign} atak=$takAtak mqtt=$takMqtt")
-                }
-
                 // Observe state for InterfaceManager
                 scope.launch {
                     transport.state.collect { state ->
@@ -827,12 +856,7 @@ class GatewayService : Service() {
                     return@launch
                 }
                 val hubUrl = settings.hubUrl.first()
-                val bridgeId = settings.hubBridgeId.first().ifEmpty {
-                    android.provider.Settings.Secure.getString(
-                        contentResolver,
-                        android.provider.Settings.Secure.ANDROID_ID,
-                    ) ?: "android-unknown"
-                }
+                val bridgeId = hubBridgeId()
                 if (hubUrl.isBlank()) {
                     Log.w("MeshSat", "Hub Reporter: URL not configured")
                     return@launch

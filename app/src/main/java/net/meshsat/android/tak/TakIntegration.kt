@@ -3,24 +3,30 @@ package net.meshsat.android.tak
 import android.content.Context
 import android.content.Intent
 import android.util.Log
-import net.meshsat.android.mqtt.MqttTransport
 
 /**
  * TAK/CoT integration — generates CoT events and broadcasts to ATAK + Hub.
  *
  * Two output paths:
  * 1. ATAK intent broadcast (if ATAK is installed on the same device)
- * 2. MQTT publish to Hub (meshsat/{deviceId}/tak/cot/out)
+ * 2. Export to the Hub, over the Hub session: [publish] hands the XML to
+ *    HubReporter.publishTakCot, which sends it on meshsat/bridge/{bridgeId}/tak/cot/out.
+ *
+ * The export used to go through the generic MQTT client (mqtt_0), which nothing ever switched on,
+ * so this class was never built and nothing was emitted, the ATAK broadcast included. It is built
+ * whenever the gateway starts now (MESHSAT-1463). [deviceId] is the Hub bridge id.
  *
  * CoT format matches Bridge (tak_cot.go) exactly for interoperability.
  */
 class TakIntegration(
     private val context: Context,
-    private val mqtt: MqttTransport?,
+    private val publish: ((String) -> Unit)?,
     private val deviceId: String,
     callsignPrefix: String = "MESHSAT",
     private var atakBroadcastEnabled: Boolean = true,
     private var mqttExportEnabled: Boolean = true,
+    /** "Enable TAK". Off: nothing is emitted, whatever the two output switches say. */
+    private val enabled: Boolean = true,
 ) {
     companion object {
         private const val TAG = "TakIntegration"
@@ -99,20 +105,14 @@ class TakIntegration(
     }
 
     private fun emit(ev: CotEvent) {
+        if (!enabled) return
         val xml = CotXml.marshal(ev)
 
         // Broadcast to ATAK if installed and enabled
         if (atakBroadcastEnabled) broadcastToAtak(xml)
 
-        // Publish to Hub via MQTT if enabled
-        if (mqttExportEnabled) {
-            mqtt?.publishRaw(
-                "meshsat/$deviceId/tak/cot/out",
-                1, // QoS at-least-once
-                false,
-                xml,
-            )
-        }
+        // Export to the Hub if enabled
+        if (mqttExportEnabled) publish?.invoke(xml)
 
         Log.d(TAG, "CoT emitted: type=${ev.type} uid=${ev.uid}")
     }
