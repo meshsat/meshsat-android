@@ -396,6 +396,15 @@ class HubReporter(
         )
     }
 
+    /**
+     * Publish one Cursor-on-Target event, as XML, on this bridge's export topic: QoS 1, not
+     * retained. Dropped when the Hub is not connected, like every publish here: an event that could
+     * not be sent when it was true is not worth sending later (MESHSAT-1463).
+     */
+    fun publishTakCot(xml: String) {
+        publish(HubTopics.takCotOut(config.bridgeId), QOS_AT_LEAST_ONCE, retained = false, xml)
+    }
+
     /** Publish device telemetry to meshsat/{deviceId}/telemetry. */
     fun publishDeviceTelemetry(deviceId: String, telemetry: DeviceTelemetry) {
         publish(
@@ -473,16 +482,13 @@ class HubReporter(
 
     // --- Internal ---
 
-    /** Subscribe to the command topic and TAK broadcast, then publish the birth. */
+    /** Subscribe to the command topic and what the Hub delivers of TAK, then publish the birth. */
     private fun subscribeAndAnnounce(c: MqttClient) {
-        c.subscribe(
-            arrayOf(
-                HubTopics.bridgeCmd(config.bridgeId),
-                "meshsat/broadcast/tak/cot/in",
-                HubTopics.bridgeMOAck(config.bridgeId),
-            ),
-            intArrayOf(QOS_AT_LEAST_ONCE, QOS_AT_LEAST_ONCE, QOS_AT_LEAST_ONCE),
-        )
+        val topics = arrayOf(
+            HubTopics.bridgeCmd(config.bridgeId),
+            HubTopics.bridgeMOAck(config.bridgeId),
+        ) + HubTopics.takCotInFilters()
+        c.subscribe(topics, IntArray(topics.size) { QOS_AT_LEAST_ONCE })
         publishBirth()
     }
 
@@ -583,8 +589,11 @@ class HubReporter(
     var onTakCot: ((String) -> Unit)? = null
 
     private fun handleInbound(topic: String, payload: String) {
-        // TAK CoT broadcast from Hub OTS poller
+        // TAK from the Hub: an event from the tenant's TAK servers, or one another bridge of the
+        // tenant exported. What this bridge exported itself comes back on the topic that names it as
+        // the sender, and is dropped by that topic (MESHSAT-1463).
         if (topic.contains("/tak/cot/in")) {
+            if (isOwnTakExport(topic, config.bridgeId)) return
             onTakCot?.invoke(payload)
             return
         }
@@ -830,6 +839,12 @@ data class HubReporterConfig(
  * innermost cause, which is where Paho puts the real reason ("Unable to connect to server" over
  * a TLS or DNS error). Pure, so it has a test.
  */
+/** Whether a delivered TAK event is one this bridge exported itself, by the topic it arrived on. */
+internal fun isOwnTakExport(topic: String, bridgeId: String): Boolean {
+    val sender = HubTopics.takCotSender(topic)
+    return sender.isNotEmpty() && sender == HubTopics.segment(bridgeId)
+}
+
 internal fun connectFailureText(e: Throwable): String {
     val chain = generateSequence(e) { it.cause }.take(8).toList()
     val outer = chain.first().message?.trim().orEmpty().ifBlank { chain.first().javaClass.simpleName }

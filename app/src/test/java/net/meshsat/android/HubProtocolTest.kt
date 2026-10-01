@@ -250,4 +250,46 @@ class HubProtocolTest {
         assertEquals(30, config.healthIntervalSec)
         assertTrue(config.enabled)
     }
+
+    // --- TAK through the Hub (MESHSAT-1463) ---
+
+    @Test
+    fun `the TAK export topic is the bridge's own subtree`() {
+        assertEquals("meshsat/bridge/pixel9a/tak/cot/out", HubTopics.takCotOut("pixel9a"))
+        // An id is written the way the Hub writes one into a topic.
+        assertEquals("meshsat/bridge/kit%2B1%2F2/tak/cot/out", HubTopics.takCotOut("kit+1/2"))
+    }
+
+    @Test
+    fun `what the Hub delivers arrives on two subscriptions`() {
+        assertEquals(
+            listOf("meshsat/broadcast/tak/cot/in", "meshsat/broadcast/tak/cot/in/+"),
+            HubTopics.takCotInFilters().toList(),
+        )
+    }
+
+    @Test
+    fun `the sender of a delivered TAK event is the topic's last segment`() {
+        // From a TAK server: no sender.
+        assertEquals("", HubTopics.takCotSender("meshsat/broadcast/tak/cot/in"))
+        assertEquals("pixel9a", HubTopics.takCotSender("meshsat/broadcast/tak/cot/in/pixel9a"))
+        assertEquals("kit%2B1", HubTopics.takCotSender("meshsat/broadcast/tak/cot/in/kit%2B1"))
+        assertEquals("", HubTopics.takCotSender("meshsat/broadcast/tak/cot/in/"))
+        assertEquals("", HubTopics.takCotSender("meshsat/broadcast/tak/cot/in/pixel9a/more"))
+        assertEquals("", HubTopics.takCotSender("meshsat/broadcast/tak/cot/inpixel9a"))
+        assertEquals("", HubTopics.takCotSender("meshsat/bridge/pixel9a/tak/cot/out"))
+    }
+
+    @Test
+    fun `a TAK event this phone exported is recognised by its topic and nothing else is`() {
+        // Its own export, back from the Hub.
+        assertTrue(isOwnTakExport("meshsat/broadcast/tak/cot/in/pixel9a", "pixel9a"))
+        assertTrue(isOwnTakExport("meshsat/broadcast/tak/cot/in/kit%2B1", "kit+1"))
+        // Another bridge's export, and an event from a TAK server.
+        assertTrue(!isOwnTakExport("meshsat/broadcast/tak/cot/in/rocket01", "pixel9a"))
+        assertTrue(!isOwnTakExport("meshsat/broadcast/tak/cot/in", "pixel9a"))
+        // An id that merely starts the same is somebody else.
+        assertTrue(!isOwnTakExport("meshsat/broadcast/tak/cot/in/pixel9a2", "pixel9a"))
+        assertTrue(!isOwnTakExport("meshsat/broadcast/tak/cot/in/pixel9a", "pixel9"))
+    }
 }
