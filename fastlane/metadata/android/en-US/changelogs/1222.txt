@@ -1,0 +1,1 @@
+TAK now goes through the MeshSat Hub: the phone sends its Cursor on Target messages to the Hub, which talks to the TAK server, and shows on the map what the Hub delivers back. With Enable TAK switched off the phone sends nothing.
