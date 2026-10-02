@@ -8,11 +8,15 @@ promise SMS three times.
   F-Droid listing minus SMS, plus "This edition does not send or receive SMS."
 - `en-US/images/featureGraphic.png`: 1024 x 500, cut from the developer-page header
   (`Branding/Google Play/developer-header-4096x2304-logo.jpg`, the sticker logo lockup).
-- `en-US/images/phoneScreenshots/1-4.png`: F-Droid screenshots 3 to 6 (passes, node, satellite,
-  safety), scaled to 2400 high and padded to 1350 x 2400 by extending the edge pixels: the
-  store listing form takes 9:16 only, and the phone is 1080 x 2424. 24-bit PNG, no alpha.
-  Home and Setup are left out because they show the SMS lane and row of the full
-  edition; retake them from a `play` build when the listing gets its own set.
+- `en-US/images/phoneScreenshots/1-5.png`: Home, People, satellite passes, map and the node
+  screen of 2.19.4, captured on 2 Oct 2026 and framed by `scripts/frame-play-screenshots.py`:
+  1440 x 2560 (9:16), 24-bit PNG, one headline above each capture, no device frame. The script's
+  header quotes Google's rules for listing screenshots. The captures come from the full edition,
+  so Home shows its SMS lane; the listing's texts still never promise SMS. A name on Home's SOS
+  card is blurred. The raw captures are not in the repo.
+- `scripts/publish-play-listing.py` replaces the listing's phone screenshots with the files in
+  that folder. It is run by hand, never by CI: a listing change is a submission to Google's
+  review. `--dry-run` shows what the listing holds and changes nothing.
 - Release notes come from `fastlane/metadata/android/en-US/changelogs/<versionCode>.txt`, which
   `scripts/bump-version.sh` writes; the Play upload job passes that directory.
 
