@@ -279,6 +279,12 @@ class GatewayService : Service() {
         /** One stored battery reading a minute is plenty for an estimate over hours. */
         private const val NODE_BATTERY_SAMPLE_MS = 60_000L
 
+        /**
+         * How often the phone's last position is repeated to TAK (MESHSAT-1487). A position event
+         * goes stale after CotBuilder's 300 s, so this has to stay well under that.
+         */
+        private const val TAK_POSITION_REPEAT_MS = 60_000L
+
         // Hub relay client — Reticulum over a Hub WebSocket tunnel to one kit (MESHSAT-1157)
         var hubRelayTransport: net.meshsat.android.hub.relay.RelayBridgeTransport? = null
             private set
@@ -777,11 +783,40 @@ class GatewayService : Service() {
                     Log.d("MeshSat", "TAK/CoT disabled in settings")
                 } else {
                     Log.i("MeshSat", "TAK/CoT integration initialized: callsign=${takIntegration?.callsign} atak=$takAtak hub=$takMqtt")
+                    repeatTakPosition()
                 }
             } catch (e: Exception) {
                 Log.e("MeshSat", "TAK/CoT init failed: ${e.message}")
             }
         }
+    }
+
+    /**
+     * Repeat the phone's last position to TAK once a minute (MESHSAT-1487).
+     *
+     * Android hands over a new fix only after 60 s and 50 m, so a phone that lies still reported
+     * once, at service start, before the Hub session was up, and that event was dropped. A position
+     * event also goes stale after five minutes. The last fix is still where a phone that has not
+     * moved is, so it is sent again; the first repeat comes a minute in, when the Hub is connected.
+     */
+    private fun repeatTakPosition() {
+        scope.launch {
+            while (isActive) {
+                delay(TAK_POSITION_REPEAT_MS)
+                _phoneLocation.value?.let { sendTakPosition(it) }
+            }
+        }
+    }
+
+    /** One position event (PLI) for [location], to ATAK and the Hub (MESHSAT-191). */
+    private fun sendTakPosition(location: Location) {
+        takIntegration?.sendPosition(
+            lat = location.latitude,
+            lon = location.longitude,
+            alt = location.altitude,
+            course = location.bearing.toDouble(),
+            speed = location.speed.toDouble(),
+        )
     }
 
     /** Initialize Hub MQTT transport if enabled in settings. */
@@ -2629,14 +2664,7 @@ class GatewayService : Service() {
                     altitude = location.altitude.toInt(),
                 )
             )
-            // Emit CoT PLI to ATAK + Hub (MESHSAT-191)
-            takIntegration?.sendPosition(
-                lat = location.latitude,
-                lon = location.longitude,
-                alt = location.altitude,
-                course = location.bearing.toDouble(),
-                speed = location.speed.toDouble(),
-            )
+            sendTakPosition(location)
         }
         // Publish position to Hub via HubReporter (MESHSAT-292)
         hubReporter?.let { reporter ->
