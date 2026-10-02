@@ -1,0 +1,1 @@
+With Enable TAK on, the phone now sends its position to TAK once a minute, moving or not. Before, a phone that lay still sent it once when the app started, and that one report could be lost.
