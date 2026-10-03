@@ -8,6 +8,7 @@ What it does:
 • Satellite: Iridium SBD through the node's RockBLOCK 9603, up to 340 bytes out and 270 bytes in. Messages wait in a queue and are retried until they go out. The app opens a satellite session only when there is something to send, when the modem rings or when you check the mailbox, never on a timer, because every session costs a credit. Passes are predicted on the phone, with no internet needed.
 • APRS through a KISS TNC over TCP (Direwolf, for example) or directly to APRS-IS.
 • Hub, optional: the phone reports to a MeshSat Hub over MQTT with a client certificate and takes remote commands. The Hub is open source and can be self-hosted.
+• TAK, through the Hub: your team's TAK picture appears on the map, and with Enable TAK on the phone sends its position, an SOS and its chat to your TAK server.
 • Reticulum: the phone runs as a Reticulum transport node and relays between its links.
 • Safety: hold the SOS button for 3 seconds and the SOS goes out on every route the phone has, each retried until it is sent, until you cancel it. A check-in timer and zones drawn on the map.
 • The map works offline down to country level. Night mode turns the whole app red.
@@ -15,6 +16,8 @@ What it does:
 This edition does not send or receive SMS.
 
 Satellite messaging needs a RockBLOCK modem and Iridium credits from a provider; Iridium is a paid commercial network.
+
+Internet connections: the bundled world map covers country level; closer in, map tiles come from OpenStreetMap's tile servers while you look at the map online. Once a satellite modem is set up, Iridium orbit data is downloaded from celestrak.org, or tle.ivanstanojevic.me if that fails, when the stored copy is more than a day old, checked at most every 12 hours. The Hub, APRS-IS and Reticulum over TCP connect only when you set them up. Nothing else goes online.
 
 Permissions: Bluetooth and location, because Android needs location to scan for Bluetooth devices and the map shows where you are; notifications. Starting after a phone restart is off until you switch it on.
 

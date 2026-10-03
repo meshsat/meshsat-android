@@ -9,11 +9,14 @@ What it does:
 • SMS through the phone's own SIM, optionally encrypted per conversation with AES-256-GCM. Messages are compressed with MSVQ-SC, which is lossy: what arrives means the same, but may not be word for word what was sent.
 • APRS through a KISS TNC over TCP (Direwolf, for example) or directly to APRS-IS.
 • Hub, optional: the phone reports to a MeshSat Hub over MQTT with a client certificate and takes remote commands. The Hub is open source and can be self-hosted.
+• TAK, through the Hub: your team's TAK picture appears on the map, and with Enable TAK on the phone sends its position, an SOS and its chat to your TAK server.
 • Reticulum: the phone runs as a Reticulum transport node and relays between its links.
 • Safety: hold the SOS button for 3 seconds and the SOS goes out on every route the phone has, each retried until it is sent, until you cancel it. A check-in timer and zones drawn on the map.
 • The map works offline down to country level. Night mode turns the whole app red.
 
 Satellite messaging needs a RockBLOCK modem and Iridium credits from a provider; Iridium is a paid commercial network.
+
+Internet connections: the bundled world map covers country level; closer in, map tiles come from OpenStreetMap's tile servers while you look at the map online. Once a satellite modem is set up, Iridium orbit data is downloaded from celestrak.org, or tle.ivanstanojevic.me if that fails, when the stored copy is more than a day old, checked at most every 12 hours. The Hub, APRS-IS and Reticulum over TCP connect only when you set them up. Nothing else goes online.
 
 Permissions: Bluetooth and location, because Android needs location to scan for Bluetooth devices and the map shows where you are; SMS, to send and receive through your SIM; notifications. Starting after a phone restart is off until you switch it on.
 

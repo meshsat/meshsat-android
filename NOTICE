@@ -30,8 +30,14 @@ Meshtastic protobuf definitions
 
 TAK protobuf definitions
   Location: app/src/main/proto/takproto/
-  Licence:  NEEDS VERIFICATION — confirm the upstream source and its licence
-            terms before the next release, and record the result here.
+  Upstream: https://github.com/deptofdefense/AndroidTacticalAssaultKit-CIV
+            directory takproto/ (package atakmap.commoncommo.protobuf.v1),
+            checked at commit 42f0a4662a9011f8a0532489259fe248b0e23ede
+  Licence:  GPL-3.0 (the repository's LICENSE.md; the .proto files carry no
+            headers of their own). Compatible with this project's GPL-3.0.
+  Changes:  comments removed, java_package/java_multiple_files options
+            added, imports given the takproto/ prefix; message and field
+            definitions are identical to upstream.
 
 JSPR protocol implementation for the RockBLOCK 9704
   Location: app/src/main/java/net/meshsat/android/bt/Iridium9704Spp.kt
@@ -67,20 +73,18 @@ BSD 3-Clause
   no.nordicsemi.android:ble
   org.nanohttpd:nanohttpd
 
-Eclipse Public License 1.0 / Eclipse Distribution License 1.0 (dual)
-  org.eclipse.paho:org.eclipse.paho.client.mqttv3
-  NOTE: EPL-1.0 is not compatible with GPL-3.0. This project relies on the
-  EDL-1.0 (BSD-3-Clause) arm of Paho's dual licence. Confirm this election is
-  documented and correct before the next release.
+Eclipse Public License 2.0 / Eclipse Distribution License 1.0 (dual)
+  org.eclipse.paho:org.eclipse.paho.client.mqttv3 (1.2.5)
+  Paho 1.2.5 is offered under EPL-2.0 or EDL-1.0 (its about.html and
+  edl-v10 at tag v1.2.5). This project takes it under the EDL-1.0, which is
+  the BSD 3-Clause licence and compatible with GPL-3.0:
+    Copyright (c) 2007, Eclipse Foundation, Inc. and its licensors.
+    All rights reserved. Redistribution under the terms of
+    https://www.eclipse.org/org/documents/edl-v10.php
 
 ================================================================================
-OUTSTANDING VERIFICATION
+BUNDLED DATA
 ================================================================================
-
-The two NEEDS VERIFICATION items above (TAK protobuf licence, Paho EDL
-election) are open. Neither blocks development, but both should be closed
-before any distribution that a third party relies on, and before this file is
-cited as evidence of licence hygiene.
 
 Bundled ML assets (codebook_v1.bin, corpus_index.bin, encoder.onnx, vocab.txt)
 are produced by sidecar/msvqsc/train.py in the MeshSat Bridge repository
