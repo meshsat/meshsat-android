@@ -1,0 +1,1 @@
+Your data stays on the phone: the app is no longer included in cloud backups or device transfers. Release builds connect over TLS only and trust only the system's certificate authorities, so a self-hosted Hub needs a publicly trusted certificate.
