@@ -1,13 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
   Network Security Config for MeshSat Android.
-  Trusts system CAs AND user-installed CAs for all connections.
+  Release builds: TLS only, system CAs only. A self-hosted Hub needs a
+  publicly trusted certificate (Let's Encrypt, for example); the Hub's own
+  CA for the relay tunnel and the client certificate are handled in code
+  (hub/relay/RelayTls, CertificatePinner), not through the system store.
+  Plain TCP links (APRS-IS, KISS, Reticulum TCP) are sockets, not HTTP,
+  and are not governed by this file.
+  Debug builds also trust user-installed CAs, for testing against a
+  development Hub.
 -->
 <network-security-config>
-    <base-config cleartextTrafficPermitted="true">
+    <base-config cleartextTrafficPermitted="false">
         <trust-anchors>
             <certificates src="system" />
-            <certificates src="user" />
         </trust-anchors>
     </base-config>
 
