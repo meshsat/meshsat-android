@@ -253,13 +253,13 @@ upload-package:
 # secret exists the job says so and passes, so a tag pipeline is never red for it. The account
 # may only release to testing tracks, so PLAY_TRACK is alpha (reviewed) or internal (not).
 #
-# MANUAL while a change is in Google's review (MESHSAT-1346): Google counts review time from
-# the last submitted change, so an upload from a tag can push a pending review to the back of
-# the queue. Since 2 Oct 2026 that is the listing's new screenshots. The job waits for someone
-# to press play and the pipeline stays green without it. Once the store page shows the new
-# screenshots, remove `when: manual` and `allow_failure: true` from the rule below and start
-# the newest tag's job by hand, so alpha catches up. The job was automatic until 28 Sep 2026
-# and for a few hours on 2 Oct, after the first production release went live (MESHSAT-1395).
+# Automatic again since 5 Oct 2026, when the listing's new screenshots went live (MESHSAT-1346).
+# Google counts review time from the last submitted change, so an upload from a tag can push a
+# pending review to the back of the queue. While a review must not be disturbed (a production
+# promotion, a listing change), add `when: manual` and `allow_failure: true` to the rule below;
+# the job then waits for someone to press play and the pipeline stays green without it. It was
+# manual from 28 Sep to 2 Oct 2026 (first production release, MESHSAT-1395) and from 2 to 5 Oct
+# 2026 (the screenshots).
 publish-play:
   stage: release
   image: python:3.12-slim
@@ -268,8 +268,6 @@ publish-play:
       aud: https://gitlab.nuclearlighters.net
   rules:
     - if: '$CI_COMMIT_TAG =~ /^v/'
-      when: manual
-      allow_failure: true
   needs:
     - job: build-release
       artifacts: true
