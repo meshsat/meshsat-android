@@ -250,8 +250,9 @@ upload-package:
 # =============================================================================
 # The service account key lives in OpenBao at secret/ci/android-play (field
 # service_account_json), fetched with the same JWT role as the signing keystore. Until that
-# secret exists the job says so and passes, so a tag pipeline is never red for it. The account
-# may only release to testing tracks, so PLAY_TRACK is alpha (reviewed) or internal (not).
+# secret exists the job says so and passes, so a tag pipeline is never red for it. PLAY_TRACK is
+# alpha (reviewed) or internal (not). The account CAN release to production (proven 5 Oct 2026,
+# when 2.19.7 was promoted by hand on the owner's word), so never point this job at production.
 #
 # Automatic again since 5 Oct 2026, when the listing's new screenshots went live (MESHSAT-1346).
 # Google counts review time from the last submitted change, so an upload from a tag can push a

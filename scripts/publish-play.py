@@ -14,7 +14,8 @@ API directly over REST with a service-account key, no fastlane:
 
 Google's rule: the FIRST bundle of a new app must be uploaded in the Console by hand, which was
 done on 25 Sep 2026 (1180). The service account needs "Release apps to testing tracks" on the
-app in Users and permissions; that is what limits the blast radius of this key.
+app in Users and permissions. It also holds production rights (2.19.7 was promoted to production
+with this key on 5 Oct 2026), so nothing but the --track value keeps CI off production.
 
 Usage:
   publish-play.py --aab meshsat-android-2.19.2-play.aab --track alpha \
