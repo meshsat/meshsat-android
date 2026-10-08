@@ -1,0 +1,1 @@
+A RockBLOCK 9704 behind your MeshSat node now comes back by itself after the node restarts: the app keeps trying the modem's start until it answers, instead of waiting for a reconnect that could never happen.
