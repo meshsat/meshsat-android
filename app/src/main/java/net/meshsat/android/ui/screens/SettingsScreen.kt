@@ -2294,7 +2294,7 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
 
                 Text(
                     "Captures crashes, heap samples, and health heartbeats locally on this device. " +
-                        "Nothing is sent externally. Retrievable via localhost:6051/api/telemetry.",
+                        "Nothing is sent externally. Readable over adb through the local API (/api/telemetry).",
                     style = MaterialTheme.typography.bodySmall,
                     color = MeshSatTextMuted,
                 )

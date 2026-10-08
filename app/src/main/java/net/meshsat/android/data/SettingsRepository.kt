@@ -730,7 +730,7 @@ class SettingsRepository(private val context: Context) {
     /**
      * Master switch for local release telemetry (crash capture, heap samples,
      * health heartbeats, explicit events). When disabled, `TelemetryLogger`
-     * writes nothing. Retrievable via the `/api/telemetry` endpoints on localhost.
+     * writes nothing. Retrievable over adb via the local API's `/api/telemetry` endpoints.
      * Defaults to ON — privacy-preserving because nothing leaves the device.
      */
     val telemetryEnabled: Flow<Boolean> = context.dataStore.data.map {

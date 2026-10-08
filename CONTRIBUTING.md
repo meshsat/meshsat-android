@@ -35,7 +35,8 @@ Each transport requires specific hardware to test properly.
   node's Bluetooth Iridium service, on the same connection as the mesh; no HC-05 since 2.9.0.
 - Pair the node in the app: Setup > Your MeshSat node. Setup > Satellite shows the modem.
 - Free check with no satellite session: `POST http://127.0.0.1:6051/api/iridium/loopback?size=270`
-  (via `adb forward tcp:6051 tcp:6051`) writes, copies and reads back 270 bytes on the modem.
+  (via `adb forward tcp:6051 localabstract:meshsat-api`) writes, copies and reads back 270 bytes
+  on the modem.
 - Test: send a message by satellite, confirm delivery in the Rock7 portal or on the Hub. Every
   session that reaches the satellite network uses at least one credit.
 

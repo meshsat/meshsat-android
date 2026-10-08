@@ -99,17 +99,6 @@ class SmsReceiver : BroadcastReceiver() {
                         wasCompressed = result.wasCompressed,
                     )
 
-                    // Auto-forward to configured number if set [MESHSAT-447]
-                    val forwardTo = autoForwardTo
-                    if (forwardTo.isNotEmpty() && sender != forwardTo) {
-                        Log.i(TAG, "Auto-forwarding SMS from $sender to $forwardTo")
-                        net.meshsat.android.sms.SmsSender.send(
-                            context = context,
-                            to = forwardTo,
-                            text = result.displayText,
-                        )
-                    }
-
                     postNotification(context, sender, result.displayText)
                 }
             } catch (e: Exception) {
@@ -273,10 +262,6 @@ class SmsReceiver : BroadcastReceiver() {
          */
         @Volatile
         var relayCallback: SmsRelayCallback? = null
-
-        /** Auto-forward received SMS to this number. Empty = disabled. [MESHSAT-447] */
-        @Volatile
-        var autoForwardTo: String = ""
 
         private fun getCodebook(context: Context): MsvqscCodebook? {
             cachedCodebook?.let { return it }

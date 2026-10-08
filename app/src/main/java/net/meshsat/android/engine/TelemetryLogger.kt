@@ -21,8 +21,8 @@ import kotlinx.coroutines.launch
  *
  * Writes crash records, heap samples, health heartbeats, and explicit events
  * into the [net.meshsat.android.data.TelemetryEntity] ring buffer. Everything
- * stays on-device — contents are retrievable via the Local REST API on
- * `localhost:6051` and cleared via `DELETE /api/telemetry`.
+ * stays on-device — contents are retrievable over adb via the Local REST API
+ * ([net.meshsat.android.api.LocalApiServer]) and cleared via `DELETE /api/telemetry`.
  *
  * ## Crash handling
  *
