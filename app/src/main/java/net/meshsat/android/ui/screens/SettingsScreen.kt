@@ -530,8 +530,14 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
             SectionCard("Satellite modem on the node") {
                 val state = iridiumState?.value ?: IridiumSpp.State.Disconnected
                 // The pipe is transparent, so the phone is told which RockBLOCK the node carries (MESHSAT-1507).
-                val nodeModem by settings.nodeModem.collectAsState(initial = SettingsRepository.NODE_MODEM_9603)
-                val node9704 = nodeModem == SettingsRepository.NODE_MODEM_9704
+                val nodeModem by settings.nodeModem.collectAsState(initial = SettingsRepository.NODE_MODEM_AUTO)
+                val pipeStatus = iridiumPipe?.status.collectOrNull()
+                val nodeSaysJspr = pipeStatus?.value?.flags?.modemIsJspr == true
+                val node9704 = when (nodeModem) {
+                    SettingsRepository.NODE_MODEM_9704 -> true
+                    SettingsRepository.NODE_MODEM_9603 -> false
+                    else -> nodeSaysJspr
+                }
                 val state9704 = iridium9704State?.value ?: net.meshsat.android.bt.Iridium9704Spp.State.Disconnected
                 val pipeWords = when {
                     !nodePipeEnabled -> "Off: the node keeps its modem"
@@ -560,7 +566,15 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
                 SettingRow("Modem on the node") {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         FilterChip(
-                            selected = !node9704,
+                            selected = nodeModem == SettingsRepository.NODE_MODEM_AUTO,
+                            onClick = { scope.launch { settings.setNodeModem(SettingsRepository.NODE_MODEM_AUTO) } },
+                            label = { Text("Auto", style = MaterialTheme.typography.bodySmall) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = MeshSatTeal.copy(alpha = 0.2f),
+                            ),
+                        )
+                        FilterChip(
+                            selected = nodeModem == SettingsRepository.NODE_MODEM_9603,
                             onClick = { scope.launch { settings.setNodeModem(SettingsRepository.NODE_MODEM_9603) } },
                             label = { Text("9603", style = MaterialTheme.typography.bodySmall) },
                             colors = FilterChipDefaults.filterChipColors(
@@ -568,7 +582,7 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
                             ),
                         )
                         FilterChip(
-                            selected = node9704,
+                            selected = nodeModem == SettingsRepository.NODE_MODEM_9704,
                             onClick = { scope.launch { settings.setNodeModem(SettingsRepository.NODE_MODEM_9704) } },
                             label = { Text("9704", style = MaterialTheme.typography.bodySmall) },
                             colors = FilterChipDefaults.filterChipColors(
@@ -578,6 +592,9 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
                     }
                 }
 
+                if (iridiumPipe != null) {
+                    InfoRow("The node says", if (pipeStatus?.value?.flags == null) "nothing yet" else if (nodeSaysJspr) "RockBLOCK 9704 (JSPR)" else "RockBLOCK 9603 (AT)")
+                }
                 if (node9704 && state9704 == net.meshsat.android.bt.Iridium9704Spp.State.Ready) {
                     iridium9704ModemInfo?.value?.let { info ->
                         if (info.imei.isNotBlank()) InfoRow("IMEI", info.imei)

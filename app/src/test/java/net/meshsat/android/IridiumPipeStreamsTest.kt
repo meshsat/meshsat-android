@@ -37,6 +37,10 @@ class IridiumPipeStreamsTest {
         val v2 = IridiumPipeContract.parseStatusFull(byteArrayOf(2, 1, 0x0B, 4))!!
         assertEquals(Owner.Phone, v2.owner)
         assertEquals(IridiumPipeContract.StatusFlags(sessionInFlight = true, messageWaiting = true, modemAnswers = false, bufferCongested = true), v2.flags)
+        // Bit 4 (8 Oct 2026): the node says its modem speaks JSPR; older nodes never set it.
+        assertEquals(true, IridiumPipeContract.StatusFlags.of(0x14).modemIsJspr)
+        assertEquals(false, IridiumPipeContract.StatusFlags.of(0x04).modemIsJspr)
+        assertEquals(false, v2.flags?.modemIsJspr)
         assertEquals(4, v2.csq)
 
         // A v2 node still sending 2 bytes, and 0xFF for "never read".

@@ -63,6 +63,8 @@ object IridiumPipeContract {
         val messageWaiting: Boolean,
         val modemAnswers: Boolean,
         val bufferCongested: Boolean,
+        /** Bit 4 (8 Oct 2026): the modem speaks JSPR, a RockBLOCK 9704; clear on a 9603 and on an older node. */
+        val modemIsJspr: Boolean = false,
     ) {
         companion object {
             fun of(b: Int) = StatusFlags(
@@ -70,6 +72,7 @@ object IridiumPipeContract {
                 messageWaiting = b and 0x02 != 0,
                 modemAnswers = b and 0x04 != 0,
                 bufferCongested = b and 0x08 != 0,
+                modemIsJspr = b and 0x10 != 0,
             )
         }
     }
