@@ -152,6 +152,8 @@ class GatewayService : Service() {
         /** How often the node is asked again for its modem while the phone does not hold it. */
         private const val PIPE_CLAIM_RETRY_MS = 15_000L
         private const val PIPE_CLAIM_FIRST_RETRY_MS = 3_000L
+        private const val PIPE_9704_RETRY_MIN_MS = 15_000L
+        private const val PIPE_9704_RETRY_MAX_MS = 120_000L
 
         /** At most one node reconnect this often when the pipe stops taking writes (MESHSAT-1270). */
         private const val PIPE_RECOVERY_COOLDOWN_MS = 60_000L
@@ -2121,7 +2123,10 @@ class GatewayService : Service() {
                 }
                 interfaceId == "iridium9704_0" -> {
                     val spp = iridium9704Spp ?: return@setConnectCallback "9704 transport not available"
-                    spp.reconnect()
+                    // An HC-05 is dialled again. A 9704 behind the node's pipe has no address to
+                    // dial; the pipe observer retries its init while the phone holds the modem
+                    // (MESHSAT-1507: reconnect() here answered "No previous SPP address" every 2 min).
+                    if (!spp.onNodePipe && spp.lastAddress != null) spp.reconnect()
                     null
                 }
                 interfaceId.startsWith("mqtt") -> {
@@ -2892,6 +2897,17 @@ class GatewayService : Service() {
     @Volatile private var iridium0ParkedForImt = false
 
     /** What the pipe observer combines: the pipe, whether the phone wants the node's modem, and which modem it is. */
+    /**
+     * The pipe is transparent, so the node says what it carries with STATUS flag bit 4 (set: a
+     * 9704 speaking JSPR); the setting can override it, and an older node without the bit is a
+     * 9603 (MESHSAT-1507).
+     */
+    private fun nodeCarries9704(modem: String, pipe: net.meshsat.android.ble.IridiumBlePipe): Boolean = when (modem) {
+        SettingsRepository.NODE_MODEM_9704 -> true
+        SettingsRepository.NODE_MODEM_9603 -> false
+        else -> pipe.status.value?.flags?.modemIsJspr == true
+    }
+
     private data class NodePipeWish(
         val pipe: net.meshsat.android.ble.IridiumBlePipe?,
         val enabled: Boolean,
@@ -2956,18 +2972,37 @@ class GatewayService : Service() {
                             delay(if (attempt++ == 0) PIPE_CLAIM_FIRST_RETRY_MS else PIPE_CLAIM_RETRY_MS)
                         }
                     }
-                    pipe.owner.collect { owner ->
-                        // The pipe is transparent. The node says what it carries with STATUS flag bit 4
-                        // (set: a 9704 speaking JSPR); the setting can override it, and an older node
-                        // without the bit is a 9603 (MESHSAT-1507).
-                        val imt = iridium9704Spp
-                        val use9704 = when (modem) {
-                            SettingsRepository.NODE_MODEM_9704 -> true
-                            SettingsRepository.NODE_MODEM_9603 -> false
-                            else -> pipe.status.value?.flags?.modemIsJspr == true
+                    // The node discards the phone's bytes until its modem has started, 60 s after the
+                    // node boots or switches the supply on, so the first 9704 init after a reconnect
+                    // can fail with the modem healthy (seen 8 Oct 2026 12:41, the node reflashed).
+                    // Nothing else tries again over the pipe: 15 s after a failure, doubling to
+                    // 2 min, while this phone holds the modem (MESHSAT-1507).
+                    launch {
+                        var waitMs = PIPE_9704_RETRY_MIN_MS
+                        while (true) {
+                            delay(waitMs)
+                            val imt = iridium9704Spp ?: continue
+                            if (pipe.owner.value != IridiumPipeContract.Owner.Phone || !nodeCarries9704(modem, pipe)) {
+                                waitMs = PIPE_9704_RETRY_MIN_MS
+                                continue
+                            }
+                            when (imt.state.value) {
+                                net.meshsat.android.bt.Iridium9704Spp.State.Ready -> waitMs = PIPE_9704_RETRY_MIN_MS
+                                net.meshsat.android.bt.Iridium9704Spp.State.Disconnected ->
+                                    if (imt.attachIfIdle(pipe.asModemLink())) {
+                                        Log.i("MeshSat", "Iridium: the 9704 did not answer over the node's pipe; trying its init again")
+                                        waitMs = (waitMs * 2).coerceAtMost(PIPE_9704_RETRY_MAX_MS)
+                                    }
+                                else -> {}
+                            }
                         }
+                    }
+                    pipe.owner.collect { owner ->
+                        val imt = iridium9704Spp
+                        val use9704 = nodeCarries9704(modem, pipe)
                         if (owner == IridiumPipeContract.Owner.Phone) {
-                            Log.i("MeshSat", "Iridium: the node carries a ${if (use9704) "9704" else "9603"} (setting $modem)")
+                            val flag = if (pipe.status.value?.flags?.modemIsJspr == true) "9704" else "none"
+                            Log.i("MeshSat", "Iridium: the node carries a ${if (use9704) "9704" else "9603"} (setting $modem, node's JSPR flag $flag)")
                             // The 9603 interface would otherwise retry its attach every 10 s against a
                             // modem that never answers AT; it is parked while the 9704 holds the pipe.
                             if (use9704 && !iridium0ParkedForImt) {
@@ -2978,7 +3013,7 @@ class GatewayService : Service() {
                                 iridium0ParkedForImt = false
                             }
                             if (use9704 && imt != null) {
-                                if (imt.state.value == net.meshsat.android.bt.Iridium9704Spp.State.Disconnected) imt.attach(pipe.asModemLink())
+                                imt.attachIfIdle(pipe.asModemLink())
                             } else if (spp.state.value == IridiumSpp.State.Disconnected) {
                                 spp.attach(pipe.asModemLink())
                             }
