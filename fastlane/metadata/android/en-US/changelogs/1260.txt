@@ -1,0 +1,1 @@
+The app now knows which RockBLOCK sits behind your MeshSat node: a 9704 node says so itself and the matching driver takes over, with Auto as the default under Settings, Satellite modem on the node. The Home card shows the 9704 as ready, and the old 9603 driver no longer keeps asking a 9704 for AT commands.
