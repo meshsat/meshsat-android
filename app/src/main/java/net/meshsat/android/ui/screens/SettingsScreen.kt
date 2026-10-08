@@ -529,21 +529,61 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
         if (section.shows(SetupSection.Satellite)) {
             SectionCard("Satellite modem on the node") {
                 val state = iridiumState?.value ?: IridiumSpp.State.Disconnected
+                // The pipe is transparent, so the phone is told which RockBLOCK the node carries (MESHSAT-1507).
+                val nodeModem by settings.nodeModem.collectAsState(initial = SettingsRepository.NODE_MODEM_9603)
+                val node9704 = nodeModem == SettingsRepository.NODE_MODEM_9704
+                val state9704 = iridium9704State?.value ?: net.meshsat.android.bt.Iridium9704Spp.State.Disconnected
+                val pipeWords = when {
+                    !nodePipeEnabled -> "Off: the node keeps its modem"
+                    iridiumPipe == null -> "No MeshSat node connected"
+                    pipeOwner == IridiumPipeContract.Owner.Node -> "The node is using its modem"
+                    else -> "Waiting for the node"
+                }
                 ConnectionStatusRow(
                     label = "Status",
-                    connected = state == IridiumSpp.State.Connected,
+                    connected = if (node9704) state9704 == net.meshsat.android.bt.Iridium9704Spp.State.Ready else state == IridiumSpp.State.Connected,
                     statusText = when {
+                        node9704 && state9704 == net.meshsat.android.bt.Iridium9704Spp.State.Ready ->
+                            "Connected (Signal: ${iridium9704Signal?.value ?: 0}/5)"
+                        node9704 && state9704 == net.meshsat.android.bt.Iridium9704Spp.State.Initializing -> "Bringing the 9704 up..."
+                        node9704 && state9704 != net.meshsat.android.bt.Iridium9704Spp.State.Disconnected -> "Checking the modem..."
+                        node9704 -> pipeWords
                         state == IridiumSpp.State.Connected -> "Connected (Signal: ${iridiumSignal?.value ?: 0}/5)"
                         state == IridiumSpp.State.Connecting && iridiumSilent?.value == true ->
                             "The node's modem does not answer (still trying)"
                         state == IridiumSpp.State.Connecting -> "Checking the modem..."
-                        !nodePipeEnabled -> "Off: the node keeps its modem"
-                        iridiumPipe == null -> "No MeshSat node connected"
-                        pipeOwner == IridiumPipeContract.Owner.Node -> "The node is using its modem"
-                        else -> "Waiting for the node"
+                        else -> pipeWords
                     },
                     color = ColorIridium,
                 )
+
+                SettingRow("Modem on the node") {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(
+                            selected = !node9704,
+                            onClick = { scope.launch { settings.setNodeModem(SettingsRepository.NODE_MODEM_9603) } },
+                            label = { Text("9603", style = MaterialTheme.typography.bodySmall) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = MeshSatTeal.copy(alpha = 0.2f),
+                            ),
+                        )
+                        FilterChip(
+                            selected = node9704,
+                            onClick = { scope.launch { settings.setNodeModem(SettingsRepository.NODE_MODEM_9704) } },
+                            label = { Text("9704", style = MaterialTheme.typography.bodySmall) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = MeshSatTeal.copy(alpha = 0.2f),
+                            ),
+                        )
+                    }
+                }
+
+                if (node9704 && state9704 == net.meshsat.android.bt.Iridium9704Spp.State.Ready) {
+                    iridium9704ModemInfo?.value?.let { info ->
+                        if (info.imei.isNotBlank()) InfoRow("IMEI", info.imei)
+                        if (info.serial.isNotBlank()) InfoRow("Serial", info.serial)
+                    }
+                }
 
                 SettingRow("Use the node's modem") {
                     Switch(
@@ -583,7 +623,7 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
                     net.meshsat.android.ui.components.CheckMailboxButton()
                 } else if (iridiumPipe == null) {
                     Text(
-                        text = "The RockBLOCK 9603 is reached through your MeshSat node. Connect the node under Your MeshSat node; its modem appears here.",
+                        text = "The node's RockBLOCK is reached through your MeshSat node. Connect the node under Your MeshSat node; its modem appears here.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MeshSatTextMuted,
                     )

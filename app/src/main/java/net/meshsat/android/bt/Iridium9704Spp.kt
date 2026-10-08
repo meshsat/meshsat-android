@@ -5,6 +5,7 @@ import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothSocket
+import net.meshsat.android.ble.ModemLink
 import android.content.Context
 import android.util.Base64
 import android.util.Log
@@ -116,6 +117,9 @@ class Iridium9704Spp(private val context: Context) {
     private var inputStream: InputStream? = null
     private var outputStream: OutputStream? = null
 
+    // The MeshSat node's Iridium pipe when the 9704 sits behind it (MESHSAT-1507); null on an HC-05.
+    private var link: ModemLink? = null
+
     @Volatile var lastAddress: String? = null
         private set
 
@@ -209,11 +213,40 @@ class Iridium9704Spp(private val context: Context) {
     }
 
     fun disconnect() {
+        if (link != null) {
+            detach()
+            return
+        }
         polling = false
         try {
             socket?.close()
         } catch (_: IOException) {}
         socket = null
+        inputStream = null
+        outputStream = null
+        _state.value = State.Disconnected
+    }
+
+    /**
+     * Use the node's Iridium pipe as the serial link, as the 9603 driver does: the node has given
+     * this phone the modem, the bytes are JSPR at 230400 on the node's UART. The init runs as
+     * after an SPP connect; its first request may be answered MALFORMED because the node's reset
+     * text sits in the modem's parser, and the init retries after a drain.
+     */
+    fun attach(newLink: ModemLink) {
+        detach()
+        link = newLink
+        inputStream = newLink.input
+        outputStream = newLink.output
+        _state.value = State.Connected
+        scope.launch { initialize() }
+    }
+
+    /** Stop using the node's pipe without closing it; the node keeps the modem powered. No-op on an HC-05. */
+    fun detach() {
+        if (link == null) return
+        polling = false
+        link = null
         inputStream = null
         outputStream = null
         _state.value = State.Disconnected
