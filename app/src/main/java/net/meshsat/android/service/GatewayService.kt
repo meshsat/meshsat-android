@@ -674,7 +674,7 @@ class GatewayService : Service() {
                 }
                 configManager = cfgMgr
 
-                // Local API server (localhost:6051). An edition without SMS has no send callback,
+                // Local API server, for adb only (MESHSAT-1515). An edition without SMS has no send callback,
                 // so POST /api/sms/send answers 503 instead of pretending (MESHSAT-1335).
                 val smsSend: ((String, String) -> Unit)? =
                     if (net.meshsat.android.sms.SmsCapability.included) { to, text -> scope.launch { sendSmsMessage(text, to) } } else null
@@ -716,9 +716,14 @@ class GatewayService : Service() {
                         }
                     },
                 )
-                server.start()
-                localApiServer = server
-                Log.i("MeshSat", "Local API server started on 127.0.0.1:${LocalApiServer.DEFAULT_PORT}")
+                try {
+                    server.start()
+                    localApiServer = server
+                    Log.i("MeshSat", "Local API server started on localabstract:${LocalApiServer.SOCKET_NAME}")
+                } catch (e: Exception) {
+                    // Another app holding the name gets nothing from us: the API stays off.
+                    Log.w("MeshSat", "Local API not started on ${LocalApiServer.SOCKET_NAME}: ${e.message}")
+                }
             } catch (e: Exception) {
                 Log.w("MeshSat", "Phase F init failed (signing/API disabled): ${e.message}")
             }

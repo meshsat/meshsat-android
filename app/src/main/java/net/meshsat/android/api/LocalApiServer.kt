@@ -1,5 +1,10 @@
 package net.meshsat.android.api
 
+import android.net.LocalServerSocket
+import android.net.LocalSocket
+import android.os.Process
+import android.system.Os
+import android.system.OsConstants
 import android.util.Log
 import com.geeksville.mesh.ChannelProtos
 import com.google.protobuf.ByteString
@@ -21,16 +26,25 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.Closeable
+import java.util.Collections
+import java.util.concurrent.ConcurrentHashMap
+import kotlin.concurrent.thread
 
 /**
- * Lightweight local REST API server for MeshSat Android.
- * Runs on localhost only (127.0.0.1) for automation and scripting.
+ * Lightweight local REST API server for MeshSat Android, for automation and scripting over adb.
  * Port of meshsat/internal/api/ — exposes interfaces, rules, deliveries, health, geofences, audit.
  *
- * Uses NanoHTTPD for zero-dependency HTTP serving.
+ * It listens on the abstract Unix socket [SOCKET_NAME], not on TCP, and answers only adb's shell,
+ * root and this app (GHSA-h3j8-w2p3-vw76, MESHSAT-1515). On 127.0.0.1:6051 any installed app with
+ * INTERNET could send SMS, read the config or replace the Hub settings, and a web page could post
+ * to it. A Unix socket carries the caller's uid, which is how Chrome guards its DevTools socket.
+ * From a computer: `adb forward tcp:6051 localabstract:meshsat-api`, then http://127.0.0.1:6051.
+ *
+ * NanoHTTPD still parses the requests and writes the responses; only its TCP listener is unused.
  */
 class LocalApiServer(
-    port: Int = DEFAULT_PORT,
+    private val socketName: String = SOCKET_NAME,
     private val scope: CoroutineScope,
     private val interfaceManager: InterfaceManager?,
     private val channelRegistry: ChannelRegistry?,
@@ -45,7 +59,81 @@ class LocalApiServer(
     private val restartCallback: (() -> Unit)? = null,
     private val smsSendCallback: ((to: String, text: String) -> Unit)? = null,
     private val hubSettingsCallback: ((Map<String, String>) -> Unit)? = null,
-) : NanoHTTPD("127.0.0.1", port) {
+) : NanoHTTPD("127.0.0.1", 0) {
+
+    @Volatile
+    private var listener: LocalServerSocket? = null
+    private var acceptThread: Thread? = null
+    private val clients: MutableSet<LocalSocket> = Collections.newSetFromMap(ConcurrentHashMap())
+
+    /** Binds [socketName]; throws if another app already holds the name. */
+    override fun start() {
+        val server = LocalServerSocket(socketName)
+        listener = server
+        acceptThread = thread(name = "LocalApi accept", isDaemon = true) { acceptLoop(server) }
+    }
+
+    private fun acceptLoop(server: LocalServerSocket) {
+        val ownUid = Process.myUid()
+        while (listener === server) {
+            val client = try {
+                server.accept()
+            } catch (e: Exception) {
+                if (listener === server) Log.w(TAG, "Local API stopped accepting: ${e.message}")
+                break
+            }
+            val uid = try {
+                client.peerCredentials.uid
+            } catch (e: Exception) {
+                -1
+            }
+            if (!isTrustedPeer(uid, ownUid)) {
+                Log.w(TAG, "Refused a local API connection from uid $uid")
+                closeQuietly(client)
+                continue
+            }
+            clients.add(client)
+            thread(name = "LocalApi client", isDaemon = true) { handleClient(client) }
+        }
+    }
+
+    private fun handleClient(client: LocalSocket) {
+        try {
+            client.soTimeout = SOCKET_READ_TIMEOUT
+            val session = HTTPSession(tempFileManagerFactory.create(), client.inputStream, client.outputStream)
+            // execute() serves one request and throws when the caller closes or wants no keep-alive.
+            while (listener != null) session.execute()
+        } catch (e: Exception) {
+            if (e.message != "NanoHttpd Shutdown") Log.d(TAG, "Local API connection ended: ${e.message}")
+        } finally {
+            clients.remove(client)
+            closeQuietly(client)
+        }
+    }
+
+    override fun stop() {
+        val server = listener ?: return
+        listener = null
+        // Closing the socket alone does not wake a thread blocked in accept(); shutting it down does.
+        try {
+            Os.shutdown(server.fileDescriptor, OsConstants.SHUT_RDWR)
+        } catch (e: Exception) {
+            // already closed
+        }
+        closeQuietly(server)
+        clients.forEach { closeQuietly(it) }
+        clients.clear()
+        acceptThread?.join(1000)
+        acceptThread = null
+    }
+
+    private fun closeQuietly(c: Closeable) {
+        try {
+            c.close()
+        } catch (e: Exception) {
+            // nothing to do
+        }
+    }
 
     override fun serve(session: IHTTPSession): Response {
         val uri = session.uri.trimEnd('/')
@@ -90,10 +178,8 @@ class LocalApiServer(
 
             // SMS
             method == Method.POST && uri == "/api/sms/send" -> handleSmsSend(session)
-            method == Method.POST && uri == "/api/sms/auto-forward" -> handleSmsAutoForward(session)
-            method == Method.GET && uri == "/api/sms/auto-forward" -> jsonOk(JSONObject().put("forward_to", net.meshsat.android.sms.SmsReceiver.autoForwardTo))
 
-            // Settings (localhost only, for E2E automation)
+            // Settings, for E2E automation
             method == Method.POST && uri == "/api/settings/hub" -> handleHubSettings(session)
 
             // Iridium 9603 on the MeshSat node (MESHSAT-1236); both are free, no satellite session
@@ -708,14 +794,6 @@ class LocalApiServer(
         return jsonOk(JSONObject().put("status", "sent").put("to", to))
     }
 
-    private fun handleSmsAutoForward(session: IHTTPSession): Response {
-        val body = readBody(session) ?: return jsonError(Response.Status.BAD_REQUEST, "empty body")
-        val json = JSONObject(body)
-        val forwardTo = json.optString("forward_to", "")
-        net.meshsat.android.sms.SmsReceiver.autoForwardTo = forwardTo
-        return jsonOk(JSONObject().put("status", "ok").put("forward_to", forwardTo))
-    }
-
     // --- Helpers ---
 
     private fun jsonOk(json: JSONObject): Response {
@@ -733,6 +811,16 @@ class LocalApiServer(
 
     companion object {
         private const val TAG = "LocalApiServer"
-        const val DEFAULT_PORT = 6051
+
+        /** The abstract socket name, the target of `adb forward ... localabstract:meshsat-api`. */
+        const val SOCKET_NAME = "meshsat-api"
+
+        /** adb's shell user (AID_SHELL in android_filesystem_config.h). */
+        private const val SHELL_UID = 2000
+        private const val ROOT_UID = 0
+
+        /** adb (shell, or root after `adb root`) and this app itself; every other app is refused. */
+        fun isTrustedPeer(uid: Int, ownUid: Int): Boolean =
+            uid == SHELL_UID || uid == ROOT_UID || uid == ownUid
     }
 }

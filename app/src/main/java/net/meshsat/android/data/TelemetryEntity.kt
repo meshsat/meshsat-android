@@ -12,9 +12,8 @@ import androidx.room.PrimaryKey
  * bounded per-type via the DAO's trim queries to prevent unbounded growth.
  *
  * Contents are queryable via the Local REST API (endpoints under
- * `/api/telemetry`) on `localhost:6051` so a user can pull diagnostics
- * without USB/logcat access, and cleared via `DELETE /api/telemetry` for
- * privacy.
+ * `/api/telemetry`), open to adb only, so diagnostics can be pulled without
+ * logcat, and cleared via `DELETE /api/telemetry` for privacy.
  *
  * The master switch `telemetryEnabled` in [SettingsRepository] gates all
  * writes; when disabled no rows are inserted regardless of the call site.

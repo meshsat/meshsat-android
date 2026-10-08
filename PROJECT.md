@@ -30,7 +30,7 @@ of these externally.
 4. **Engine internals** — Dispatcher (`engine/Dispatcher.kt`), DeadManSwitch, GeofenceMonitor, HealthScorer, InterfaceManager, BurstQueue, CreditTracker, SequenceTracker, TelemetryLogger.
 5. **Data layer** — Room database with 18 entities at version 14 (`data/AppDatabase.kt`), migrations `MIGRATION_5_6` through `MIGRATION_13_14`.
 6. **Service layer** — Foreground GatewayService (`service/GatewayService.kt`) hosts transports; TransportRegistry tracks active adapters.
-7. **Local REST API** — NanoHTTPD-based server at 127.0.0.1 (`api/LocalApiServer.kt`) for scripting + automation; port of the Bridge's `meshsat/internal/api/`.
+7. **Local REST API** — NanoHTTPD-based server on the abstract Unix socket `meshsat-api`, open to adb and the app only (`api/LocalApiServer.kt`) for scripting + automation; port of the Bridge's `meshsat/internal/api/`.
 8. **Compose UI** — 1 top-level orchestrator (`ui/MeshSatUI.kt`), 17 screens under `ui/screens/`, theme set under `ui/theme/`, components under `ui/components/`.
 
 ## What this repo does NOT own
