@@ -1,0 +1,1 @@
+A message sent through a RockBLOCK 9704 is no longer queued in the modem several times while no satellite is in view: a send that gets no answer is cancelled in the modem before the app tries again.
