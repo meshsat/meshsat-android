@@ -29,6 +29,7 @@ class SettingsRepository(private val context: Context) {
         val KEY_IRIDIUM_NODE_PIPE = booleanPreferencesKey("iridium_node_pipe_enabled")
         val KEY_IRIDIUM9704_BT_ADDR = stringPreferencesKey("iridium9704_bt_address")
         val KEY_NODE_MODEM = stringPreferencesKey("node_modem")
+        const val NODE_MODEM_AUTO = "auto"
         const val NODE_MODEM_9603 = "9603"
         const val NODE_MODEM_9704 = "9704"
         val KEY_MSVQSC_ENABLED = booleanPreferencesKey("msvqsc_enabled")
@@ -211,10 +212,11 @@ class SettingsRepository(private val context: Context) {
     }
 
     /**
-     * Which RockBLOCK sits behind the MeshSat node's Iridium pipe: "9603" (AT, SBD) or "9704"
-     * (JSPR, IMT). The pipe is transparent, so the phone has to be told (MESHSAT-1507).
+     * Which RockBLOCK sits behind the MeshSat node's Iridium pipe: "auto" follows the node's own
+     * word (STATUS flag bit 4 set = a 9704 speaking JSPR, clear = a 9603), "9603" and "9704"
+     * override it (MESHSAT-1507).
      */
-    val nodeModem: Flow<String> = context.dataStore.data.map { it[KEY_NODE_MODEM] ?: NODE_MODEM_9603 }
+    val nodeModem: Flow<String> = context.dataStore.data.map { it[KEY_NODE_MODEM] ?: NODE_MODEM_AUTO }
 
     suspend fun setNodeModem(modem: String) {
         context.dataStore.edit { it[KEY_NODE_MODEM] = modem }

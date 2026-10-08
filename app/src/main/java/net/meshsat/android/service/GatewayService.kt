@@ -2888,6 +2888,9 @@ class GatewayService : Service() {
         }
     }
 
+    // True while the 9603 interface is parked because the node's modem is a 9704 (MESHSAT-1507).
+    @Volatile private var iridium0ParkedForImt = false
+
     /** What the pipe observer combines: the pipe, whether the phone wants the node's modem, and which modem it is. */
     private data class NodePipeWish(
         val pipe: net.meshsat.android.ble.IridiumBlePipe?,
@@ -2954,11 +2957,27 @@ class GatewayService : Service() {
                         }
                     }
                     pipe.owner.collect { owner ->
-                        // The pipe is transparent: the setting says which RockBLOCK the node carries,
-                        // and the matching driver takes the link (MESHSAT-1507).
+                        // The pipe is transparent. The node says what it carries with STATUS flag bit 4
+                        // (set: a 9704 speaking JSPR); the setting can override it, and an older node
+                        // without the bit is a 9603 (MESHSAT-1507).
                         val imt = iridium9704Spp
+                        val use9704 = when (modem) {
+                            SettingsRepository.NODE_MODEM_9704 -> true
+                            SettingsRepository.NODE_MODEM_9603 -> false
+                            else -> pipe.status.value?.flags?.modemIsJspr == true
+                        }
                         if (owner == IridiumPipeContract.Owner.Phone) {
-                            if (modem == SettingsRepository.NODE_MODEM_9704 && imt != null) {
+                            Log.i("MeshSat", "Iridium: the node carries a ${if (use9704) "9704" else "9603"} (setting $modem)")
+                            // The 9603 interface would otherwise retry its attach every 10 s against a
+                            // modem that never answers AT; it is parked while the 9704 holds the pipe.
+                            if (use9704 && !iridium0ParkedForImt) {
+                                interfaceManager?.disable("iridium_0")
+                                iridium0ParkedForImt = true
+                            } else if (!use9704 && iridium0ParkedForImt) {
+                                interfaceManager?.enable("iridium_0")
+                                iridium0ParkedForImt = false
+                            }
+                            if (use9704 && imt != null) {
                                 if (imt.state.value == net.meshsat.android.bt.Iridium9704Spp.State.Disconnected) imt.attach(pipe.asModemLink())
                             } else if (spp.state.value == IridiumSpp.State.Disconnected) {
                                 spp.attach(pipe.asModemLink())

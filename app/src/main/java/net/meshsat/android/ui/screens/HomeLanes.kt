@@ -149,7 +149,10 @@ fun HomeLanes(navigate: (String) -> Unit) {
 
     // --- Satellite ---
     val sppState = spp?.state?.value ?: IridiumSpp.State.Disconnected
-    val bars = spp?.signal?.value ?: 0
+    // A RockBLOCK 9704, on the node's pipe or an HC-05, has its own driver (MESHSAT-1507).
+    val imt = GatewayService.iridium9704Spp
+    val imtState = imt?.state?.value ?: net.meshsat.android.bt.Iridium9704Spp.State.Disconnected
+    val bars = if (imtState == net.meshsat.android.bt.Iridium9704Spp.State.Ready) imt?.signal?.value ?: 0 else spp?.signal?.value ?: 0
     val silent = spp?.modemSilent?.value == true
     val owner = ble?.iridiumPipe?.value?.owner?.value
     val passes = GatewayService.passes.value
@@ -173,6 +176,10 @@ fun HomeLanes(navigate: (String) -> Unit) {
         // phone cannot reach the radio at all; the satellite is not the problem.
         spp?.linkBroken?.value == true ->
             LaneState.Failed to (satQueueLine + "The phone cannot reach the node's modem. Getting the link back.").trim()
+        imtState == net.meshsat.android.bt.Iridium9704Spp.State.Ready ->
+            LaneState.Working to (satQueueLine + (passLine ?: "Modem ready.")).trim()
+        imtState != net.meshsat.android.bt.Iridium9704Spp.State.Disconnected ->
+            LaneState.Trying to "Bringing the 9704 up."
         sppState == IridiumSpp.State.Connected ->
             LaneState.Working to (satQueueLine + (passLine ?: "Modem ready.")).trim()
         sppState == IridiumSpp.State.Connecting && silent ->
