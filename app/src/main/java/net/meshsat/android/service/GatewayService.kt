@@ -2268,7 +2268,11 @@ class GatewayService : Service() {
             scope.launch {
                 spp.state.collect { state ->
                     when (state) {
-                        net.meshsat.android.bt.Iridium9704Spp.State.Ready -> mgr.setOnline("iridium9704_0")
+                        net.meshsat.android.bt.Iridium9704Spp.State.Ready -> {
+                            mgr.setOnline("iridium9704_0")
+                            // Messages for the satellite wait on iridium_0; the node's 9704 carries them.
+                            if (iridium0ParkedForImt) wakeSatelliteQueueFor9704("the node's 9704 is up")
+                        }
                         net.meshsat.android.bt.Iridium9704Spp.State.Disconnected -> mgr.setOffline("iridium9704_0")
                         net.meshsat.android.bt.Iridium9704Spp.State.Connecting,
                         net.meshsat.android.bt.Iridium9704Spp.State.Connected,
@@ -2279,6 +2283,17 @@ class GatewayService : Service() {
             scope.launch {
                 spp.error.collect { err ->
                     if (err.isNotBlank()) mgr.setError("iridium9704_0", err)
+                }
+            }
+            // The node's 9704 sees a satellite: what waits for the satellite goes now, as the 9603
+            // path drains on a bar (MESHSAT-1249). A wake-up, never a gate: a send at 0 bars runs.
+            scope.launch {
+                spp.signal.collect { bars ->
+                    if (bars >= IRIDIUM_MIN_SIGNAL_BARS && iridium0ParkedForImt &&
+                        spp.state.value == net.meshsat.android.bt.Iridium9704Spp.State.Ready
+                    ) {
+                        wakeSatelliteQueueFor9704("the node's 9704 sees a satellite ($bars/5)")
+                    }
                 }
             }
         }
@@ -2487,6 +2502,11 @@ class GatewayService : Service() {
                     null // success
                 }
                 interfaceId == "iridium_0" -> {
+                    // The node carries a 9704 (its STATUS flag bit 4, or the setting): that is the
+                    // satellite now. The composer, the rules, the receipts and the Home count all
+                    // name this one link, so its messages go out over IMT here. Until 8 Oct 2026
+                    // they waited for a 9603 that was not there ("iridium not connected", MESHSAT-1507).
+                    if (iridium0ParkedForImt) return sendVia9704(payload, textPreview)
                     val spp = iridiumSpp
                         ?: return "iridium not available"
                     if (spp.state.value != IridiumSpp.State.Connected)
@@ -2525,20 +2545,7 @@ class GatewayService : Service() {
                     null // success: Dispatcher.onSent records it
                 }
                 interfaceId == "iridium9704_0" -> {
-                    val spp = iridium9704Spp
-                        ?: return "9704 not available"
-                    if (spp.state.value != net.meshsat.android.bt.Iridium9704Spp.State.Ready)
-                        return "9704 not ready"
-                    val data = if (payload.isNotEmpty()) payload else textPreview.toByteArray()
-                    // 9704 supports up to 100KB — no app-level fragmentation needed
-                    val status = spp.sendMessageBlocking(data)
-                    // A cancel the modem never settled leaves the message there: it may still go.
-                    if (status == net.meshsat.android.bt.Iridium9704Spp.MO_CANCEL_UNANSWERED) {
-                        return "${Dispatcher.UNCONFIRMED} the 9704 did not answer the cancel of a message it held"
-                    }
-                    if (status != "mo_ack_received") {
-                        return "9704 MO failed: ${status ?: "timeout"}"
-                    }
+                    sendVia9704(payload, textPreview)?.let { return it }
                     db.messageDao().insert(
                         Message(
                             transport = "iridium9704", direction = "tx", sender = "self",
@@ -2914,6 +2921,35 @@ class GatewayService : Service() {
         SettingsRepository.NODE_MODEM_9704 -> true
         SettingsRepository.NODE_MODEM_9603 -> false
         else -> pipe.status.value?.flags?.modemIsJspr == true
+    }
+
+    /**
+     * One message out through the RockBLOCK 9704, null when the satellite acknowledged it. The
+     * driver cancels a send that sees no satellite before it answers, so a retry never leaves a
+     * second copy in the modem; a cancel the modem never settled is unconfirmed (MESHSAT-1507).
+     */
+    private suspend fun sendVia9704(payload: ByteArray, textPreview: String): String? {
+        val spp = iridium9704Spp ?: return "9704 not available"
+        if (spp.state.value != net.meshsat.android.bt.Iridium9704Spp.State.Ready) return "9704 not ready"
+        val data = if (payload.isNotEmpty()) payload else textPreview.toByteArray()
+        // Up to 100 KB in one message: nothing is cut into parts.
+        val status = spp.sendMessageBlocking(data)
+        if (status == net.meshsat.android.bt.Iridium9704Spp.MO_CANCEL_UNANSWERED) {
+            return "${Dispatcher.UNCONFIRMED} the 9704 did not answer the cancel of a message it held"
+        }
+        if (status != "mo_ack_received") return "9704 MO failed: ${status ?: "timeout"}"
+        return null
+    }
+
+    /**
+     * The satellite queue waits on iridium_0, whose interface is parked while the node's 9704
+     * holds the pipe; a parked interface may have lost its worker (stopped when it left Online).
+     * Starting it again is a no-op when it runs, and releases held deliveries.
+     */
+    private suspend fun wakeSatelliteQueueFor9704(reason: String) {
+        val disp = dispatcher ?: return
+        disp.startWorker("iridium_0")
+        disp.drainNow("iridium_0", reason)
     }
 
     private data class NodePipeWish(
