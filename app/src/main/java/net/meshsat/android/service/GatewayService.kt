@@ -2888,6 +2888,14 @@ class GatewayService : Service() {
         }
     }
 
+    /** What the pipe observer combines: the pipe, whether the phone wants the node's modem, and which modem it is. */
+    private data class NodePipeWish(
+        val pipe: net.meshsat.android.ble.IridiumBlePipe?,
+        val enabled: Boolean,
+        val wanted: Boolean,
+        val modem: String,
+    )
+
     private fun observeIridiumPipe() {
         val ble = meshtasticBle ?: return
         val spp = iridiumSpp ?: return
@@ -2913,10 +2921,11 @@ class GatewayService : Service() {
             }
         }
         scope.launch {
-            combine(ble.iridiumPipe, settings.iridiumNodePipeEnabled, iridiumWanted) { pipe, enabled, wanted ->
-                Triple(pipe, enabled, wanted)
-            }.collectLatest { (pipe, enabled, wanted) ->
+            combine(ble.iridiumPipe, settings.iridiumNodePipeEnabled, iridiumWanted, settings.nodeModem) { pipe, enabled, wanted, modem ->
+                NodePipeWish(pipe, enabled, wanted, modem)
+            }.collectLatest { (pipe, enabled, wanted, modem) ->
                 spp.detach()
+                iridium9704Spp?.detach()
                 if (pipe == null) return@collectLatest
                 // The node's health (contract v2 STATS) is shown whoever holds the modem.
                 pipe.watchStats()
@@ -2945,10 +2954,18 @@ class GatewayService : Service() {
                         }
                     }
                     pipe.owner.collect { owner ->
+                        // The pipe is transparent: the setting says which RockBLOCK the node carries,
+                        // and the matching driver takes the link (MESHSAT-1507).
+                        val imt = iridium9704Spp
                         if (owner == IridiumPipeContract.Owner.Phone) {
-                            if (spp.state.value == IridiumSpp.State.Disconnected) spp.attach(pipe.asModemLink())
+                            if (modem == SettingsRepository.NODE_MODEM_9704 && imt != null) {
+                                if (imt.state.value == net.meshsat.android.bt.Iridium9704Spp.State.Disconnected) imt.attach(pipe.asModemLink())
+                            } else if (spp.state.value == IridiumSpp.State.Disconnected) {
+                                spp.attach(pipe.asModemLink())
+                            }
                         } else {
                             spp.detach()
+                            imt?.detach()
                         }
                     }
                 }

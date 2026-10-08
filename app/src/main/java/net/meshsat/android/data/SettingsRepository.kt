@@ -28,6 +28,9 @@ class SettingsRepository(private val context: Context) {
         // The phone takes the MeshSat node's RockBLOCK 9603 over its BLE pipe (MESHSAT-1236).
         val KEY_IRIDIUM_NODE_PIPE = booleanPreferencesKey("iridium_node_pipe_enabled")
         val KEY_IRIDIUM9704_BT_ADDR = stringPreferencesKey("iridium9704_bt_address")
+        val KEY_NODE_MODEM = stringPreferencesKey("node_modem")
+        const val NODE_MODEM_9603 = "9603"
+        const val NODE_MODEM_9704 = "9704"
         val KEY_MSVQSC_ENABLED = booleanPreferencesKey("msvqsc_enabled")
         val KEY_MSVQSC_STAGES = stringPreferencesKey("msvqsc_stages") // "auto" or "2"-"8"
         val KEY_DEADMAN_ENABLED = booleanPreferencesKey("deadman_enabled")
@@ -205,6 +208,16 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setIridiumNodePipeEnabled(enabled: Boolean) {
         context.dataStore.edit { it[KEY_IRIDIUM_NODE_PIPE] = enabled }
+    }
+
+    /**
+     * Which RockBLOCK sits behind the MeshSat node's Iridium pipe: "9603" (AT, SBD) or "9704"
+     * (JSPR, IMT). The pipe is transparent, so the phone has to be told (MESHSAT-1507).
+     */
+    val nodeModem: Flow<String> = context.dataStore.data.map { it[KEY_NODE_MODEM] ?: NODE_MODEM_9603 }
+
+    suspend fun setNodeModem(modem: String) {
+        context.dataStore.edit { it[KEY_NODE_MODEM] = modem }
     }
 
     /** The HC-05 of a RockBLOCK 9704 this phone has connected to; empty when none ever was. */
