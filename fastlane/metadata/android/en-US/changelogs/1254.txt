@@ -1,0 +1,1 @@
+A MeshSat node can now carry a RockBLOCK 9704: choose the modem on the node under Settings, Satellite modem on the node, and the app's 9704 driver works through the node's Bluetooth pipe the way the 9603 driver does. The node modem card shows the 9704's state, signal, IMEI and serial.
