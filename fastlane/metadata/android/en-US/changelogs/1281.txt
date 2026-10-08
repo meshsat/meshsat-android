@@ -1,1 +1,1 @@
-A message sent through a RockBLOCK 9704 is no longer queued in the modem several times while no satellite is in view: a send that gets no answer is cancelled in the modem before the app tries again.
+Messages for the satellite now go out through a RockBLOCK 9704 behind your MeshSat node; before, they waited for a 9603 that was not there. A send that sees no satellite is cancelled in the modem before the app tries again, so the modem never holds a message twice.
