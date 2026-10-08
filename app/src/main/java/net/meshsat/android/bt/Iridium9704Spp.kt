@@ -52,7 +52,26 @@ class Iridium9704Spp(private val context: Context) {
 
         private const val JSPR_TIMEOUT_MS = 10_000L
         private const val SIGNAL_TIMEOUT_MS = 2_000L
-        private const val MO_TIMEOUT_MS = 120_000L
+        // An accepted message stays in the modem until it goes or is cancelled, so a send that
+        // walks away on a timeout leaves it there and the retry queues a second copy (the Bridge's
+        // 20 message soak of 21 Sep 2026: 7 duplicates, MESHSAT-1282). As the Bridge does
+        // (internal/transport/jspr.go, cmd/jspr-helper), a send with no final status after 150 s
+        // is cancelled by its message_id with Ground Control's PUT messageOriginateStatus
+        // {"action": "cancel"}, and the modem's one answer for that id settles it within 20 s:
+        // cancelled (a retry is safe) or mo_ack_received (it went).
+        private const val MO_BUDGET_MS = 150_000L
+        private const val MO_CANCEL_SETTLE_MS = 20_000L
+
+        /** A send's answer when the modem never settled its cancel: the message may still go out. */
+        const val MO_CANCEL_UNANSWERED = "cancel_unanswered"
+
+        /**
+         * True when a messageOriginateStatus naming [statusId] settles the send in flight as
+         * [inFlightId]. The modem reports every message it holds, including those the node or
+         * another client queued on it (MESHSAT-1507), so another id never settles this send.
+         * A status without an id (-1) still does, as before.
+         */
+        internal fun moStatusSettles(inFlightId: Int, statusId: Int): Boolean = statusId < 0 || statusId == inFlightId
         private const val MAX_SEGMENT_SIZE = 1446
         private const val RAW_TOPIC = 244
 
@@ -607,16 +626,43 @@ class Iridium9704Spp(private val context: Context) {
      */
     suspend fun sendMessageBlocking(data: ByteArray, topicId: Int = RAW_TOPIC): String? {
         if (!sendMessage(data, topicId)) return null
+        awaitMoFinal(MO_BUDGET_MS)?.let { return it }
+        when (_moStatus.value) {
+            // The answer landed as the budget ran out.
+            MoStatus.Complete, MoStatus.Failed -> {
+                val status = moFinalStatus
+                resetMoStatus()
+                return status
+            }
+            MoStatus.Segmenting -> {}
+            else -> {
+                // Never accepted: nothing of this send is in the modem.
+                resetMoStatus()
+                return null
+            }
+        }
+        val id = moMessageId
+        Log.w(TAG, "MO $id: no final status in ${MO_BUDGET_MS / 1000} s; cancelling it in the modem")
+        val answer = try {
+            sendJspr(
+                "PUT", "messageOriginateStatus",
+                JSONObject().put("topic_id", moTopicId).put("message_id", id).put("action", "cancel"),
+            )
+        } catch (e: IOException) {
+            null
+        }
+        if (answer != null) awaitMoFinal(MO_CANCEL_SETTLE_MS)?.let { return it }
+        Log.w(TAG, "MO $id: the modem did not settle the cancel; the message may still go out")
+        resetMoStatus()
+        return MO_CANCEL_UNANSWERED
+    }
 
-        val deadline = System.currentTimeMillis() + MO_TIMEOUT_MS
+    /** The final status of the send in flight, once [handleMoStatus] has it, or null after [budgetMs]. */
+    private suspend fun awaitMoFinal(budgetMs: Long): String? {
+        val deadline = System.currentTimeMillis() + budgetMs
         while (System.currentTimeMillis() < deadline) {
             when (_moStatus.value) {
-                MoStatus.Complete -> {
-                    val status = moFinalStatus
-                    resetMoStatus()
-                    return status
-                }
-                MoStatus.Failed -> {
+                MoStatus.Complete, MoStatus.Failed -> {
                     val status = moFinalStatus
                     resetMoStatus()
                     return status
@@ -624,7 +670,6 @@ class Iridium9704Spp(private val context: Context) {
                 else -> delay(100)
             }
         }
-        resetMoStatus()
         return null
     }
 
@@ -668,6 +713,12 @@ class Iridium9704Spp(private val context: Context) {
 
     private suspend fun handleMoStatus(json: JSONObject) {
         val status = json.optString("final_mo_status", "")
+        val id = json.optInt("message_id", -1)
+        if (_moStatus.value != MoStatus.Segmenting || !moStatusSettles(moMessageId, id)) {
+            // A message this phone is not waiting for: it neither settles nor blocks the next send.
+            Log.i(TAG, "MO status for message $id, not this phone's send: $status")
+            return
+        }
         moFinalStatus = status
         if (status == "mo_ack_received") {
             _moStatus.value = MoStatus.Complete

@@ -63,6 +63,31 @@ fun registerAndroidDefaults(registry: ChannelRegistry) {
         )
     )
 
+    // A RockBLOCK 9704 (IMT), on an HC-05 or behind a MeshSat node. Without an entry its sends
+    // retried 3 times 5 s apart and each retry queued another copy in the modem (MESHSAT-1507).
+    // It retries as the 9603 does; a send that sees no satellite is cancelled in the modem
+    // after 150 s, so every retry starts from an empty slot.
+    registry.register(
+        ChannelDescriptor(
+            id = "iridium9704",
+            label = "Iridium IMT (RockBLOCK 9704)",
+            isPaid = true,
+            canSend = true,
+            canReceive = true,
+            binaryCapable = true,
+            maxPayload = 100_000,
+            defaultTtl = 3600.seconds,
+            isSatellite = true,
+            retryConfig = RetryConfig(
+                enabled = true,
+                initialWait = 180.seconds,
+                maxWait = 30.minutes,
+                maxRetries = 10,
+                backoffFunc = "isu",
+            ),
+        )
+    )
+
     registry.register(
         ChannelDescriptor(
             id = "sms",
