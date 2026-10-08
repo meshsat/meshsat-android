@@ -1,0 +1,1 @@
+After a message through a RockBLOCK 9704 is cancelled or refused, the 9704 link stays online instead of showing as reconnecting while the modem is fine.
