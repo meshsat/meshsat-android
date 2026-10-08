@@ -2282,7 +2282,16 @@ class GatewayService : Service() {
             }
             scope.launch {
                 spp.error.collect { err ->
-                    if (err.isNotBlank()) mgr.setError("iridium9704_0", err)
+                    if (err.isBlank()) return@collect
+                    // A message the modem refused or cancelled is that message's failure, not the
+                    // link's, as for the 9603 (MESHSAT-1243): while the modem is ready the interface
+                    // keeps its state. Marked ERROR, it left Online, lost its worker and, behind the
+                    // node, sat at Connecting with the modem ready (8 Oct 2026 14:33, MESHSAT-1507).
+                    if (spp.state.value == net.meshsat.android.bt.Iridium9704Spp.State.Ready) {
+                        mgr.noteError("iridium9704_0", err)
+                    } else {
+                        mgr.setError("iridium9704_0", err)
+                    }
                 }
             }
             // The node's 9704 sees a satellite: what waits for the satellite goes now, as the 9603
