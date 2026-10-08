@@ -242,6 +242,21 @@ class Iridium9704Spp(private val context: Context) {
         scope.launch { initialize() }
     }
 
+    /**
+     * [attach] only while the driver is idle, as one step: the pipe observer and its retry can
+     * both find the 9704 down at the same moment, and two inits on one link would read each
+     * other's replies.
+     */
+    @Synchronized
+    fun attachIfIdle(newLink: ModemLink): Boolean {
+        if (_state.value != State.Disconnected) return false
+        attach(newLink)
+        return true
+    }
+
+    /** True while the driver rides the node's pipe, including after an init over it failed. */
+    val onNodePipe: Boolean get() = link != null
+
     /** Stop using the node's pipe without closing it; the node keeps the modem powered. No-op on an HC-05. */
     fun detach() {
         if (link == null) return
