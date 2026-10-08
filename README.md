@@ -80,7 +80,7 @@ Routing rules (Setup > Advanced > Routing rules) decide what is forwarded betwee
 
 - **Mesh.** Meshtastic over Bluetooth LE with the official protobufs: text, positions, telemetry, waypoints, node info, traceroute and more. A reply to a node goes to that node, not to the whole channel. People lists the nodes you hear, with a button to message one or show it on the map, and Mesh topology draws how they are linked from their neighbour info. Region, channels and transmit power are under Setup > Mesh radio settings; the app only sends back values it has read from the radio.
 - **Satellite.** Iridium SBD through the node's RockBLOCK 9603, up to 340 bytes out and 270 bytes in. Messages wait in a queue and are retried until they go out, and a message that arrives during any satellite session is stored straight away. The app opens a satellite session only when there is something to send, when the modem rings, when the gateway holds a message and the modem sees a satellite, or when you tap Check Mailbox. It never checks on a timer and never because it reconnected to the node, because every session costs a credit. If Bluetooth drops in the middle of a session, the node finishes it on its own and the app treats the message as possibly sent and retries it after the modem's 3-minute pause. Passes are predicted on the phone from orbit data that ships with the app and is refreshed when there is internet, and the signal shows as an icon in Android's status bar.
-- **RockBLOCK 9704 (Iridium IMT)** over an HC-05/06 Bluetooth serial adapter, with messages up to 100 KB. The code is there; it has not been tested on hardware.
+- **RockBLOCK 9704 (Iridium IMT)**, with messages up to 100 KB. A MeshSat node can carry one instead of a 9603. The node says which modem it has, and with **Modem on the node** on Auto (Setup > Satellite, the default) the app picks the matching driver; 9603 and 9704 override it. A send that sees no satellite within 150 seconds is cancelled in the modem before the app tries again, so the modem never holds a message twice. Through an HC-05/06 Bluetooth serial adapter the code is there, but it has not been tested on hardware.
 - **SMS** through the phone's own SIM, optionally encrypted per conversation with AES-256-GCM. Mesh and SMS messages are compressed with MSVQ-SC by default. It is lossy: what arrives means the same, but may not be word for word what was sent.
 - **APRS** through a KISS TNC over TCP (Direwolf, for example) or directly to APRS-IS, with smart beaconing and acknowledged messages.
 - **Hub.** MQTT with a client certificate. The phone shows up in the Hub's fleet like a field kit, reports health and positions, and takes remote commands: send a message, flush the queue, update config, rotate keys, reboot. When a field kit cannot be reached directly, the app can reach it through a tunnel via the Hub.
@@ -105,7 +105,8 @@ The map works without internet down to country level, from a world overview buil
 | Pass prediction with no internet | Verified 19 September 2026 |
 | The phone connected to the Hub as a bridge | Verified 19 September 2026 |
 | Recovery when the node drops out mid-session | Verified 20 September 2026: the node was restarted while the phone held its modem, and the phone marked the link down and took the modem back on its own in 8 seconds |
-| RockBLOCK 9704 | **Not tested on hardware** |
+| RockBLOCK 9704 behind a MeshSat node | Bench, 8 October 2026, on a T-Beam Supreme with a 9704: the app picked the 9704 from the node's own word, brought it up in under 2 seconds, had it back by itself 65 seconds after the node restarted, and handed it a message, which it cancelled cleanly when no satellite was in view. **No message through a satellite yet** |
+| RockBLOCK 9704 over an HC-05/06 adapter | **Not tested on hardware** |
 | SOS: hold to send, SMS to an emergency contact, cancel, and the cancellation after it | Verified 19 September 2026 on the Android 11 emulator (2.13.0) |
 | SOS by satellite to the Hub | The frame matches the Bridge's byte for byte in tests. **Not sent through the Hub yet**: it would page the on-call chain |
 | SOS over the mesh and to the Hub online, and Test the alarm on the phone | **Not exercised yet** |
@@ -125,6 +126,7 @@ The map works without internet down to country level, from a world overview buil
 | Phone | Android emulator, API 30 | | Build checks |
 | MeshSat node | v0: XIAO ESP32-S3, Wio-SX1262, RockBLOCK 9603 | Bluetooth LE | Tested, mesh and satellite |
 | MeshSat node | v1: LILYGO T-Beam Supreme, RockBLOCK 9603 | Bluetooth LE | Being built |
+| MeshSat node | compact v2 prototype: LILYGO T-Beam Supreme, RockBLOCK 9704 | Bluetooth LE | Bench tested, no satellite message yet |
 | Meshtastic radio | Any Meshtastic device, for example a LILYGO T-Echo or T-Deck, a Heltec LoRa V4 or a XIAO ESP32-S3 with an SX1262 | Bluetooth LE | Should work, mesh only |
 | Satellite | RockBLOCK 9704 | HC-05/06 Bluetooth serial | Not tested |
 | APRS | Any KISS TNC reachable over TCP, for example Direwolf with a Quansheng UV-K5 and an AIOC | KISS over TCP | Should work |
