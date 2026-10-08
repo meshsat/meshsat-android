@@ -163,4 +163,39 @@ class Iridium9704Test {
     fun imtMaxSize() {
         assertEquals(100_000, Iridium9704Spp.IMT_MAX_SIZE)
     }
+
+    // ═══════════════════════════════════════════════════════════════
+    // MO final status: only the send's own message settles it (MESHSAT-1507)
+    // ═══════════════════════════════════════════════════════════════
+
+    @Test
+    fun moStatus_ownMessageSettlesTheSend() {
+        assertTrue(Iridium9704Spp.moStatusSettles(inFlightId = 4, statusId = 4))
+    }
+
+    @Test
+    fun moStatus_anotherMessageInTheModemDoesNot() {
+        // The node's own text (3) and a laptop's (2) sat in the same modem on 8 Oct 2026.
+        assertFalse(Iridium9704Spp.moStatusSettles(inFlightId = 4, statusId = 3))
+        assertFalse(Iridium9704Spp.moStatusSettles(inFlightId = 4, statusId = 2))
+    }
+
+    @Test
+    fun moStatus_withoutAnIdStillSettles() {
+        assertTrue(Iridium9704Spp.moStatusSettles(inFlightId = 4, statusId = -1))
+    }
+
+    @Test
+    fun channel9704_retriesAsTheSatelliteChannelDoes() {
+        val registry = net.meshsat.android.channel.ChannelRegistry()
+        net.meshsat.android.channel.registerAndroidDefaults(registry)
+        val imt = registry.get("iridium9704")
+        assertNotNull("the 9704 needs its own entry, or its sends retry 3 times 5 s apart", imt)
+        val sbd = registry.get("iridium")!!
+        assertTrue(imt!!.isSatellite)
+        assertTrue(imt.retryConfig.enabled)
+        assertEquals("isu", imt.retryConfig.backoffFunc)
+        assertEquals(sbd.retryConfig.maxRetries, imt.retryConfig.maxRetries)
+        assertEquals(sbd.retryConfig.initialWait, imt.retryConfig.initialWait)
+    }
 }

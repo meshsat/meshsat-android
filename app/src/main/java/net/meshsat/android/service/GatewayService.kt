@@ -1076,8 +1076,12 @@ class GatewayService : Service() {
                                     val payload = if (dataB64.isNotBlank()) {
                                         android.util.Base64.decode(dataB64, android.util.Base64.DEFAULT)
                                     } else text.toByteArray()
-                                    val status = spp.sendMessageBlocking(payload)
-                                    if (status != null) null else "send timed out"
+                                    // Only the satellite's acknowledgement is a send; "cancelled" is not.
+                                    when (val status = spp.sendMessageBlocking(payload)) {
+                                        "mo_ack_received" -> null
+                                        null -> "send timed out"
+                                        else -> "not sent: $status"
+                                    }
                                 }
                             }
                             else -> {
@@ -2528,6 +2532,10 @@ class GatewayService : Service() {
                     val data = if (payload.isNotEmpty()) payload else textPreview.toByteArray()
                     // 9704 supports up to 100KB — no app-level fragmentation needed
                     val status = spp.sendMessageBlocking(data)
+                    // A cancel the modem never settled leaves the message there: it may still go.
+                    if (status == net.meshsat.android.bt.Iridium9704Spp.MO_CANCEL_UNANSWERED) {
+                        return "${Dispatcher.UNCONFIRMED} the 9704 did not answer the cancel of a message it held"
+                    }
                     if (status != "mo_ack_received") {
                         return "9704 MO failed: ${status ?: "timeout"}"
                     }
