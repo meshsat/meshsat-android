@@ -45,6 +45,12 @@ class Identity private constructor(
     /** Raw 32-byte X25519 public key (for wire format). */
     val encryptionPubRaw: ByteArray = extractRaw(encryptionPublic)
 
+    /** The 32-byte Ed25519 seed, as RNS Identity.from_bytes takes it (MESHSAT-1553). */
+    val signingSeedRaw: ByteArray by lazy { net.meshsat.android.rns.RnsIdentity.rawPrivateFromPkcs8(signingPrivate.encoded) }
+
+    /** The 32-byte X25519 private scalar, as RNS Identity.from_bytes takes it (MESHSAT-1553). */
+    val encryptionPrivRaw: ByteArray by lazy { net.meshsat.android.rns.RnsIdentity.rawPrivateFromPkcs8(encryptionPrivate.encoded) }
+
     /** 16-byte destination hash. */
     val destHash: ByteArray = computeDestHash(signingPubRaw, encryptionPubRaw)
 
