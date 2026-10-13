@@ -40,6 +40,7 @@ class RnsStack(
 
     private val sendChannels = ConcurrentHashMap<String, Channel<ByteArray>>()
     private var announceJob: Job? = null
+    private var syncJob: Job? = null
 
     init {
         val tx = object : Transmitter {
@@ -114,6 +115,7 @@ class RnsStack(
 
     fun stop() {
         announceJob?.cancel()
+        syncJob?.cancel()
         lxmf.stop()
         node.stop()
         for (c in sendChannels.values) c.close()
@@ -138,6 +140,29 @@ class RnsStack(
         val policy = PaidPolicy(all, minIntervalMs, bitrate = 0, extraHops = extraHops.coerceIn(0, PaidPolicy.MAX_EXTRA_HOPS))
         for (id in interfaces().keys.filter { isPaidInterface(it) }) node.setPaidPolicy(id, policy)
         Log.i(TAG, "paid link policy: ${all.size} destinations, extra hops $extraHops, every ${minIntervalMs / 60_000} min, on ${interfaces().keys.filter { isPaidInterface(it) }}")
+    }
+
+    /** The propagation node choice from settings: "" = the nearest heard, "none" = off, else a 32-hex address. */
+    fun setPropagationNode(choice: String) {
+        val c = choice.trim().lowercase()
+        when {
+            c == "none" -> { lxmf.autoSelectPropagationNode = false; lxmf.setPropagationNode(null) }
+            c.length == 32 && c.all { it in "0123456789abcdef" } -> { lxmf.autoSelectPropagationNode = true; lxmf.setPropagationNode(c.unhex()) }
+            else -> { lxmf.autoSelectPropagationNode = true; lxmf.setPropagationNode(null) }
+        }
+    }
+
+    /** Syncs from the propagation node every [intervalMs] (0 stops), the first time half a minute in. */
+    fun startSyncLoop(intervalMs: Long) {
+        syncJob?.cancel()
+        if (intervalMs <= 0) { syncJob = null; return }
+        syncJob = scope.launch {
+            delay(30_000)
+            while (isActive) {
+                if (lxmf.propagationNode() != null) lxmf.sync()
+                delay(intervalMs)
+            }
+        }
     }
 
     /** Sends an LXMF message; [method] null = auto (direct across the satellite). */

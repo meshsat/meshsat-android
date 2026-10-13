@@ -18,11 +18,13 @@ import java.util.concurrent.atomic.AtomicReference
  */
 object LxStamper {
     const val WORKBLOCK_EXPAND_ROUNDS = 3000
+    /** A propagation stamp (over the transient id, for a propagation node) expands 1000 rounds. */
+    const val WORKBLOCK_EXPAND_ROUNDS_PN = 1000
     const val STAMP_SIZE = 32
 
-    fun workblock(messageId: ByteArray): ByteArray {
-        val out = ByteArray(WORKBLOCK_EXPAND_ROUNDS * 256)
-        for (n in 0 until WORKBLOCK_EXPAND_ROUNDS) {
+    fun workblock(messageId: ByteArray, expandRounds: Int = WORKBLOCK_EXPAND_ROUNDS): ByteArray {
+        val out = ByteArray(expandRounds * 256)
+        for (n in 0 until expandRounds) {
             val salt = Rns.sha256(messageId, Msgpack.pack(MpInt(n.toLong())))
             Hkdf.derive(256, messageId, salt).copyInto(out, n * 256)
         }
@@ -56,9 +58,9 @@ object LxStamper {
      * Searches random stamps until one meets [cost], on every core, or returns
      * null when [cancelled] says so first. Returns the stamp and its value.
      */
-    fun generateStamp(messageId: ByteArray, cost: Int, cancelled: () -> Boolean = { false }): Pair<ByteArray, Int>? {
+    fun generateStamp(messageId: ByteArray, cost: Int, cancelled: () -> Boolean = { false }, expandRounds: Int = WORKBLOCK_EXPAND_ROUNDS): Pair<ByteArray, Int>? {
         if (cost <= 0) return null
-        val wb = workblock(messageId)
+        val wb = workblock(messageId, expandRounds)
         val found = AtomicBoolean(false)
         val result = AtomicReference<ByteArray>()
         val workers = maxOf(1, Runtime.getRuntime().availableProcessors())

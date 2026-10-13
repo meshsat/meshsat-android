@@ -52,6 +52,9 @@ class OutgoingResource internal constructor(internal val link: Link, internal va
     internal var rttMs = 0L
     internal var state = 0   // 0 advertised, 1 transferring, 2 awaiting proof, 3 complete, 4 failed
     internal var recvMinHeight = 0
+    /** Set when the resource carries a link request or its response (ResourceAdvertisement q, u and p). */
+    internal var requestId: ByteArray? = null
+    internal var isResponse = false
     /** Resolves once the receiver proved the resource or the transfer failed. */
     val result = CompletableFuture<ResourceResult>()
     val hashHex: String get() = hash.hex()
@@ -77,6 +80,9 @@ class IncomingResource internal constructor(internal val link: Link, val hash: B
     internal var lastActivityMs = 0L
     internal var reqSentMs = 0L
     internal var state = 0   // 0 transferring, 1 assembling, 2 complete, 3 failed
+    /** The request this resource answers, when it is a response. */
+    var requestId: ByteArray? = null
+        internal set
     var data: ByteArray? = null
         internal set
     val hashHex: String get() = hash.hex()
@@ -93,14 +99,18 @@ private fun mapHash(part: ByteArray, random: ByteArray): ByteArray = Rns.sha256(
 
 private fun sduOf(l: Link): Int = l.mtu - Rns.HEADER_MAXSIZE - Rns.IFAC_MIN_SIZE
 
-/** Advertises [payload] on the link and serves it; the result resolves when the receiver proves it. */
-fun LinkManager.sendResource(l: Link, payload: ByteArray): OutgoingResource {
+/**
+ * Advertises [payload] on the link and serves it; the result resolves when the receiver
+ * proves it. [requestId] marks a link request or, with [isResponse], its response.
+ */
+fun LinkManager.sendResource(l: Link, payload: ByteArray, requestId: ByteArray? = null, isResponse: Boolean = false): OutgoingResource {
     if (l.state != LinkState.ACTIVE && l.state != LinkState.STALE) throw IllegalStateException("link not active")
     if (payload.size > MAX_SIZE) throw IllegalArgumentException("resource larger than one segment (1 MiB)")
     val plain = Rns.randomBytes(RANDOM_HASH_LEN) + payload
     val enc = l.encrypt(plain)
     val sdu = sduOf(l)
     val r = OutgoingResource(l, enc, payload.size)
+    r.requestId = requestId; r.isResponse = isResponse
     r.rttMs = l.rttMs
     while (true) {
         r.randomHash = Rns.randomBytes(RANDOM_HASH_LEN)
@@ -141,8 +151,9 @@ private fun OutgoingResource.advertisement(segment: Int): MpValue {
         MpStr("o") to MpBin(hash),
         MpStr("i") to MpInt(1),
         MpStr("l") to MpInt(1),
-        MpStr("q") to MpNil,
-        MpStr("f") to MpInt(0x01),   // encrypted, not compressed, not split, no metadata
+        MpStr("q") to (requestId?.let { MpBin(it) } ?: MpNil),
+        // encrypted, not compressed, not split, no metadata; the request (u, 0x08) or response (p, 0x10) flag
+        MpStr("f") to MpInt(0x01L or (if (requestId == null) 0L else if (isResponse) 0x10L else 0x08L)),
         MpStr("m") to MpBin(hm),
     )
 }
@@ -247,13 +258,25 @@ internal fun LinkManager.handleResourceAdv(l: Link, plain: ByteArray) {
     if (h.size != Rns.FULL_HASH_LEN || rb.size != RANDOM_HASH_LEN || n <= 0 || t <= 0 || t > 3L * MAX_SIZE) return
     if (segs > 1 || (f and 0x20L) != 0L) { node().log("rns: multi-segment or metadata resource not supported, rejecting"); rejectResource(l, h); return }
     if ((f and 0x02L) != 0L) { node().log("rns: compressed resource not supported, rejecting"); rejectResource(l, h); return }
-    val accept = l.acceptResources
-    if (accept == null || !accept(d.toInt())) { rejectResource(l, h); return }
+    val q = (v["q"] as? MpBin)?.value
+    var pendingReq: RequestReceipt? = null
+    if (q != null && (f and 0x10L) != 0L) {
+        // A response to one of our requests: accepted whatever the link's resource policy says (Link.receive).
+        pendingReq = pendingRequest(l, q)
+        if (pendingReq == null) { node().log("rns: response resource for unknown request ${q.hex().take(8)}, rejecting"); rejectResource(l, h); return }
+    } else if (q != null && (f and 0x08L) != 0L) {
+        node().log("rns: request resource on ${l.idHex.take(8)}, no request handlers, rejecting"); rejectResource(l, h); return
+    } else {
+        val accept = l.acceptResources
+        if (accept == null || !accept(d.toInt())) { rejectResource(l, h); return }
+    }
     val sdu = sduOf(l)
     var totalParts = ((t + sdu - 1) / sdu).toInt()
     if (n.toInt() != totalParts) totalParts = n.toInt()
     val r = IncomingResource(l, h.copyOf(), t.toInt(), d.toInt(), totalParts)
     r.randomHash = rb.copyOf()
+    r.requestId = pendingReq?.requestId
+    pendingReq?.responseStarted = true
     r.lastActivityMs = node().now()
     val rs = l.res()
     rs.mu.withLock {
@@ -396,8 +419,24 @@ internal fun LinkManager.concludeIncoming(r: IncomingResource, data: ByteArray?,
     r.mu.withLock { if (err == null) { r.state = 2; r.data = data } else r.state = 3 }
     val rs = r.link.res()
     rs.mu.withLock { rs.incoming.remove(r.hashHex) }
-    if (err != null) { node().log("rns: incoming resource on ${r.link.idHex.take(8)} failed: $err"); return }
+    val reqId = r.requestId
+    if (err != null) {
+        node().log("rns: incoming resource on ${r.link.idHex.take(8)} failed: $err")
+        if (reqId != null) pendingRequest(r.link, reqId)?.let { failRequest(it, "response resource failed: $err") }
+        return
+    }
     node().log("rns: resource received on ${r.link.idHex.take(8)}, ${data!!.size} bytes")
+    if (reqId != null) {
+        // A response resource: msgpack([request id, data]) (Link.response_resource_concluded).
+        val v = try { Msgpack.unpack(data).first } catch (_: MsgpackException) { null } as? MpArray
+        val id = (v?.items?.getOrNull(0) as? MpBin)?.value
+        if (v == null || v.items.size < 2 || id == null) {
+            pendingRequest(r.link, reqId)?.let { failRequest(it, "malformed response resource") }
+        } else {
+            completeRequest(r.link, id, v.items[1])
+        }
+        return
+    }
     r.link.onResource?.invoke(r.link, data)
     r.link.local?.onLinkResource?.invoke(r.link, data)
 }

@@ -263,6 +263,10 @@ class GatewayService : Service() {
         const val LXMF_SENT = "lxmf:sent"
         const val LXMF_DELIVERED = "lxmf:delivered"
         const val LXMF_FAILED = "lxmf:failed"
+        /** A propagated message the node took: as far as the sender ever sees it go. */
+        const val LXMF_PROPAGATED = "lxmf:propagated"
+        /** The delivery ledger's virtual channel for LXMF, as the Bridge's class lxmf on lxmf_0. */
+        const val LXMF_CHANNEL = "lxmf_0"
 
         // This phone's Reticulum identity, the key that signs a contact card (MESHSAT-566/575)
         var routingIdentity: net.meshsat.android.routing.Identity? = null
@@ -480,6 +484,7 @@ class GatewayService : Service() {
                 val method = when (intent.getStringExtra(EXTRA_LXMF_METHOD)) {
                     "direct" -> net.meshsat.android.lxmf.LxMethod.DIRECT
                     "opportunistic" -> net.meshsat.android.lxmf.LxMethod.OPPORTUNISTIC
+                    "propagated" -> net.meshsat.android.lxmf.LxMethod.PROPAGATED
                     else -> null
                 }
                 try {
@@ -742,6 +747,12 @@ class GatewayService : Service() {
                     },
                     smsSendCallback = smsSend,
                     lxmfSendCallback = { dest, content, method -> sendLxmf(dest, content, method) },
+                    lxmfPropagationCallback = { node, syncMin ->
+                        scope.launch {
+                            node?.let { settings.setLxmfPropagationNode(it); rnsStack?.setPropagationNode(it) }
+                            syncMin?.let { settings.setLxmfSyncIntervalMin(it); rnsStack?.startSyncLoop((it.toLongOrNull() ?: 0L) * 60_000L) }
+                        }
+                    },
                     lxmfMessagesCallback = { limit -> runBlocking { db.messageDao().getByTransportSync("lxmf", limit) } },
                     rnsPaidCallback = { dests, extraHops, minutes ->
                         scope.launch {
@@ -776,6 +787,8 @@ class GatewayService : Service() {
                             settings["rns_tcp_listen_enabled"]?.let { s.setRnsTcpListenEnabled(it.toBoolean()) }
                             settings["rns_tcp_listen_port"]?.let { s.setRnsTcpListenPort(it) }
                             settings["lxmf_display_name"]?.let { s.setLxmfDisplayName(it) }
+                            settings["lxmf_propagation_node"]?.let { s.setLxmfPropagationNode(it); rnsStack?.setPropagationNode(it) }
+                            settings["lxmf_sync_interval_min"]?.let { s.setLxmfSyncIntervalMin(it); rnsStack?.startSyncLoop((it.toLongOrNull() ?: 0L) * 60_000L) }
                             Log.i("MeshSat", "Hub settings updated via API (${settings.size} keys)")
                         }
                     },
@@ -2173,20 +2186,27 @@ class GatewayService : Service() {
             },
             onOutboundState = { o ->
                 scope.launch {
-                    val id = lxmfRows[o.hashHex] ?: return@launch
+                    val propagated = o.method == net.meshsat.android.lxmf.LxMethod.PROPAGATED
                     val state = when (o.state) {
                         net.meshsat.android.lxmf.LxState.DELIVERED -> LXMF_DELIVERED
                         net.meshsat.android.lxmf.LxState.FAILED, net.meshsat.android.lxmf.LxState.REJECTED,
                         net.meshsat.android.lxmf.LxState.CANCELLED -> LXMF_FAILED
-                        net.meshsat.android.lxmf.LxState.SENT, net.meshsat.android.lxmf.LxState.SENDING -> LXMF_SENT
+                        net.meshsat.android.lxmf.LxState.SENT -> if (propagated) LXMF_PROPAGATED else LXMF_SENT
+                        net.meshsat.android.lxmf.LxState.SENDING -> LXMF_SENT
                         else -> LXMF_QUEUED
                     }
-                    db.messageDao().setForwardedTo(id, state)
-                    if (o.state.terminal) lxmfRows.remove(o.hashHex)
+                    lxmfRows[o.hashHex]?.let { id -> db.messageDao().setForwardedTo(id, state) }
+                    // The delivery ledger follows too (the Bridge's class lxmf on its virtual channel lxmf_0).
+                    lxmfLedger[o.hashHex]?.let { id -> db.messageDeliveryDao().setStatus(id, ledgerStatus(o.state), o.lastError) }
+                    if (o.state.terminal || (propagated && o.state == net.meshsat.android.lxmf.LxState.SENT)) {
+                        lxmfRows.remove(o.hashHex); lxmfLedger.remove(o.hashHex)
+                    }
                 }
             },
         )
         applyPaidPolicy(stack)
+        stack.setPropagationNode(settings.lxmfPropagationNode.first())
+        stack.startSyncLoop((settings.lxmfSyncIntervalMin.first().toLongOrNull() ?: 0L) * 60_000L)
         rnsStack = stack
         stack
     } catch (e: Exception) {
@@ -2194,8 +2214,17 @@ class GatewayService : Service() {
         null
     }
 
-    /** Outbound LXMF messages by hash, to the row that shows their state. */
+    /** Outbound LXMF messages by hash, to the row that shows their state, and to their delivery ledger entry. */
     private val lxmfRows = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private val lxmfLedger = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    private fun ledgerStatus(s: net.meshsat.android.lxmf.LxState): String = when (s) {
+        net.meshsat.android.lxmf.LxState.DELIVERED -> "delivered"
+        net.meshsat.android.lxmf.LxState.FAILED, net.meshsat.android.lxmf.LxState.REJECTED, net.meshsat.android.lxmf.LxState.CANCELLED -> "failed"
+        net.meshsat.android.lxmf.LxState.SENT -> "sent"
+        net.meshsat.android.lxmf.LxState.SENDING -> "sending"
+        else -> "queued"
+    }
 
     /** The satellite's allow-list and extra hops from settings (MESHSAT-1553 P6). */
     suspend fun applyPaidPolicy(stack: net.meshsat.android.rns.RnsStack) {
@@ -2222,7 +2251,18 @@ class GatewayService : Service() {
                 )
             )
             lxmfRows[o.hashHex] = id
-            if (o.state.terminal) db.messageDao().setForwardedTo(id, if (o.state == net.meshsat.android.lxmf.LxState.DELIVERED) LXMF_DELIVERED else LXMF_FAILED)
+            val ledgerId = db.messageDeliveryDao().insert(
+                net.meshsat.android.data.MessageDeliveryEntity(
+                    msgRef = "lxmf:${o.hashHex}", channel = LXMF_CHANNEL, status = ledgerStatus(o.state),
+                    payload = text.toByteArray(Charsets.UTF_8), textPreview = text.take(80), maxRetries = 0, recipient = destHex,
+                )
+            )
+            lxmfLedger[o.hashHex] = ledgerId
+            if (o.state.terminal) {
+                db.messageDao().setForwardedTo(id, if (o.state == net.meshsat.android.lxmf.LxState.DELIVERED) LXMF_DELIVERED else LXMF_FAILED)
+                db.messageDeliveryDao().setStatus(ledgerId, ledgerStatus(o.state), o.lastError)
+                lxmfRows.remove(o.hashHex); lxmfLedger.remove(o.hashHex)
+            }
         }
         return o.hashHex
     }

@@ -5,6 +5,7 @@ import net.meshsat.android.lxmf.LxMethod
 import net.meshsat.android.lxmf.LxState
 import net.meshsat.android.lxmf.LxmfAppData
 import net.meshsat.android.lxmf.LxmfRouter
+import net.meshsat.android.lxmf.SyncState
 import net.meshsat.android.rns.Node
 import net.meshsat.android.rns.NodeConfig
 import net.meshsat.android.rns.RnsIdentity
@@ -201,5 +202,80 @@ class InteropLxmfTest {
         val rcv = p.wait("lxm_received", null, 30_000)
         assertEquals(o.hashHex, rcv["hash"]); assertEquals(true, rcv["signature_validated"]); assertEquals(big2, rcv["content"])
         assertEquals(LxState.DELIVERED, o.result.get(30, TimeUnit.SECONDS))
+    }
+
+    /**
+     * A Python propagation node N and a Python client B both behind our kit (the transport
+     * between them). We send PROPAGATED through N; B syncs from N and gets it.
+     */
+    @Test
+    fun propagatedToPythonViaNode() {
+        val k = Kit()
+        val n = PyPeer.start(PyPeer.Opts(name = "N", connect = "127.0.0.1:${k.port}", propagationNode = true, loglevel = 5))
+        val b = PyPeer.start(PyPeer.Opts(name = "B", connect = "127.0.0.1:${k.port}"))
+        waitFor("two tcp peers") { k.server.peerCount() == 2 }
+        assertTrue(n.propagation.length == 32)
+        n.send("cmd" to "announce")
+        waitFor("we learn the propagation node") { k.router.propagationNodes().any { it.destHex == n.propagation } }
+        val info = k.router.propagationNodeInfo()!!
+        assertEquals(n.propagation, info.destHex); assertTrue(info.enabled); assertEquals(13, info.stampCost); assertEquals(1, info.hops)
+        b.send("cmd" to "announce")
+        waitFor("we learn B's delivery dest") { k.node.hopsTo(h(b.delivery)) == 1 }
+        b.wait("announce", { it["dest"] == n.propagation }, 15_000)   // B hears the node through us
+
+        val o = k.router.send(h(b.delivery), "through the node".toByteArray(), "pn".toByteArray(), method = LxMethod.PROPAGATED)
+        assertEquals(LxMethod.PROPAGATED, o.method)
+        assertEquals(LxState.SENT, o.result.get(90, TimeUnit.SECONDS))
+        assertNotNull(o.transientId)
+
+        // B verifies the signature only once it knows us.
+        assertTrue(k.router.announce())
+        b.wait("announce", { it["dest"] == k.router.hashHex }, 15_000)
+        b.send("cmd" to "set_propagation_node", "dest" to n.propagation)
+        b.wait("propagation_node_set")
+        b.send("cmd" to "sync")
+        val sync = b.wait("sync", null, 120_000)
+        assertEquals(SyncState.COMPLETE.code, (sync["state"] as Number).toInt())
+        assertEquals(1, (sync["result"] as Number).toInt())
+        val rcv = b.wait("lxm_received", null, 15_000)
+        assertEquals("through the node", rcv["content"]); assertEquals("pn", rcv["title"])
+        assertEquals(o.hashHex, rcv["hash"]); assertEquals(true, rcv["signature_validated"])
+        assertEquals("3", rcv["method"])   // LXMessage.PROPAGATED
+    }
+
+    /** B sends PROPAGATED through N for us; our sync downloads, decrypts and delivers it, and tells N. */
+    @Test
+    fun propagatedFromPythonViaNode() {
+        val k = Kit()
+        val n = PyPeer.start(PyPeer.Opts(name = "N", connect = "127.0.0.1:${k.port}", propagationNode = true, loglevel = 5))
+        val b = PyPeer.start(PyPeer.Opts(name = "B", connect = "127.0.0.1:${k.port}", loglevel = 7))
+        waitFor("two tcp peers") { k.server.peerCount() == 2 }
+        System.err.println("[test] N delivery=${n.delivery} raw=${n.raw} propagation=${n.propagation}")
+        n.send("cmd" to "announce")
+        waitFor("we learn the propagation node") { k.router.propagationNodes().any { it.destHex == n.propagation } }
+        b.wait("announce", { it["dest"] == n.propagation }, 15_000)
+        assertTrue(k.router.announce())
+        b.wait("announce", { it["dest"] == k.router.hashHex }, 15_000)
+        b.send("cmd" to "announce")
+        waitFor("we learn B's delivery dest") { k.node.hopsTo(h(b.delivery)) == 1 }   // to verify B's signature
+
+        b.send("cmd" to "set_propagation_node", "dest" to n.propagation)
+        b.wait("propagation_node_set")
+        b.send("cmd" to "send_lxm", "dest" to k.router.hashHex, "content" to "python via node", "title" to "pn2", "method" to "propagated")
+        val sent = b.wait("lxm_sent", null, 60_000)
+        // Nothing arrives by itself: a propagated message waits at the node.
+        assertTrue(k.got.poll(3, TimeUnit.SECONDS) == null)
+        b.wait("lxm_delivered", null, 90_000)   // the node took it (SENT upstream)
+
+        val r = k.router.sync().get(120, TimeUnit.SECONDS)
+        assertEquals(r.error, SyncState.COMPLETE, r.state)
+        assertEquals(1, r.received)
+        val m = take(k.got, 5_000, "the propagated message")
+        assertEquals("python via node", m.contentString); assertEquals("pn2", m.titleString)
+        assertEquals(LxMethod.PROPAGATED, m.method); assertTrue(m.signatureValid); assertEquals(sent["hash"], m.hashHex)
+
+        // A second sync finds nothing: the node deleted what we confirmed.
+        val r2 = k.router.sync().get(60, TimeUnit.SECONDS)
+        assertEquals(SyncState.COMPLETE, r2.state); assertEquals(0, r2.received)
     }
 }

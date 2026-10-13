@@ -47,6 +47,8 @@ class Link internal constructor(
     internal var local: Destination? = null
     internal var destIdentity: RnsIdentity? = null   // initiator: the destination identity
     internal var resources: LinkResources? = null
+    /** Requests we sent and still wait for, by request id (Link.pending_requests). */
+    internal val pendingRequests = HashMap<String, RequestReceipt>()
 
     /** Whether an advertised resource of the given data size is received; null rejects every resource. */
     var acceptResources: ((size: Int) -> Boolean)? = null
@@ -257,6 +259,7 @@ class LinkManager internal constructor(private val n: Node) {
     internal fun closed(l: Link) {
         mu.withLock { links.remove(l.idHex); pending.remove(l.idHex) }
         n.log("rns: link closed ${l.idHex.take(8)}")
+        failRequestsOn(l, "link closed")
         l.established.completeExceptionally(IllegalStateException("link closed"))
         l.closed.complete(l)
         l.onClosed?.invoke(l)
@@ -331,6 +334,7 @@ class LinkManager internal constructor(private val n: Node) {
             Rns.CTX_RESOURCE -> receivePart(l, h.data)
             Rns.CTX_RESOURCE_HMU -> l.decrypt(h.data)?.let { handleResourceHmu(l, it) }
             Rns.CTX_RESOURCE_ICL, Rns.CTX_RESOURCE_RCL -> l.decrypt(h.data)?.let { handleResourceCancel(l, it) }
+            Rns.CTX_RESPONSE -> l.decrypt(h.data)?.let { handleResponsePacket(l, it) }
 
             Rns.CTX_LINKIDENTIFY -> {
                 if (l.initiator) return
@@ -347,6 +351,7 @@ class LinkManager internal constructor(private val n: Node) {
     /** Link.__watchdog_job for every link, from the node jobs. */
     internal fun watchdog(nowMs: Long) {
         resourceWatchdog(nowMs)
+        requestWatchdog(nowMs)
         for (l in all()) {
             var close = false
             l.mu.withLock {

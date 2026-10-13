@@ -148,6 +148,7 @@ internal fun Node.processAnnounceTable(nowMs: Long) {
         } else if (!paidGate(ifaces[0], o.dest, PaidKind.ANNOUNCE)) {
             continue   // a path response on a paid link for an unlisted destination
         }
+        log("rns: rebroadcasting announce for ${o.dest.hex().take(8)} on $ifaces")
         for (id in ifaces) sendAnnounceOn(id, o.raw, nowMs)
         count { announcesTx++ }
     }
