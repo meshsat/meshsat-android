@@ -13,7 +13,13 @@ class PathEntry(
     val packetHash: ByteArray,
     var unresponsive: Boolean = false,
 ) {
-    val direct: Boolean get() = hops <= 1
+    /**
+     * The destination is a neighbour: one hop, or heard by its own HEADER_1 announce
+     * (next hop == its hash) however many hops a paid link's extra hops count. A
+     * packet to a neighbour stays HEADER_1; a HEADER_2 with its own hash as the
+     * transport id is what a stock peer drops (the Bridge's f68edfd).
+     */
+    val direct: Boolean get() = hops <= 1 || nextHop.contentEquals(destHash)
 
     /** The newest emission timestamp among the random blobs. */
     fun emittedAt(): Long = randomBlobs.maxOfOrNull { Announce.blobTimestamp(it) } ?: 0L

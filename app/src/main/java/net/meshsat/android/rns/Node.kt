@@ -326,7 +326,7 @@ class Node(val cfg: NodeConfig, internal val tx: Transmitter) {
         // the transport header and take it as the HEADER_1 packet it would have been.
         // MeshSat extension; a stock node never sees a direct peer beyond one hop.
         if (hdr.headerType == Rns.HEADER_2 && hdr.packetType != Rns.PACKET_ANNOUNCE &&
-            localDestination(hdr.destHash) != null && localDestination(hdr.transportId!!) != null) {
+            !hdr.transportId.sameAs(idHash) && localDestination(hdr.destHash) != null && localDestination(hdr.transportId!!) != null) {
             raw = Header.stripTransport(raw).copyOf()
             hdr = Header.unpackOrNull(raw) ?: return false
         }
