@@ -1,0 +1,1 @@
+Reticulum: messages through an LXMF propagation node and syncing from one; AutoInterface, so Sideband and rnsd on the same WiFi find the phone by themselves; an RNode on USB OTG or Bluetooth LE puts the phone on a LoRa mesh; every LXMF send in the delivery ledger.
