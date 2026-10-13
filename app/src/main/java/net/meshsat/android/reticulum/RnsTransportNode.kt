@@ -77,6 +77,12 @@ class RnsTransportNode(
 
     var hembCallback: HembFrameCallback? = null
 
+    /**
+     * The upstream-compatible node (MESHSAT-1553) sees every packet first; what it
+     * declines (returns false) continues into this stack's MeshSat-private handling.
+     */
+    var upstreamInbound: ((interfaceId: String, raw: ByteArray) -> Boolean)? = null
+
     // Public accessors for dashboard/settings widgets (MESHSAT-394/396)
     val destHashHex: String get() = localDestHash.joinToString("") { "%02x".format(it) }
     fun interfaceCount(): Int = interfaces().size
@@ -100,7 +106,7 @@ class RnsTransportNode(
         // Register receive callbacks on all interfaces
         interfaces().forEach { (id, iface) ->
             iface.setReceiveCallback(RnsReceiveCallback { _, raw ->
-                scope.launch { onPacketReceived(id, raw) }
+                scope.launch { receive(id, raw) }
             })
         }
 
@@ -122,6 +128,12 @@ class RnsTransportNode(
     // ═══════════════════════════════════════════════════════════════
     // Packet reception — unified entry point
     // ═══════════════════════════════════════════════════════════════
+
+    /** The entry for every interface: the upstream node first, then this stack. */
+    fun receive(sourceInterface: String, raw: ByteArray) {
+        if (upstreamInbound?.invoke(sourceInterface, raw) == true) return
+        onPacketReceived(sourceInterface, raw)
+    }
 
     /**
      * Handle a raw packet received from an interface.
