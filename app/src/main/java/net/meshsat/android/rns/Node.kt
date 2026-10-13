@@ -319,7 +319,17 @@ class Node(val cfg: NodeConfig, internal val tx: Transmitter) {
         } else {
             raw = rawIn.copyOf()
         }
-        val hdr = Header.unpackOrNull(raw) ?: return false
+        var hdr = Header.unpackOrNull(raw) ?: return false
+        // A peer that counts us more than one hop away (extra hops on a paid link, the
+        // satellite) inserts a transport header with OUR destination hash as the next
+        // hop, because our announce reached it directly. That packet is ours: strip
+        // the transport header and take it as the HEADER_1 packet it would have been.
+        // MeshSat extension; a stock node never sees a direct peer beyond one hop.
+        if (hdr.headerType == Rns.HEADER_2 && hdr.packetType != Rns.PACKET_ANNOUNCE &&
+            localDestination(hdr.destHash) != null && localDestination(hdr.transportId!!) != null) {
+            raw = Header.stripTransport(raw).copyOf()
+            hdr = Header.unpackOrNull(raw) ?: return false
+        }
         noteCrossing(ifaceId, raw, inbound = true)
         val pkt = Packet(raw, hdr, Header.packetHash(raw), ifaceId)
         count { rxPackets++ }
