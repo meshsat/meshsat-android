@@ -176,6 +176,8 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
     val lxmfDisplayName by settings.lxmfDisplayName.collectAsState(initial = "")
     val rnsPaidDests by settings.rnsPaidDests.collectAsState(initial = "")
     val rnsPaidExtraHops by settings.rnsPaidExtraHops.collectAsState(initial = "20")
+    val rnsTcpListenEnabled by settings.rnsTcpListenEnabled.collectAsState(initial = false)
+    val rnsTcpListenPort by settings.rnsTcpListenPort.collectAsState(initial = "4242")
 
     // Hub Reporter settings (MESHSAT-292)
     val hubEnabled by settings.hubEnabled.collectAsState(initial = false)
@@ -1698,6 +1700,34 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
                         colors = ButtonDefaults.buttonColors(containerColor = MeshSatTeal),
                     ) { Text("Save", style = MaterialTheme.typography.bodySmall) }
                 }
+
+                HorizontalDivider(color = MeshSatBorder, modifier = Modifier.padding(vertical = 8.dp))
+                Text("Peers on this WiFi", style = MaterialTheme.typography.bodyMedium)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("Listen on TCP port $rnsTcpListenPort", style = MaterialTheme.typography.bodyMedium)
+                    Switch(
+                        checked = rnsTcpListenEnabled,
+                        onCheckedChange = { scope.launch { settings.setRnsTcpListenEnabled(it) } },
+                        colors = SwitchDefaults.colors(checkedTrackColor = MeshSatTeal),
+                    )
+                }
+                val wifiIp = remember { net.meshsat.android.reticulum.RnsTcpServerInterface.wifiAddress() }
+                val listener = GatewayService.rnsTcpServer
+                Text(
+                    text = when {
+                        !rnsTcpListenEnabled -> "Off. Takes effect when the gateway restarts."
+                        listener == null -> "Starts with the gateway."
+                        !listener.isOnline -> "Not listening (the port may be taken)."
+                        else -> "Listening; ${net.meshsat.android.ui.Words.count(listener.peerCount(), "peer")} connected. In Sideband, add a TCP client interface to " +
+                            (wifiIp ?: "this phone's WiFi address") + " port ${listener.boundPort}."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MeshSatTextMuted,
+                )
 
                 HorizontalDivider(color = MeshSatBorder, modifier = Modifier.padding(vertical = 8.dp))
                 Text("Reticulum over TCP", style = MaterialTheme.typography.bodyMedium)

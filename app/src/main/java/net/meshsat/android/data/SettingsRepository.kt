@@ -81,6 +81,7 @@ class SettingsRepository(private val context: Context) {
         val KEY_RNS_TRANSPORT_ENABLED = booleanPreferencesKey("rns_transport_enabled")
         // Reticulum and LXMF as the clients speak them (MESHSAT-1553)
         val KEY_LXMF_DISPLAY_NAME = stringPreferencesKey("lxmf_display_name")
+        val KEY_RNS_TCP_LISTEN_ENABLED = booleanPreferencesKey("rns_tcp_listen_enabled")
         val KEY_RNS_PAID_DESTS = stringPreferencesKey("rns_paid_dests")
         val KEY_RNS_PAID_EXTRA_HOPS = stringPreferencesKey("rns_paid_extra_hops")
         val KEY_RNS_PAID_MIN_INTERVAL_MIN = stringPreferencesKey("rns_paid_min_interval_min")
@@ -583,6 +584,10 @@ class SettingsRepository(private val context: Context) {
     /** The name other LXMF clients show for this phone; blank = the Hub bridge id or "MeshSat phone". */
     val lxmfDisplayName: Flow<String> = context.dataStore.data.map { it[KEY_LXMF_DISPLAY_NAME] ?: "" }
     suspend fun setLxmfDisplayName(name: String) { context.dataStore.edit { it[KEY_LXMF_DISPLAY_NAME] = name } }
+
+    /** The phone listens for Reticulum TCP peers (Sideband on the same WiFi) on rns_tcp_listen_port (MESHSAT-1553 P4). */
+    val rnsTcpListenEnabled: Flow<Boolean> = context.dataStore.data.map { it[KEY_RNS_TCP_LISTEN_ENABLED] ?: false }
+    suspend fun setRnsTcpListenEnabled(enabled: Boolean) { context.dataStore.edit { it[KEY_RNS_TCP_LISTEN_ENABLED] = enabled } }
 
     /** Comma-separated 32-hex destinations that may be announced and path-requested across the satellite (MESHSAT-1553 P6). */
     val rnsPaidDests: Flow<String> = context.dataStore.data.map { it[KEY_RNS_PAID_DESTS] ?: "" }

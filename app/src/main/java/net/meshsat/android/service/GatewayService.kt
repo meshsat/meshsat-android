@@ -246,6 +246,10 @@ class GatewayService : Service() {
         var rnsMqttInterface: net.meshsat.android.reticulum.RnsMqttInterface? = null
             private set
 
+        // The phone as a Reticulum TCP listener for peers on the same WiFi (MESHSAT-1553)
+        var rnsTcpServer: net.meshsat.android.reticulum.RnsTcpServerInterface? = null
+            private set
+
         // Reticulum Transport Node (MESHSAT-199/267)
         var rnsTransportNode: net.meshsat.android.reticulum.RnsTransportNode? = null
             private set
@@ -560,6 +564,8 @@ class GatewayService : Service() {
         rnsStack = null
         rnsTransportNode?.stop()
         rnsTransportNode = null
+        rnsTcpServer?.let { srv -> scope.launch { srv.stop() } }
+        rnsTcpServer = null
         hubRelayTransport?.shutdown()
         hubRelayTransport = null
         meshtasticBle?.disconnect()
@@ -1817,6 +1823,11 @@ class GatewayService : Service() {
     private fun initRnsTcp() {
         scope.launch {
             try {
+                // The listener for peers on this WiFi; it joins the node's interface map when it starts.
+                if (settings.rnsTcpListenEnabled.first()) {
+                    val port = settings.rnsTcpListenPort.first().toIntOrNull()?.takeIf { it in 1..65535 } ?: 4242
+                    rnsTcpServer = net.meshsat.android.reticulum.RnsTcpServerInterface(port)
+                }
                 val enabled = settings.rnsTcpEnabled.first()
                 if (!enabled) {
                     Log.d("MeshSat", "RNS TCP disabled in settings")
@@ -2042,6 +2053,9 @@ class GatewayService : Service() {
                     }
                     rnsTcpInterface?.let { tcp ->
                         map["tcp_rns_0"] = tcp
+                    }
+                    rnsTcpServer?.let { srv ->
+                        map[srv.interfaceId] = cached(srv.interfaceId, srv) { it }
                     }
                     // MQTT Reticulum interface (MESHSAT-354)
                     rnsMqttInterface?.let { map["mqtt_rns_0"] = it }
