@@ -248,6 +248,8 @@ class GatewayService : Service() {
 
         // The phone as a Reticulum TCP listener for peers on the same WiFi (MESHSAT-1553)
         var rnsTcpServer: net.meshsat.android.reticulum.RnsTcpServerInterface? = null
+        /** The AutoInterface on this WiFi, when enabled (MESHSAT-1553 P4). */
+        var rnsAutoInterface: net.meshsat.android.reticulum.RnsAutoInterface? = null
             private set
 
         // Reticulum Transport Node (MESHSAT-199/267)
@@ -571,6 +573,8 @@ class GatewayService : Service() {
         rnsTransportNode = null
         rnsTcpServer?.let { srv -> scope.launch { srv.stop() } }
         rnsTcpServer = null
+        rnsAutoInterface?.let { a -> scope.launch { a.stop() } }
+        rnsAutoInterface = null
         hubRelayTransport?.shutdown()
         hubRelayTransport = null
         meshtasticBle?.disconnect()
@@ -785,6 +789,7 @@ class GatewayService : Service() {
                             settings["rns_tcp_port"]?.let { s.setRnsTcpPort(it) }
                             settings["rns_tcp_tls"]?.let { s.setRnsTcpTls(it.toBoolean()) }
                             settings["rns_tcp_listen_enabled"]?.let { s.setRnsTcpListenEnabled(it.toBoolean()) }
+                            settings["rns_auto_enabled"]?.let { s.setRnsAutoEnabled(it.toBoolean()) }
                             settings["rns_tcp_listen_port"]?.let { s.setRnsTcpListenPort(it) }
                             settings["lxmf_display_name"]?.let { s.setLxmfDisplayName(it) }
                             settings["lxmf_propagation_node"]?.let { s.setLxmfPropagationNode(it); rnsStack?.setPropagationNode(it) }
@@ -1845,6 +1850,10 @@ class GatewayService : Service() {
     private fun initRnsTcp() {
         scope.launch {
             try {
+                // Zero-configuration peering with Sideband and rnsd on this WiFi; joins the interface map when it starts.
+                if (settings.rnsAutoEnabled.first()) {
+                    rnsAutoInterface = net.meshsat.android.reticulum.RnsAutoInterface(this@GatewayService)
+                }
                 // The listener for peers on this WiFi; it joins the node's interface map when it starts.
                 if (settings.rnsTcpListenEnabled.first()) {
                     val port = settings.rnsTcpListenPort.first().toIntOrNull()?.takeIf { it in 1..65535 } ?: 4242
@@ -2078,6 +2087,9 @@ class GatewayService : Service() {
                     }
                     rnsTcpServer?.let { srv ->
                         map[srv.interfaceId] = cached(srv.interfaceId, srv) { it }
+                    }
+                    rnsAutoInterface?.let { a ->
+                        map[a.interfaceId] = cached(a.interfaceId, a) { it }
                     }
                     // MQTT Reticulum interface (MESHSAT-354)
                     rnsMqttInterface?.let { map["mqtt_rns_0"] = it }

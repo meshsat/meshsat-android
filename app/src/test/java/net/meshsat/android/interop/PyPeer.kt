@@ -29,6 +29,8 @@ class PyPeer private constructor(val name: String, private val proc: Process, va
         val transport: Boolean = false,
         val connect: String? = null,
         val listen: Int = 0,
+        /** An AutoInterface on this network device (a veth end). */
+        val auto: String? = null,
         val name: String = "rnsnode",
         val stampCost: Int = 0,
         val enforce: Boolean = false,
@@ -56,6 +58,7 @@ class PyPeer private constructor(val name: String, private val proc: Process, va
             if (o.transport) args += listOf("--transport", "yes")
             o.connect?.let { args += listOf("--connect", it) }
             if (o.listen != 0) args += listOf("--listen", o.listen.toString())
+            o.auto?.let { args += listOf("--auto", it) }
             if (o.stampCost > 0) args += listOf("--stamp-cost", o.stampCost.toString())
             if (o.enforce) args += "--enforce-stamps"
             if (o.propagationNode) args += listOf("--propagation-node", "--propagation-cost", o.propagationCost.toString())
