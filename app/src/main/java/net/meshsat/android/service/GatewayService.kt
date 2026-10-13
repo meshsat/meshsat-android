@@ -248,9 +248,15 @@ class GatewayService : Service() {
 
         // The phone as a Reticulum TCP listener for peers on the same WiFi (MESHSAT-1553)
         var rnsTcpServer: net.meshsat.android.reticulum.RnsTcpServerInterface? = null
+            private set
         /** The AutoInterface on this WiFi, when enabled (MESHSAT-1553 P4). */
         var rnsAutoInterface: net.meshsat.android.reticulum.RnsAutoInterface? = null
             private set
+        /** The RNode on USB OTG or Bluetooth LE, when enabled (MESHSAT-1553 P4). */
+        var rnsRnodeInterface: net.meshsat.android.reticulum.RnsRnodeInterface? = null
+            private set
+        /** Re-reads the RNode settings and restarts that interface. */
+        const val ACTION_RESTART_RNODE = "net.meshsat.android.RESTART_RNODE"
 
         // Reticulum Transport Node (MESHSAT-199/267)
         var rnsTransportNode: net.meshsat.android.reticulum.RnsTransportNode? = null
@@ -480,6 +486,7 @@ class GatewayService : Service() {
                 val recipient = intent.getStringExtra(EXTRA_RECIPIENT) ?: return START_STICKY
                 scope.launch { sendSmsMessage(text, recipient) }
             }
+            ACTION_RESTART_RNODE -> scope.launch { restartRnode() }
             ACTION_SEND_LXMF -> {
                 val text = intent.getStringExtra(EXTRA_TEXT) ?: return START_STICKY
                 val recipient = intent.getStringExtra(EXTRA_RECIPIENT) ?: return START_STICKY
@@ -575,6 +582,8 @@ class GatewayService : Service() {
         rnsTcpServer = null
         rnsAutoInterface?.let { a -> scope.launch { a.stop() } }
         rnsAutoInterface = null
+        rnsRnodeInterface?.let { r -> scope.launch { r.stop() } }
+        rnsRnodeInterface = null
         hubRelayTransport?.shutdown()
         hubRelayTransport = null
         meshtasticBle?.disconnect()
@@ -751,6 +760,7 @@ class GatewayService : Service() {
                     },
                     smsSendCallback = smsSend,
                     lxmfSendCallback = { dest, content, method -> sendLxmf(dest, content, method) },
+                    rnodeCallback = { m -> scope.launch { if (applyRnodeSettings(m)) restartRnode() } },
                     lxmfPropagationCallback = { node, syncMin ->
                         scope.launch {
                             node?.let { settings.setLxmfPropagationNode(it); rnsStack?.setPropagationNode(it) }
@@ -790,6 +800,7 @@ class GatewayService : Service() {
                             settings["rns_tcp_tls"]?.let { s.setRnsTcpTls(it.toBoolean()) }
                             settings["rns_tcp_listen_enabled"]?.let { s.setRnsTcpListenEnabled(it.toBoolean()) }
                             settings["rns_auto_enabled"]?.let { s.setRnsAutoEnabled(it.toBoolean()) }
+                            if (applyRnodeSettings(settings)) restartRnode()
                             settings["rns_tcp_listen_port"]?.let { s.setRnsTcpListenPort(it) }
                             settings["lxmf_display_name"]?.let { s.setLxmfDisplayName(it) }
                             settings["lxmf_propagation_node"]?.let { s.setLxmfPropagationNode(it); rnsStack?.setPropagationNode(it) }
@@ -1843,6 +1854,34 @@ class GatewayService : Service() {
         }
     }
 
+    /** The RNode interface the settings describe, or null when off or misconfigured (MESHSAT-1553 P4). */
+    private suspend fun buildRnode(): net.meshsat.android.reticulum.RnsRnodeInterface? {
+        if (!settings.rnodeEnabled.first()) return null
+        val params = settings.rnodeParams() ?: run { Log.w("MeshSat", "RNode: custom parameters do not parse, not started"); return null }
+        params.validate()?.let { Log.w("MeshSat", "RNode: $it, not started"); return null }
+        val port = settings.rnodePort.first().ifBlank { "usb" }
+        return net.meshsat.android.reticulum.RnsRnodeInterface(this, scope, net.meshsat.android.reticulum.RnsRnodeInterface.Config(port, params))
+    }
+
+    /** Stops the running RNode interface and starts one from the current settings; the interface map picks it up. */
+    suspend fun restartRnode() {
+        rnsRnodeInterface?.stop()
+        rnsRnodeInterface = null
+        rnsRnodeInterface = buildRnode()
+        Log.i("MeshSat", "RNode interface ${if (rnsRnodeInterface == null) "off" else "restarted on ${rnsRnodeInterface?.config?.port}"}")
+    }
+
+    /** Persists RNode keys from a settings map; true when any was present. */
+    suspend fun applyRnodeSettings(m: Map<String, String>): Boolean {
+        var any = false
+        m["rnode_enabled"]?.let { settings.setRnodeEnabled(it.toBoolean()); any = true }
+        m["rnode_port"]?.let { settings.setRnodePort(it); any = true }
+        m["rnode_preset"]?.let { settings.setRnodePreset(it); any = true }
+        m["rnode_custom_params"]?.let { settings.setRnodeCustomParams(it); any = true }
+        m["rnode_airtime_limits"]?.let { settings.setRnodeAirtimeLimits(it); any = true }
+        return any
+    }
+
     /**
      * Initialize Reticulum TCP interface (MESHSAT-268).
      * Connects to a stock RNS node over TCP with HDLC framing.
@@ -1854,6 +1893,8 @@ class GatewayService : Service() {
                 if (settings.rnsAutoEnabled.first()) {
                     rnsAutoInterface = net.meshsat.android.reticulum.RnsAutoInterface(this@GatewayService)
                 }
+                // An RNode on USB OTG or BLE: LoRa to Sideband's and Tim's meshes.
+                rnsRnodeInterface = buildRnode()
                 // The listener for peers on this WiFi; it joins the node's interface map when it starts.
                 if (settings.rnsTcpListenEnabled.first()) {
                     val port = settings.rnsTcpListenPort.first().toIntOrNull()?.takeIf { it in 1..65535 } ?: 4242
@@ -2090,6 +2131,9 @@ class GatewayService : Service() {
                     }
                     rnsAutoInterface?.let { a ->
                         map[a.interfaceId] = cached(a.interfaceId, a) { it }
+                    }
+                    rnsRnodeInterface?.let { r ->
+                        map[r.interfaceId] = cached(r.interfaceId, r) { it }
                     }
                     // MQTT Reticulum interface (MESHSAT-354)
                     rnsMqttInterface?.let { map["mqtt_rns_0"] = it }

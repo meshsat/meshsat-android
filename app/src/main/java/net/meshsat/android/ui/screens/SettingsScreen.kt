@@ -179,6 +179,17 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
     val rnsPaidExtraHops by settings.rnsPaidExtraHops.collectAsState(initial = "20")
     val lxmfPropagationNode by settings.lxmfPropagationNode.collectAsState(initial = "")
     val rnsAutoEnabled by settings.rnsAutoEnabled.collectAsState(initial = false)
+    val rnodeEnabled by settings.rnodeEnabled.collectAsState(initial = false)
+    val rnodePort by settings.rnodePort.collectAsState(initial = "usb")
+    val rnodePreset by settings.rnodePreset.collectAsState(initial = "eu-868")
+    val rnodeCustomParams by settings.rnodeCustomParams.collectAsState(initial = "867200000,125000,14,8,5")
+    val rnodeAirtimeLimits by settings.rnodeAirtimeLimits.collectAsState(initial = "0,0")
+    var rnodePortInput by remember(rnodePort) { mutableStateOf(rnodePort) }
+    var rnodePresetInput by remember(rnodePreset) { mutableStateOf(rnodePreset) }
+    var rnodeCustomInput by remember(rnodeCustomParams) { mutableStateOf(rnodeCustomParams) }
+    var rnodeAirtimeInput by remember(rnodeAirtimeLimits) { mutableStateOf(rnodeAirtimeLimits) }
+    val rnodeScanResults = remember { mutableStateListOf<net.meshsat.android.rnode.RnodeBleScanner.Found>() }
+    var rnodeScanning by remember { mutableStateOf(false) }
     val lxmfSyncIntervalMin by settings.lxmfSyncIntervalMin.collectAsState(initial = "0")
     val rnsTcpListenEnabled by settings.rnsTcpListenEnabled.collectAsState(initial = false)
     val rnsTcpListenPort by settings.rnsTcpListenPort.collectAsState(initial = "4242")
@@ -1932,6 +1943,139 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
         }
 
         if (section.shows(SetupSection.Hub)) {
+            // --- An RNode (LoRa radio) on USB OTG or Bluetooth LE (MESHSAT-1553 P4) ---
+            SectionCard("RNode (LoRa radio)") {
+                Text(
+                    text = "A Reticulum LoRa radio (RNode firmware 1.52 or newer) on a USB OTG cable or over Bluetooth LE puts this " +
+                        "phone on the same mesh as Sideband and the kits' radios. Peers must match frequency, bandwidth, spreading " +
+                        "factor and coding rate exactly; the presets are CrossTalk's starting points, not legal requirements.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MeshSatTextMuted,
+                )
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Text("Use an RNode", style = MaterialTheme.typography.bodyMedium)
+                    Switch(
+                        checked = rnodeEnabled,
+                        onCheckedChange = { on ->
+                            scope.launch {
+                                settings.setRnodeEnabled(on)
+                                context.startService(Intent(context, GatewayService::class.java).setAction(GatewayService.ACTION_RESTART_RNODE))
+                            }
+                        },
+                        colors = SwitchDefaults.colors(checkedTrackColor = MeshSatTeal),
+                    )
+                }
+                Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(selected = rnodePortInput == "usb", onClick = { rnodePortInput = "usb" }, label = { Text("USB OTG", style = MaterialTheme.typography.bodySmall) })
+                    FilterChip(selected = rnodePortInput != "usb", onClick = { if (rnodePortInput == "usb") rnodePortInput = "ble:" }, label = { Text("Bluetooth LE", style = MaterialTheme.typography.bodySmall) })
+                }
+                if (rnodePortInput != "usb") {
+                    OutlinedTextField(
+                        value = rnodePortInput.removePrefix("ble:"),
+                        onValueChange = { rnodePortInput = "ble:" + it.uppercase().take(17) },
+                        label = { Text("RNode Bluetooth address", style = MaterialTheme.typography.bodySmall) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        textStyle = MaterialTheme.typography.bodyMedium,
+                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = MeshSatTeal, unfocusedBorderColor = MeshSatBorder),
+                    )
+                    Button(
+                        onClick = {
+                            val perms = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT) else arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
+                            if (perms.any { ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED }) {
+                                Toast.makeText(context, "Grant the Bluetooth permissions on the Setup tab first", Toast.LENGTH_SHORT).show()
+                            } else {
+                                rnodeScanResults.clear(); rnodeScanning = true
+                                val ok = net.meshsat.android.rnode.RnodeBleScanner.scan(context, 10_000,
+                                    onFound = { f -> if (rnodeScanResults.none { it.address == f.address }) rnodeScanResults.add(f) },
+                                    onDone = { rnodeScanning = false })
+                                if (!ok) { rnodeScanning = false; Toast.makeText(context, "Bluetooth is off", Toast.LENGTH_SHORT).show() }
+                            }
+                        },
+                        enabled = !rnodeScanning,
+                        colors = ButtonDefaults.buttonColors(containerColor = MeshSatTeal),
+                    ) { Text(if (rnodeScanning) "Scanning..." else "Scan for RNodes", style = MaterialTheme.typography.bodySmall) }
+                    rnodeScanResults.forEach { f ->
+                        TextButton(onClick = { rnodePortInput = "ble:" + f.address }) {
+                            Text("${f.name}  ${f.address}  ${f.rssi} dBm", style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+                Text("Radio parameters", style = MaterialTheme.typography.bodyMedium)
+                Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    net.meshsat.android.rnode.RnodeProtocol.PRESETS.forEach { pr ->
+                        FilterChip(selected = rnodePresetInput == pr.id, onClick = { rnodePresetInput = pr.id }, label = { Text(pr.label.removeSuffix(" (starter)"), style = MaterialTheme.typography.bodySmall) })
+                    }
+                    FilterChip(selected = rnodePresetInput == "custom", onClick = { rnodePresetInput = "custom" }, label = { Text("Custom", style = MaterialTheme.typography.bodySmall) })
+                }
+                val shownParams = if (rnodePresetInput == "custom") net.meshsat.android.data.parseRnodeParams(rnodeCustomInput)
+                    else net.meshsat.android.rnode.RnodeProtocol.preset(rnodePresetInput)?.params
+                if (rnodePresetInput == "custom") {
+                    OutlinedTextField(
+                        value = rnodeCustomInput,
+                        onValueChange = { rnodeCustomInput = it.filter { c -> c.isDigit() || c == ',' }.take(40) },
+                        label = { Text("frequency Hz, bandwidth Hz, TX power dBm, SF, CR", style = MaterialTheme.typography.bodySmall) },
+                        singleLine = true,
+                        isError = shownParams == null || shownParams.validate() != null,
+                        modifier = Modifier.fillMaxWidth(),
+                        textStyle = MaterialTheme.typography.bodyMedium,
+                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = MeshSatTeal, unfocusedBorderColor = MeshSatBorder),
+                    )
+                } else {
+                    Text(net.meshsat.android.rnode.RnodeProtocol.preset(rnodePresetInput)?.description ?: "", style = MaterialTheme.typography.bodySmall, color = MeshSatTextMuted)
+                }
+                shownParams?.let { p ->
+                    Text(
+                        text = "%.4f MHz, %d kHz, SF %d, CR 4/%d, %d dBm, about %.0f bit/s on air".format(p.frequency / 1e6, p.bandwidth / 1000, p.sf, p.cr, p.txPower, p.bitrate()) +
+                            (p.validate()?.let { "; $it" } ?: ""),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (p.validate() == null) MeshSatTextMuted else MeshSatRed,
+                    )
+                }
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        value = rnodeAirtimeInput,
+                        onValueChange = { rnodeAirtimeInput = it.filter { c -> c.isDigit() || c == ',' || c == '.' }.take(12) },
+                        label = { Text("Airtime limits % short,long (0 = none)", style = MaterialTheme.typography.bodySmall) },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                        textStyle = MaterialTheme.typography.bodyMedium,
+                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = MeshSatTeal, unfocusedBorderColor = MeshSatBorder),
+                    )
+                    Button(
+                        onClick = {
+                            val bad = rnodePresetInput == "custom" && (shownParams == null || shownParams.validate() != null)
+                            if (bad) { Toast.makeText(context, "The custom parameters are not valid", Toast.LENGTH_SHORT).show() }
+                            else if (rnodePortInput != "usb" && rnodePortInput.removePrefix("ble:").length != 17) { Toast.makeText(context, "Pick or type the RNode's Bluetooth address", Toast.LENGTH_SHORT).show() }
+                            else scope.launch {
+                                settings.setRnodePort(rnodePortInput)
+                                settings.setRnodePreset(rnodePresetInput)
+                                settings.setRnodeCustomParams(rnodeCustomInput)
+                                settings.setRnodeAirtimeLimits(rnodeAirtimeInput.ifBlank { "0,0" })
+                                context.startService(Intent(context, GatewayService::class.java).setAction(GatewayService.ACTION_RESTART_RNODE))
+                                Toast.makeText(context, if (rnodeEnabled) "RNode settings applied, reconnecting" else "RNode settings saved", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = MeshSatTeal),
+                    ) { Text("Apply", style = MaterialTheme.typography.bodySmall) }
+                }
+                val rn = GatewayService.rnsRnodeInterface
+                val rs = rn?.stats()
+                Text(
+                    text = when {
+                        !rnodeEnabled -> "Off."
+                        rn == null -> "Starts with the gateway (or the settings do not parse: see the log)."
+                        !rn.isOnline -> rn.status
+                        rs == null -> rn.status
+                        else -> "Online: ${rn.deviceDescription}, ${net.meshsat.android.rnode.RnodeProtocol.platformName(rs.platform)} firmware ${rs.firmware}, " +
+                            "RSSI ${rs.rssi} dBm, SNR ${rs.snr} dB, ${rs.rxPackets} received, ${rs.txPackets} sent" +
+                            (if (rs.airtimeShort > 0) ", airtime ${rs.airtimeShort}%" else "")
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (rn?.isOnline == true) MeshSatTeal else MeshSatTextMuted,
+                )
+            }
+
             SectionCard("Hub connection") {
                 // --- Where the Hub link stands, and the switch for it ---
                 val hubState = hubReporterState?.value

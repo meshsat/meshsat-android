@@ -18,6 +18,8 @@ Args:
   --connect HOST:PORT   TCPClientInterface to a server
   --listen PORT         TCPServerInterface on 127.0.0.1
   --auto DEVICE         AutoInterface on one network device (a veth end in the tests)
+  --rnode PORT          RNodeInterface on a serial port (a software RNode's pty in the tests)
+  --rnode-params F,BW,TXP,SF,CR   its radio parameters (default CrossTalk's EU preset)
   --name NAME           LXMF display name (default "rnsnode")
   --stamp-cost N        inbound stamp cost announced (0 = none)
   --enforce-stamps      enforce inbound stamps
@@ -71,6 +73,8 @@ def main():
     ap.add_argument("--connect", default=None)
     ap.add_argument("--listen", default=None)
     ap.add_argument("--auto", default=None)
+    ap.add_argument("--rnode", default=None)
+    ap.add_argument("--rnode-params", default="867200000,125000,14,8,5")
     ap.add_argument("--name", default="rnsnode")
     ap.add_argument("--stamp-cost", type=int, default=0)
     ap.add_argument("--enforce-stamps", action="store_true")
@@ -107,6 +111,21 @@ def main():
     type = AutoInterface
     enabled = yes
     devices = {args.auto}
+    ingress_control = No
+"""
+    if args.rnode:
+        freq, bw, txp, sf, cr = [int(x) for x in args.rnode_params.split(",")]
+        ifaces += f"""
+  [[rnode]]
+    type = RNodeInterface
+    enabled = yes
+    port = {args.rnode}
+    frequency = {freq}
+    bandwidth = {bw}
+    txpower = {txp}
+    spreadingfactor = {sf}
+    codingrate = {cr}
+    flow_control = True
     ingress_control = No
 """
     if args.keep_config: pass
