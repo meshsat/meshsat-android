@@ -148,6 +148,24 @@ class RnsIdentity private constructor(
         /** A fresh x25519 ratchet private key (32 bytes). */
         fun generateRatchet(): ByteArray = X25519PrivateKeyParameters(rng).encoded
 
+        /** A fresh x25519 private key for a link handshake (32 bytes); its public key is [ratchetPublic]. */
+        fun generateX25519(): ByteArray = X25519PrivateKeyParameters(rng).encoded
+
+        /** X25519 ECDH on raw keys. */
+        fun x25519Agree(prv: ByteArray, pub: ByteArray): ByteArray = agree(X25519PrivateKeyParameters(prv, 0), X25519PublicKeyParameters(pub, 0))
+
+        /** A fresh ed25519 seed (32 bytes) for a link's ephemeral signing key. */
+        fun generateSigningSeed(): ByteArray = Ed25519PrivateKeyParameters(rng).encoded
+
+        fun signingPublicOfSeed(seed: ByteArray): ByteArray = Ed25519PrivateKeyParameters(seed, 0).generatePublicKey().encoded
+
+        fun signWithSeed(seed: ByteArray, data: ByteArray): ByteArray {
+            val s = Ed25519Signer()
+            s.init(true, Ed25519PrivateKeyParameters(seed, 0))
+            s.update(data, 0, data.size)
+            return s.generateSignature()
+        }
+
         fun ratchetPublic(prv: ByteArray): ByteArray = X25519PrivateKeyParameters(prv, 0).generatePublicKey().encoded
 
         /** The 32 raw private bytes inside an RFC 8410 PKCS#8 encoding (Ed25519 seed or X25519 scalar). */

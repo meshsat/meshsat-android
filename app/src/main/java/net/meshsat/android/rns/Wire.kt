@@ -143,7 +143,7 @@ internal fun String.unhex(): ByteArray {
     return ByteArray(length / 2) { i -> ((Character.digit(this[2 * i], 16) shl 4) or Character.digit(this[2 * i + 1], 16)).toByte() }
 }
 
-internal fun ByteArray.sameAs(other: ByteArray?): Boolean = other != null && contentEquals(other)
+internal fun ByteArray?.sameAs(other: ByteArray?): Boolean = this != null && other != null && contentEquals(other)
 
 /**
  * A parsed packet header plus its data (RNS/Packet.py). Every packet carries a
