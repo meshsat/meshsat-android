@@ -17,6 +17,7 @@ Args:
   --transport yes|no    enable_transport
   --connect HOST:PORT   TCPClientInterface to a server
   --listen PORT         TCPServerInterface on 127.0.0.1
+  --auto DEVICE         AutoInterface on one network device (a veth end in the tests)
   --name NAME           LXMF display name (default "rnsnode")
   --stamp-cost N        inbound stamp cost announced (0 = none)
   --enforce-stamps      enforce inbound stamps
@@ -69,6 +70,7 @@ def main():
     ap.add_argument("--transport", default="no")
     ap.add_argument("--connect", default=None)
     ap.add_argument("--listen", default=None)
+    ap.add_argument("--auto", default=None)
     ap.add_argument("--name", default="rnsnode")
     ap.add_argument("--stamp-cost", type=int, default=0)
     ap.add_argument("--enforce-stamps", action="store_true")
@@ -97,6 +99,14 @@ def main():
     enabled = yes
     listen_ip = 127.0.0.1
     listen_port = {args.listen}
+    ingress_control = No
+"""
+    if args.auto:
+        ifaces += f"""
+  [[auto]]
+    type = AutoInterface
+    enabled = yes
+    devices = {args.auto}
     ingress_control = No
 """
     if args.keep_config: pass

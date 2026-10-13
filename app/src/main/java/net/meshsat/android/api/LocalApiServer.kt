@@ -201,6 +201,7 @@ class LocalApiServer(
             method == Method.POST && uri == "/api/lxmf/sync" -> handleLxmfSync(session)
             method == Method.POST && uri == "/api/rns/paid" -> handleRnsPaid(session)
             method == Method.GET && uri == "/api/rns/paths" -> handleRnsPaths()
+            method == Method.GET && uri == "/api/rns/auto" -> handleRnsAuto()
 
             method == Method.GET && uri == "/api/iridium/status" -> handleIridiumStatus()
             method == Method.POST && uri == "/api/iridium/loopback" -> handleIridiumLoopback(session)
@@ -621,6 +622,17 @@ class LocalApiServer(
             if (r != null) return jsonOk(JSONObject().put("done", true).put("state", r.state.name.lowercase()).put("received", r.received).put("duplicates", r.duplicates).put("error", r.error))
         }
         return jsonOk(JSONObject().put("done", false).put("state", st.lxmf.syncState.name.lowercase()))
+    }
+
+    /** The AutoInterface: whether it runs, on which devices, and the peers it discovered. */
+    private fun handleRnsAuto(): Response {
+        val a = net.meshsat.android.service.GatewayService.rnsAutoInterface
+            ?: return jsonOk(JSONObject().put("enabled", false).put("online", false))
+        return jsonOk(JSONObject().apply {
+            put("enabled", true); put("online", a.isOnline); put("group", a.groupText)
+            put("devices", JSONArray(a.devices()))
+            put("peers", JSONArray().apply { for (p in a.peers()) put(JSONObject().put("address", p.address).put("device", p.device).put("last_heard_ms", p.lastHeardMs)) })
+        })
     }
 
     private fun handleLxmfMessages(session: IHTTPSession): Response {

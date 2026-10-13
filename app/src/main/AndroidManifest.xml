@@ -4,6 +4,8 @@
 
     <!-- Internet for map tiles -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Reticulum AutoInterface: receiving link-local multicast on WiFi needs the multicast lock (MESHSAT-1553) -->
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
 
     <!-- SMS: only the fdroid edition. Its permissions and receivers are in
          src/fdroid/AndroidManifest.xml; the play edition has none of them (MESHSAT-1335). -->

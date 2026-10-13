@@ -86,6 +86,7 @@ class SettingsRepository(private val context: Context) {
         val KEY_RNS_PAID_EXTRA_HOPS = stringPreferencesKey("rns_paid_extra_hops")
         val KEY_RNS_PAID_MIN_INTERVAL_MIN = stringPreferencesKey("rns_paid_min_interval_min")
         val KEY_LXMF_PROPAGATION_NODE = stringPreferencesKey("lxmf_propagation_node")
+        val KEY_RNS_AUTO_ENABLED = booleanPreferencesKey("rns_auto_enabled")
         val KEY_LXMF_SYNC_INTERVAL_MIN = stringPreferencesKey("lxmf_sync_interval_min")
 
         // Hub Reporter settings (MESHSAT-292)
@@ -602,6 +603,10 @@ class SettingsRepository(private val context: Context) {
     /** Minutes between two announces of one destination across the satellite. */
     val rnsPaidMinIntervalMin: Flow<String> = context.dataStore.data.map { it[KEY_RNS_PAID_MIN_INTERVAL_MIN] ?: "5" }
     suspend fun setRnsPaidMinIntervalMin(minutes: String) { context.dataStore.edit { it[KEY_RNS_PAID_MIN_INTERVAL_MIN] = minutes } }
+
+    /** The RNS AutoInterface on this WiFi: Sideband and rnsd with theirs on find the phone with nothing typed (MESHSAT-1553 P4). */
+    val rnsAutoEnabled: Flow<Boolean> = context.dataStore.data.map { it[KEY_RNS_AUTO_ENABLED] ?: false }
+    suspend fun setRnsAutoEnabled(enabled: Boolean) { context.dataStore.edit { it[KEY_RNS_AUTO_ENABLED] = enabled } }
 
     /** The LXMF propagation node: "" = the nearest one heard, "none" = never, or a 32-hex lxmf.propagation address (MESHSAT-1553 P3b). */
     val lxmfPropagationNode: Flow<String> = context.dataStore.data.map { it[KEY_LXMF_PROPAGATION_NODE] ?: "" }

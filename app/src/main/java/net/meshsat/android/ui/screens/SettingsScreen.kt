@@ -178,6 +178,7 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
     val rnsPaidDests by settings.rnsPaidDests.collectAsState(initial = "")
     val rnsPaidExtraHops by settings.rnsPaidExtraHops.collectAsState(initial = "20")
     val lxmfPropagationNode by settings.lxmfPropagationNode.collectAsState(initial = "")
+    val rnsAutoEnabled by settings.rnsAutoEnabled.collectAsState(initial = false)
     val lxmfSyncIntervalMin by settings.lxmfSyncIntervalMin.collectAsState(initial = "0")
     val rnsTcpListenEnabled by settings.rnsTcpListenEnabled.collectAsState(initial = false)
     val rnsTcpListenPort by settings.rnsTcpListenPort.collectAsState(initial = "4242")
@@ -1790,6 +1791,29 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
 
                 HorizontalDivider(color = MeshSatBorder, modifier = Modifier.padding(vertical = 8.dp))
                 Text("Peers on this WiFi", style = MaterialTheme.typography.bodyMedium)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("Find Reticulum apps by themselves (AutoInterface)", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                    Switch(
+                        checked = rnsAutoEnabled,
+                        onCheckedChange = { scope.launch { settings.setRnsAutoEnabled(it) } },
+                        colors = SwitchDefaults.colors(checkedTrackColor = MeshSatTeal),
+                    )
+                }
+                val auto = GatewayService.rnsAutoInterface
+                Text(
+                    text = when {
+                        !rnsAutoEnabled -> "Off. Takes effect when the gateway restarts. Sideband and rnsd with their AutoInterface on then find this phone with nothing typed."
+                        auto == null -> "Starts with the gateway."
+                        !auto.isOnline -> "Not running: no WiFi link-local address."
+                        else -> "Running on ${auto.devices().joinToString()}; ${net.meshsat.android.ui.Words.count(auto.peerCount(), "peer")} discovered."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MeshSatTextMuted,
+                )
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
