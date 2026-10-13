@@ -136,6 +136,9 @@ object Rns {
 /** Thrown for bytes that do not parse as the wire format says. */
 class WireException(message: String) : Exception(message)
 
+/** Lower-case hex of a byte array, for callers outside this package. */
+fun hexOf(b: ByteArray): String = b.joinToString("") { "%02x".format(it) }
+
 internal fun ByteArray.hex(): String = joinToString("") { "%02x".format(it) }
 
 internal fun String.unhex(): ByteArray {

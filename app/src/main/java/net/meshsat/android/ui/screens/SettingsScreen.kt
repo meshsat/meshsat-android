@@ -33,6 +33,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -176,6 +177,8 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
     val lxmfDisplayName by settings.lxmfDisplayName.collectAsState(initial = "")
     val rnsPaidDests by settings.rnsPaidDests.collectAsState(initial = "")
     val rnsPaidExtraHops by settings.rnsPaidExtraHops.collectAsState(initial = "20")
+    val lxmfPropagationNode by settings.lxmfPropagationNode.collectAsState(initial = "")
+    val lxmfSyncIntervalMin by settings.lxmfSyncIntervalMin.collectAsState(initial = "0")
     val rnsTcpListenEnabled by settings.rnsTcpListenEnabled.collectAsState(initial = false)
     val rnsTcpListenPort by settings.rnsTcpListenPort.collectAsState(initial = "4242")
 
@@ -219,6 +222,8 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
     var lxmfNameInput by remember(lxmfDisplayName) { mutableStateOf(lxmfDisplayName) }
     var paidDestsInput by remember(rnsPaidDests) { mutableStateOf(rnsPaidDests) }
     var paidHopsInput by remember(rnsPaidExtraHops) { mutableStateOf(rnsPaidExtraHops) }
+    var syncMinInput by remember(lxmfSyncIntervalMin) { mutableStateOf(lxmfSyncIntervalMin) }
+    var pnTick by remember { mutableStateOf(0) }
     val lxmfAddress = GatewayService.rnsStack?.lxmfAddress
         ?: GatewayService.routingIdentity?.let { net.meshsat.android.rns.RnsStack.lxmfAddressOf(it) } ?: ""
     val rnsTcpState = GatewayService.rnsTcpInterface?.state.collectOrNull()
@@ -1653,6 +1658,88 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
                     enabled = GatewayService.rnsStack != null,
                     colors = ButtonDefaults.buttonColors(containerColor = MeshSatTeal),
                 ) { Text("Announce now", style = MaterialTheme.typography.bodySmall) }
+
+                HorizontalDivider(color = MeshSatBorder, modifier = Modifier.padding(vertical = 8.dp))
+                Text("Propagation node", style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    text = "A message sent as Propagated waits at an LXMF propagation node until the other side syncs, " +
+                        "and Sync fetches what a node holds for this phone. Automatic takes the nearest node heard announcing.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MeshSatTextMuted,
+                )
+                val pnStack = GatewayService.rnsStack
+                val pnNodes = remember(pnStack, pnTick) { pnStack?.lxmf?.propagationNodes().orEmpty() }
+                val pnCurrent = remember(pnStack, pnTick, lxmfPropagationNode) { pnStack?.lxmf?.propagationNodeInfo() }
+                LaunchedEffect(pnStack) { while (true) { kotlinx.coroutines.delay(2000); pnTick++ } }
+                Text(
+                    text = when {
+                        lxmfPropagationNode == "none" -> "Off"
+                        pnStack == null -> "Starts with the gateway"
+                        pnCurrent != null -> "Using ${pnCurrent.name ?: pnCurrent.destHex.take(8)}, " +
+                            "${net.meshsat.android.ui.Words.count(pnCurrent.hops, "hop")} away, stamp cost ${pnCurrent.stampCost}" +
+                            (if (lxmfPropagationNode.isBlank()) " (automatic)" else "")
+                        else -> "No propagation node heard yet"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (pnCurrent != null && lxmfPropagationNode != "none") MeshSatTeal else MeshSatTextMuted,
+                )
+                Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = lxmfPropagationNode.isBlank(),
+                        onClick = { scope.launch { settings.setLxmfPropagationNode(""); pnStack?.setPropagationNode("") } },
+                        label = { Text("Automatic", style = MaterialTheme.typography.bodySmall) },
+                    )
+                    FilterChip(
+                        selected = lxmfPropagationNode == "none",
+                        onClick = { scope.launch { settings.setLxmfPropagationNode("none"); pnStack?.setPropagationNode("none") } },
+                        label = { Text("Off", style = MaterialTheme.typography.bodySmall) },
+                    )
+                    pnNodes.forEach { n ->
+                        FilterChip(
+                            selected = lxmfPropagationNode == n.destHex,
+                            onClick = { scope.launch { settings.setLxmfPropagationNode(n.destHex); pnStack?.setPropagationNode(n.destHex) } },
+                            label = { Text(n.name ?: n.destHex.take(8), style = MaterialTheme.typography.bodySmall) },
+                        )
+                    }
+                }
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        value = syncMinInput,
+                        onValueChange = { v ->
+                            syncMinInput = v.filter { c -> c.isDigit() }.take(4)
+                            val minutes = syncMinInput.ifBlank { "0" }
+                            scope.launch { settings.setLxmfSyncIntervalMin(minutes); pnStack?.startSyncLoop((minutes.toLongOrNull() ?: 0L) * 60_000L) }
+                        },
+                        label = { Text("Sync every (min, 0 = by hand)", style = MaterialTheme.typography.bodySmall) },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.weight(1f),
+                        textStyle = MaterialTheme.typography.bodyMedium,
+                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = MeshSatTeal, unfocusedBorderColor = MeshSatBorder),
+                    )
+                    Button(
+                        onClick = {
+                            pnStack?.lxmf?.sync(); pnTick++
+                            Toast.makeText(context, "Syncing from the propagation node", Toast.LENGTH_SHORT).show()
+                        },
+                        enabled = pnCurrent != null && lxmfPropagationNode != "none" && pnStack?.lxmf?.syncState?.busy != true,
+                        colors = ButtonDefaults.buttonColors(containerColor = MeshSatTeal),
+                    ) { Text("Sync now", style = MaterialTheme.typography.bodySmall) }
+                }
+                pnStack?.lxmf?.let { r ->
+                    val last = r.lastSync
+                    Text(
+                        text = when {
+                            r.syncState.busy -> "Syncing: ${r.syncState.name.lowercase().replace('_', ' ')}"
+                            last == null -> "Not synced yet"
+                            last.state == net.meshsat.android.lxmf.SyncState.COMPLETE ->
+                                "Last sync: ${net.meshsat.android.ui.Words.count(last.received, "new message")}" + (if (last.duplicates > 0) ", ${last.duplicates} already here" else "")
+                            else -> "Last sync failed: ${last.error}"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MeshSatTextMuted,
+                    )
+                }
 
                 HorizontalDivider(color = MeshSatBorder, modifier = Modifier.padding(vertical = 8.dp))
                 Text("Reticulum by satellite", style = MaterialTheme.typography.bodyMedium)

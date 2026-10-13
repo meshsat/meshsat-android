@@ -62,6 +62,8 @@ class LocalApiServer(
     /** LXMF send (MESHSAT-1553): destination hex, content, method (null = auto); returns the message hash. */
     private val lxmfSendCallback: ((dest: String, content: String, method: net.meshsat.android.lxmf.LxMethod?) -> String)? = null,
     private val lxmfMessagesCallback: ((limit: Int) -> List<net.meshsat.android.data.Message>)? = null,
+    /** The propagation node choice ("", "none" or 32 hex; null keeps) and the sync interval in minutes (null keeps), persisted. */
+    private val lxmfPropagationCallback: ((node: String?, syncIntervalMin: String?) -> Unit)? = null,
     /** The satellite allow-list: destinations, extra hops (-1 keeps), interval minutes (-1 keeps). */
     private val rnsPaidCallback: ((dests: List<String>, extraHops: Int, minIntervalMin: Int) -> Unit)? = null,
     private val hubSettingsCallback: ((Map<String, String>) -> Unit)? = null,
@@ -194,6 +196,9 @@ class LocalApiServer(
             method == Method.POST && uri == "/api/lxmf/announce" -> handleLxmfAnnounce()
             method == Method.POST && uri == "/api/lxmf/send" -> handleLxmfSend(session)
             method == Method.GET && uri == "/api/lxmf/messages" -> handleLxmfMessages(session)
+            method == Method.GET && uri == "/api/lxmf/propagation" -> handleLxmfPropagation()
+            method == Method.POST && uri == "/api/lxmf/propagation" -> handleLxmfPropagationSet(session)
+            method == Method.POST && uri == "/api/lxmf/sync" -> handleLxmfSync(session)
             method == Method.POST && uri == "/api/rns/paid" -> handleRnsPaid(session)
             method == Method.GET && uri == "/api/rns/paths" -> handleRnsPaths()
 
@@ -551,6 +556,7 @@ class LocalApiServer(
         val method = when (json.optString("method", "auto")) {
             "direct" -> net.meshsat.android.lxmf.LxMethod.DIRECT
             "opportunistic" -> net.meshsat.android.lxmf.LxMethod.OPPORTUNISTIC
+            "propagated" -> net.meshsat.android.lxmf.LxMethod.PROPAGATED
             else -> null
         }
         val svc = lxmfSendCallback ?: return jsonError(Response.Status.SERVICE_UNAVAILABLE, "no sender")
@@ -559,6 +565,62 @@ class LocalApiServer(
         } catch (e: Exception) {
             jsonError(Response.Status.SERVICE_UNAVAILABLE, e.message ?: "send failed")
         }
+    }
+
+    private fun propagationJson(st: net.meshsat.android.rns.RnsStack): JSONObject = JSONObject().apply {
+        val r = st.lxmf
+        put("node", r.propagationNode()?.let { net.meshsat.android.rns.hexOf(it) } ?: "")
+        put("fixed", r.propagationNodeFixedHex ?: "")
+        put("auto", r.autoSelectPropagationNode)
+        put("sync_state", r.syncState.name.lowercase())
+        put("sync_progress", r.syncProgress.toDouble())
+        r.lastSync?.let { put("last_sync", JSONObject().put("state", it.state.name.lowercase()).put("received", it.received).put("duplicates", it.duplicates).put("error", it.error)) }
+        put("nodes", JSONArray().apply {
+            for (n in r.propagationNodes()) put(JSONObject().apply {
+                put("dest", n.destHex); put("name", n.name ?: ""); put("enabled", n.enabled); put("stamp_cost", n.stampCost)
+                put("hops", n.hops); put("interface", n.iface); put("last_seen_ms", n.lastSeenMs); put("transfer_limit_kb", n.transferLimitKb)
+            })
+        })
+    }
+
+    private fun handleLxmfPropagation(): Response {
+        val st = stack() ?: return jsonError(Response.Status.SERVICE_UNAVAILABLE, "Reticulum node not running")
+        return jsonOk(propagationJson(st))
+    }
+
+    /** {"node"?: "auto"|"none"|32 hex, "sync_interval_min"?: n} */
+    private fun handleLxmfPropagationSet(session: IHTTPSession): Response {
+        val body = readBody(session) ?: return jsonError(Response.Status.BAD_REQUEST, "empty body")
+        val json = try { JSONObject(body) } catch (e: Exception) { return jsonError(Response.Status.BAD_REQUEST, "bad json") }
+        var node: String? = null
+        if (json.has("node")) {
+            val v = json.optString("node", "").trim().lowercase()
+            node = when {
+                v == "auto" || v.isEmpty() -> ""
+                v == "none" || v == "off" -> "none"
+                v.length == 32 && v.all { it in "0123456789abcdef" } -> v
+                else -> return jsonError(Response.Status.BAD_REQUEST, "node must be auto, none or 32 hex characters")
+            }
+        }
+        val syncMin = if (json.has("sync_interval_min")) json.optInt("sync_interval_min", 0).coerceIn(0, 10_000).toString() else null
+        val cb = lxmfPropagationCallback ?: return jsonError(Response.Status.SERVICE_UNAVAILABLE, "no settings")
+        cb(node, syncMin)
+        val st = stack()
+        return jsonOk(JSONObject().put("ok", true).put("node", node ?: JSONObject.NULL).put("sync_interval_min", syncMin ?: JSONObject.NULL)
+            .also { o -> st?.let { o.put("status", propagationJson(it)) } })
+    }
+
+    /** Starts a sync from the propagation node; ?wait=N blocks up to N seconds for the result. */
+    private fun handleLxmfSync(session: IHTTPSession): Response {
+        val st = stack() ?: return jsonError(Response.Status.SERVICE_UNAVAILABLE, "Reticulum node not running")
+        if (st.lxmf.propagationNode() == null) return jsonError(Response.Status.SERVICE_UNAVAILABLE, "no propagation node known")
+        val f = st.lxmf.sync()
+        val wait = session.parms["wait"]?.toLongOrNull()?.coerceIn(0, 600) ?: 0
+        if (wait > 0) {
+            val r = try { f.get(wait, java.util.concurrent.TimeUnit.SECONDS) } catch (_: Exception) { null }
+            if (r != null) return jsonOk(JSONObject().put("done", true).put("state", r.state.name.lowercase()).put("received", r.received).put("duplicates", r.duplicates).put("error", r.error))
+        }
+        return jsonOk(JSONObject().put("done", false).put("state", st.lxmf.syncState.name.lowercase()))
     }
 
     private fun handleLxmfMessages(session: IHTTPSession): Response {

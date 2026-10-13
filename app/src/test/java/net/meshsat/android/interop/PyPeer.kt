@@ -22,6 +22,8 @@ class PyPeer private constructor(val name: String, private val proc: Process, va
     lateinit var delivery: String; private set
     lateinit var raw: String; private set
     lateinit var transportId: String; private set
+    /** The lxmf.propagation destination when started with [Opts.propagationNode], else "". */
+    lateinit var propagation: String; private set
 
     class Opts(
         val transport: Boolean = false,
@@ -31,6 +33,9 @@ class PyPeer private constructor(val name: String, private val proc: Process, va
         val stampCost: Int = 0,
         val enforce: Boolean = false,
         val loglevel: Int = 0,
+        /** Also run an LXMF propagation node at this stamp cost (13 is the minimum upstream allows). */
+        val propagationNode: Boolean = false,
+        val propagationCost: Int = 13,
     )
 
     companion object {
@@ -53,6 +58,7 @@ class PyPeer private constructor(val name: String, private val proc: Process, va
             if (o.listen != 0) args += listOf("--listen", o.listen.toString())
             if (o.stampCost > 0) args += listOf("--stamp-cost", o.stampCost.toString())
             if (o.enforce) args += "--enforce-stamps"
+            if (o.propagationNode) args += listOf("--propagation-node", "--propagation-cost", o.propagationCost.toString())
             if (o.loglevel > 0) args += listOf("--loglevel", o.loglevel.toString())
             val proc = ProcessBuilder(args).redirectErrorStream(false).start()
             val p = PyPeer(o.name, proc, cfgDir)
@@ -76,14 +82,20 @@ class PyPeer private constructor(val name: String, private val proc: Process, va
             p.delivery = ready["delivery"] as String
             p.raw = ready["raw"] as String
             p.transportId = ready["transport_id"] as String
+            p.propagation = (ready["propagation"] as? String) ?: ""
             if (ready["rns"] != PyEnv.rnsVersion) throw AssertionError("peer runs RNS ${ready["rns"]}, want ${PyEnv.rnsVersion}")
             return p
         }
 
+        /** Set when a wait timed out, so the peers' logs are dumped at the end even if the test did not notice. */
+        @Volatile var waitFailed = false
+
         /** Stops every peer started so far; call from @After. */
         fun stopAll(dumpLogs: Boolean) {
             val ps = synchronized(started) { started.toList().also { started.clear() } }
-            for (p in ps) p.stop(dumpLogs)
+            val dump = dumpLogs || waitFailed
+            waitFailed = false
+            for (p in ps) p.stop(dump)
         }
     }
 
@@ -102,8 +114,12 @@ class PyPeer private constructor(val name: String, private val proc: Process, va
         val deadline = System.currentTimeMillis() + timeoutMs
         while (true) {
             val remaining = deadline - System.currentTimeMillis()
-            if (remaining <= 0) throw AssertionError("timeout waiting for $name from peer $name")
-            val ev = events.poll(remaining, TimeUnit.MILLISECONDS) ?: throw AssertionError("timeout waiting for $name from peer ${this.name}")
+            if (remaining <= 0) { waitFailed = true; throw AssertionError("timeout waiting for $name from peer ${this.name}") }
+            val ev = events.poll(remaining, TimeUnit.MILLISECONDS) ?: run {
+                waitFailed = true
+                val seen = synchronized(lock) { log.takeLast(12).map { it["event"].toString() + (it["dest"]?.let { d -> ":" + d.toString().take(8) } ?: "") } }
+                throw AssertionError("timeout waiting for $name from peer ${this.name}; last events: $seen")
+            }
             if (ev["event"] == "__exit__") throw AssertionError("peer ${this.name} exited while waiting for $name")
             if (ev["event"] == name && (pred == null || pred(ev))) {
                 synchronized(lock) { log.remove(ev) }
@@ -124,7 +140,7 @@ class PyPeer private constructor(val name: String, private val proc: Process, va
             val f = File(cfgDir, "rns.log")
             if (f.exists()) {
                 val lines = f.readLines()
-                System.err.println("[py $name rns.log tail]\n" + lines.takeLast(60).joinToString("\n"))
+                System.err.println("[py $name rns.log tail]\n" + lines.takeLast(120).joinToString("\n"))
             }
         }
         cfgDir.deleteRecursively()

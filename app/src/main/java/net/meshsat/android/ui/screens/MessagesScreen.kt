@@ -13,6 +13,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -482,9 +483,10 @@ fun ConversationChatView(
     // the mesh, a phone number by SMS, the satellite conversation by satellite.
     var composeText by remember { mutableStateOf("") }
     var sendTransport by remember { mutableStateOf(Peers.defaultTransport(peer)) }
-    // An LXMF message goes Direct (a link, waits for the satellite round trip) or lets the
-    // router choose (opportunistic off the satellite). Direct is the safe default (MESHSAT-1553).
-    var lxmfDirect by remember { mutableStateOf(true) }
+    // An LXMF message goes Direct (a link, waits for the satellite round trip), lets the router
+    // choose (Auto: opportunistic off the satellite), Opportunistic (one packet, no link), or
+    // Propagated (parked at a propagation node until the peer syncs). Direct is the safe default (MESHSAT-1553).
+    var lxmfMethod by remember { mutableStateOf("direct") }
     val meshNodes = GatewayService.meshtasticBle?.nodes.collectOrNull()?.value.orEmpty()
 
     val meshConnected = GatewayService.meshtasticBle?.state.collectOrNull()?.value == MeshtasticBle.State.Connected
@@ -580,14 +582,24 @@ fun ConversationChatView(
                 SatelliteLimits.fits(composeText.trim().toByteArray(Charsets.UTF_8).size)
             val send = {
                 if (composeText.isNotBlank() && fitsTheLink) {
-                    sendMessage(context, composeText.trim(), sendTransport, peer, meshConnected, iridiumConnected, lxmfDirect)
+                    sendMessage(context, composeText.trim(), sendTransport, peer, meshConnected, iridiumConnected, lxmfMethod)
                     composeText = ""
                 }
             }
             if (sendTransport == "lxmf") {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(bottom = 4.dp)) {
-                    FilterChip(selected = lxmfDirect, onClick = { lxmfDirect = true }, label = { Text("Direct", style = MaterialTheme.typography.bodySmall) })
-                    FilterChip(selected = !lxmfDirect, onClick = { lxmfDirect = false }, label = { Text("Auto", style = MaterialTheme.typography.bodySmall) })
+                val propagationKnown = GatewayService.rnsStack?.lxmf?.propagationNode() != null
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.padding(bottom = 4.dp).horizontalScroll(rememberScrollState()),
+                ) {
+                    listOf("direct" to "Direct", "auto" to "Auto", "opportunistic" to "Opportunistic", "propagated" to "Propagated").forEach { (key, label) ->
+                        FilterChip(
+                            selected = lxmfMethod == key,
+                            onClick = { lxmfMethod = key },
+                            enabled = key != "propagated" || propagationKnown,
+                            label = { Text(label, style = MaterialTheme.typography.bodySmall) },
+                        )
+                    }
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -674,7 +686,7 @@ private fun sendMessage(
     peer: String,
     meshConnected: Boolean,
     iridiumConnected: Boolean,
-    lxmfDirect: Boolean = true,
+    lxmfMethod: String = "direct",
 ) {
     when (transport) {
         "lxmf" -> {
@@ -684,7 +696,7 @@ private fun sendMessage(
                     .setAction(GatewayService.ACTION_SEND_LXMF)
                     .putExtra(GatewayService.EXTRA_TEXT, text)
                     .putExtra(GatewayService.EXTRA_RECIPIENT, peer)
-                    .putExtra(GatewayService.EXTRA_LXMF_METHOD, if (lxmfDirect) "direct" else "auto")
+                    .putExtra(GatewayService.EXTRA_LXMF_METHOD, lxmfMethod)
             )
         }
         "sms" -> {
@@ -728,6 +740,7 @@ private fun deliveryLabel(forwardedTo: String): String = when (forwardedTo) {
     GatewayService.IRIDIUM_QUEUED, GatewayService.LXMF_QUEUED -> "Queued"
     GatewayService.LXMF_SENT -> "Sent"
     GatewayService.LXMF_DELIVERED -> "Delivered"
+    GatewayService.LXMF_PROPAGATED -> "At the propagation node"
     GatewayService.LXMF_FAILED -> "Failed"
     GatewayService.IRIDIUM_UNCONFIRMED -> "May have been sent"
     "iridium:sbd", net.meshsat.android.sms.SmsStatusReceiver.SENT -> "Sent"
@@ -753,6 +766,8 @@ private fun DeliveryMark(forwardedTo: String) {
         GatewayService.LXMF_FAILED -> Triple(Icons.Default.ErrorOutline, MeshSatRed, "Failed")
         // Two checks only on the peer's proof, as LXMF clients show it.
         GatewayService.LXMF_DELIVERED -> Triple(Icons.Default.DoneAll, MeshSatTeal, "Delivered")
+        // One check: the propagation node holds it for the peer's next sync.
+        GatewayService.LXMF_PROPAGATED -> Triple(Icons.Default.Done, MeshSatTextMuted, "At the propagation node")
         // The link dropped after the upload: it may have arrived, and it is being sent again.
         GatewayService.IRIDIUM_UNCONFIRMED -> Triple(Icons.AutoMirrored.Filled.HelpOutline, MeshSatAmber, "May have been sent")
         "iridium:failed", net.meshsat.android.sms.SmsStatusReceiver.FAILED ->

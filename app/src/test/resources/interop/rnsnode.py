@@ -3,7 +3,14 @@
 
 Runs under the pinned venv (internal/interop/rnsenv). Reads one JSON command
 per line on stdin, writes one JSON event per line on stdout. Everything is
-upstream RNS/LXMF behaviour; nothing here knows about MeshSat.
+upstream RNS/LXMF behaviour; nothing here knows about MeshSat. Ingress control
+is off on its interfaces: RNS 1.5 holds announces that arrive in a burst on a
+fresh interface (Interface.IC_BURST_FREQ_NEW), which a test peer behind one
+transport sees on every start.
+
+The Bridge's script plus the propagation node side (MESHSAT-1553 P3b):
+--propagation-node runs an lxmd-style node, set_propagation_node and sync
+drive a client, send_lxm takes method "propagated".
 
 Args:
   --config-dir DIR      Reticulum config/storage directory (created)
@@ -13,6 +20,8 @@ Args:
   --name NAME           LXMF display name (default "rnsnode")
   --stamp-cost N        inbound stamp cost announced (0 = none)
   --enforce-stamps      enforce inbound stamps
+  --propagation-node    also run an LXMF propagation node (announced with "announce")
+  --propagation-cost N  the node's propagation stamp cost (13 = the minimum, default)
 
 Commands (JSON objects):
   {"cmd":"announce"}                       announce the LXMF delivery destination
@@ -21,7 +30,9 @@ Commands (JSON objects):
   {"cmd":"link","dest":HEX}                open an RNS.Link to dest (must be known)
   {"cmd":"link_send","link":HEX,"data":TEXT}  send data on a link, report proof
   {"cmd":"link_close","link":HEX}
-  {"cmd":"send_lxm","dest":HEX,"content":TEXT,"title":TEXT,"method":"opportunistic|direct|auto"}
+  {"cmd":"send_lxm","dest":HEX,"content":TEXT,"title":TEXT,"method":"opportunistic|direct|auto|propagated"}
+  {"cmd":"set_propagation_node","dest":HEX}  the node propagated messages go through and syncs come from
+  {"cmd":"sync","max":N}                  download from the propagation node -> {"event":"sync","state":n,"result":n}
   {"cmd":"send_packet","dest":HEX,"data":TEXT}  single encrypted packet to a SINGLE dest, waits for proof
   {"cmd":"set_keepalive","link":HEX,"seconds":N}
   {"cmd":"status"}
@@ -61,6 +72,8 @@ def main():
     ap.add_argument("--name", default="rnsnode")
     ap.add_argument("--stamp-cost", type=int, default=0)
     ap.add_argument("--enforce-stamps", action="store_true")
+    ap.add_argument("--propagation-node", action="store_true")
+    ap.add_argument("--propagation-cost", type=int, default=13)
     ap.add_argument("--loglevel", type=int, default=2)
     ap.add_argument("--keep-config", action="store_true", help="use the config already in --config-dir")
     args = ap.parse_args()
@@ -75,6 +88,7 @@ def main():
     enabled = yes
     target_host = {host}
     target_port = {port}
+    ingress_control = No
 """
     if args.listen:
         ifaces += f"""
@@ -83,6 +97,7 @@ def main():
     enabled = yes
     listen_ip = 127.0.0.1
     listen_port = {args.listen}
+    ingress_control = No
 """
     if args.keep_config: pass
     else:
@@ -103,7 +118,10 @@ def main():
     RNS.logdest = RNS.LOG_FILE
     reticulum = RNS.Reticulum(args.config_dir)
     identity = RNS.Identity()
-    router = LXMF.LXMRouter(identity=identity, storagepath=args.config_dir, enforce_stamps=args.enforce_stamps)
+    router = LXMF.LXMRouter(identity=identity, storagepath=args.config_dir, enforce_stamps=args.enforce_stamps,
+                            autopeer=False, propagation_cost=args.propagation_cost)
+    if args.propagation_node:
+        router.enable_propagation()
     stamp_cost = args.stamp_cost if args.stamp_cost > 0 else None
     delivery = router.register_delivery_identity(identity, display_name=args.name, stamp_cost=stamp_cost)
 
@@ -148,7 +166,20 @@ def main():
     RNS.Transport.register_announce_handler(AnnounceHandler())
 
     emit(event="ready", identity=identity.hash.hex(), delivery=delivery.hash.hex(), raw=raw_dest.hash.hex(),
+         propagation=router.propagation_destination.hash.hex() if args.propagation_node else "",
          transport_id=RNS.Transport.identity.hash.hex(), rns=RNS.__version__, lxmf=LXMF.__version__)
+
+    def sync_watch(deadline):
+        # LXMRouter.PR_COMPLETE is 0x07, failures are 0xf0 and up; the router moves the state by itself.
+        while time.time() < deadline:
+            st = router.propagation_transfer_state
+            if st == LXMF.LXMRouter.PR_COMPLETE or st >= LXMF.LXMRouter.PR_NO_PATH:
+                emit(event="sync", state=st, result=router.propagation_transfer_last_result,
+                     duplicates=router.propagation_transfer_last_duplicates)
+                router.acknowledge_sync_completion(reset_state=True)
+                return
+            time.sleep(0.2)
+        emit(event="sync", state=-1, result=None, duplicates=None)
 
     for line in sys.stdin:
         line = line.strip()
@@ -166,7 +197,16 @@ def main():
             elif c == "announce":
                 delivery.announce()
                 raw_dest.announce()
+                if args.propagation_node:
+                    router.propagation_destination.announce(app_data=router.get_propagation_node_app_data())
                 emit(event="announced", delivery=delivery.hash.hex(), raw=raw_dest.hash.hex())
+            elif c == "set_propagation_node":
+                router.set_outbound_propagation_node(bytes.fromhex(cmd["dest"]))
+                emit(event="propagation_node_set", dest=cmd["dest"])
+            elif c == "sync":
+                router.request_messages_from_propagation_node(identity, cmd.get("max") or LXMF.LXMRouter.PR_ALL_MESSAGES)
+                threading.Thread(target=sync_watch, args=(time.time() + float(cmd.get("timeout", 120)),), daemon=True).start()
+                emit(event="sync_started")
             elif c == "request_path":
                 RNS.Transport.request_path(bytes.fromhex(cmd["dest"]))
                 emit(event="path_requested", dest=cmd["dest"])
@@ -233,6 +273,8 @@ def main():
                         method = LXMF.LXMessage.OPPORTUNISTIC
                     else:
                         method = LXMF.LXMessage.DIRECT
+                elif m == "propagated":
+                    method = LXMF.LXMessage.PROPAGATED
                 else:
                     method = LXMF.LXMessage.DIRECT if m == "direct" else LXMF.LXMessage.OPPORTUNISTIC
                 lxm = LXMF.LXMessage(dest, delivery, cmd.get("content", "").encode("utf-8"),

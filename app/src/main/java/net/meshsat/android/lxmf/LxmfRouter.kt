@@ -1,17 +1,29 @@
 package net.meshsat.android.lxmf
 
 import net.meshsat.android.rns.Destination
+import net.meshsat.android.rns.KnownIdentity
 import net.meshsat.android.rns.Link
 import net.meshsat.android.rns.LinkState
+import net.meshsat.android.rns.MpArray
+import net.meshsat.android.rns.MpBin
+import net.meshsat.android.rns.MpFloat
+import net.meshsat.android.rns.MpInt
 import net.meshsat.android.rns.MpMap
+import net.meshsat.android.rns.MpNil
+import net.meshsat.android.rns.MpValue
+import net.meshsat.android.rns.Msgpack
+import net.meshsat.android.rns.MsgpackException
 import net.meshsat.android.rns.Node
 import net.meshsat.android.rns.Packet
+import net.meshsat.android.rns.RATCHET_EXPIRY_MS
 import net.meshsat.android.rns.Receipt
 import net.meshsat.android.rns.Rns
 import net.meshsat.android.rns.RnsIdentity
 import net.meshsat.android.rns.announce
+import net.meshsat.android.rns.asLong
 import net.meshsat.android.rns.crossesPaidLink
 import net.meshsat.android.rns.hex
+import net.meshsat.android.rns.request
 import net.meshsat.android.rns.requestPath
 import net.meshsat.android.rns.sendData
 import net.meshsat.android.rns.sendResource
@@ -82,7 +94,10 @@ class LxmfRouter(val node: Node, cfg: Config) {
         @Volatile var deliveredAtMs = 0L
             internal set
         internal var receipt: Receipt? = null
-        /** Completes with the final state (DELIVERED, FAILED, REJECTED or CANCELLED). */
+        /** PROPAGATED: msgpack([time, [dest || encrypted || stamp]]) once built, and the transient id the node files it under. */
+        internal var propagationPacked: ByteArray? = null
+        internal var transientId: ByteArray? = null
+        /** Completes with the final state: DELIVERED, FAILED, REJECTED, CANCELLED, or SENT for a propagated message the node took. */
         val result = CompletableFuture<LxState>()
         val hashHex: String get() = message.hashHex
     }
@@ -229,10 +244,11 @@ class LxmfRouter(val node: Node, cfg: Config) {
         if (chosen == LxMethod.OPPORTUNISTIC && size > LxMessage.ENCRYPTED_PACKET_MAX_CONTENT) chosen = LxMethod.DIRECT
         o.method = chosen
         o.representation = if (chosen == LxMethod.DIRECT && size > LxMessage.LINK_PACKET_MAX_CONTENT) Representation.RESOURCE else Representation.PACKET
-        if (chosen == LxMethod.PROPAGATED) throw LxmfException("propagated delivery is not available yet")
+        if (chosen == LxMethod.PROPAGATED && propagationNode() == null) throw LxmfException("no propagation node known")
         lock.withLock { pendingOutbound.add(o) }
-        // Pre-emptively request an unknown path for an opportunistic message (handle_outbound).
-        if (chosen == LxMethod.OPPORTUNISTIC && !node.paths.has(peer)) {
+        // Pre-emptively request an unknown path for an opportunistic message (handle_outbound),
+        // and the recipient's identity for a propagated one, which is encrypted for it here.
+        if ((chosen == LxMethod.OPPORTUNISTIC && !node.paths.has(peer)) || (chosen == LxMethod.PROPAGATED && node.recall(peer) == null)) {
             requestPathThrottled(peer)
             scheduleAttempt(o, peer, pathRequest = true)
         }
@@ -337,9 +353,10 @@ class LxmfRouter(val node: Node, cfg: Config) {
                         }
                     }
                     o.state == LxState.CANCELLED || o.state == LxState.REJECTED -> failMessage(o, o.state.name.lowercase())
+                    o.state == LxState.GENERATING -> { /* a stamp is being generated on its own thread */ }
                     o.method == LxMethod.OPPORTUNISTIC -> processOpportunistic(o)
                     o.method == LxMethod.DIRECT -> processDirect(o)
-                    else -> failMessage(o, "unsupported method")
+                    o.method == LxMethod.PROPAGATED -> processPropagated(o)
                 }
             }
         } finally {
@@ -487,6 +504,318 @@ class LxmfRouter(val node: Node, cfg: Config) {
         }
     }
 
+    // ---------------------------------------------------------------------------
+    // Propagation nodes (P3b): messages through an lxmf.propagation node, and syncing from one
+    // ---------------------------------------------------------------------------
+
+    private val pnNameHash = Rns.nameHash(LxMessage.PROPAGATION_NAME)
+    @Volatile private var propagationNodeFixed: ByteArray? = null
+    /** With no fixed node, the nearest announced propagation node is used, as Sideband's autoselect does. */
+    @Volatile var autoSelectPropagationNode = true
+    private var propagationLink: Link? = null
+    private val processedTransientIds = LinkedHashMap<String, Long>()
+    private val stampExecutor = Executors.newSingleThreadExecutor { r -> Thread(r, "lxmf-stamps").apply { isDaemon = true } }
+    @Volatile var syncState: SyncState = SyncState.IDLE
+        private set
+    @Volatile var syncProgress: Float = 0f
+        private set
+    @Volatile var lastSync: SyncResult? = null
+        private set
+    private var syncFuture: CompletableFuture<SyncResult>? = null
+
+    /** Propagation nodes heard announcing, nearest first. */
+    fun propagationNodes(): List<PropagationNodeInfo> = node.paths.all()
+        .filter { it.announce.nameHash.contentEquals(pnNameHash) }
+        .mapNotNull { e ->
+            val k = node.recall(e.destHash)
+            PnAppData.parse(e.destHash, k?.appData)?.copy(hops = e.hops, iface = e.iface, lastSeenMs = k?.lastSeenMs ?: 0L)
+        }
+        .sortedWith(compareBy({ it.hops }, { -it.lastSeenMs }))
+
+    /** Pins the outbound propagation node (set_outbound_propagation_node); null returns to automatic selection. */
+    fun setPropagationNode(dest: ByteArray?) {
+        val old = propagationNode()
+        propagationNodeFixed = dest?.copyOf()
+        val new = propagationNode()
+        if (old != null && (new == null || !old.contentEquals(new))) {
+            val l = lock.withLock { propagationLink.also { propagationLink = null } }
+            l?.let { node.links.teardown(it) }
+        }
+        log("lxmf: propagation node ${new?.hex()?.take(8) ?: "none"}${if (propagationNodeFixed == null) " (automatic)" else ""}")
+    }
+
+    /** The node propagated messages go through and syncs come from, or null when none is known. */
+    fun propagationNode(): ByteArray? = propagationNodeFixed
+        ?: if (autoSelectPropagationNode) propagationNodes().firstOrNull { it.enabled }?.destHash else null
+
+    fun propagationNodeInfo(): PropagationNodeInfo? = propagationNode()?.let { d -> propagationNodes().firstOrNull { it.destHash.contentEquals(d) } }
+
+    val propagationNodeFixedHex: String? get() = propagationNodeFixed?.hex()
+
+    /** process_outbound for PROPAGATED: pack and stamp first, then one link to the node, reused. */
+    private fun processPropagated(o: Outbound) {
+        val peer = o.message.dest
+        if (o.propagationPacked == null) {
+            val k = node.recall(peer)
+            val info = propagationNodeInfo()
+            if (k?.identity == null || info == null) {
+                if (!attemptDue(o, peer)) return
+                o.attempts++
+                if (o.attempts > o.maxAttempts) { failMessage(o, if (k?.identity == null) "recipient identity unknown" else "no propagation node known"); return }
+                if (k?.identity == null) requestPathThrottled(peer) else propagationNode()?.let { requestPathThrottled(it) }
+                scheduleAttempt(o, peer, pathRequest = true)
+                return
+            }
+            setState(o, LxState.GENERATING)
+            stampExecutor.execute { buildPropagated(o, k, info) }
+            return
+        }
+        val pn = propagationNode() ?: run { failMessage(o, "no propagation node known"); return }
+        if (o.attempts > o.maxAttempts) { if (attemptDue(o, pn)) failMessage(o, "max delivery attempts reached (propagated)"); return }
+        val link = lock.withLock { propagationLink }
+        if (link != null) {
+            when (link.state) {
+                LinkState.ACTIVE, LinkState.STALE -> if (o.state != LxState.SENDING) {
+                    log("lxmf: starting propagation transfer of ${o.message} via ${pn.hex().take(8)} on ${link.idHex.take(8)} (${o.representation.name.lowercase()})")
+                    setState(o, LxState.SENDING)
+                    val packed = o.propagationPacked!!
+                    try {
+                        if (o.representation == Representation.PACKET) {
+                            val r = node.links.send(link, packed)
+                            o.receipt = r
+                            r.result.thenAccept { res ->
+                                if (o.state.terminal) return@thenAccept
+                                if (res.delivered) propagated(o)
+                                else {
+                                    log("lxmf: propagation packet for ${o.message} timed out, tearing ${link.idHex.take(8)} down")
+                                    node.links.teardown(link)
+                                    setState(o, LxState.OUTBOUND)
+                                    trigger()
+                                }
+                            }
+                        } else {
+                            val res = node.links.sendResource(link, packed)
+                            res.result.thenAccept { out ->
+                                if (o.state.terminal) return@thenAccept
+                                if (out.delivered) propagated(o)
+                                else if (out.error == "rejected by receiver") { setState(o, LxState.REJECTED, out.error); trigger() }
+                                else {
+                                    log("lxmf: propagation resource for ${o.message} failed (${out.error}), tearing ${link.idHex.take(8)} down")
+                                    node.links.teardown(link)
+                                    setState(o, LxState.OUTBOUND, out.error ?: "")
+                                    trigger()
+                                }
+                            }
+                        }
+                    } catch (e: Exception) {
+                        log("lxmf: error sending ${o.message} to the propagation node: ${e.message}")
+                        failMessage(o, e.message ?: "send failed")
+                    }
+                }
+                LinkState.CLOSED -> {
+                    lock.withLock { if (propagationLink === link) propagationLink = null }
+                    if (o.state == LxState.SENDING) setState(o, LxState.OUTBOUND)
+                    if (o.attempts + 1 < o.maxAttempts) scheduleAttempt(o, pn) else failMessage(o, "propagation link closed")
+                }
+                else -> { /* pending or in handshake */ }
+            }
+            return
+        }
+        if (!attemptDue(o, pn)) return
+        o.attempts++
+        o.awaitingPath = false
+        scheduleAttempt(o, pn)
+        if (o.attempts < o.maxAttempts) {
+            if (node.paths.has(pn)) {
+                log("lxmf: establishing link to propagation node ${pn.hex().take(8)} for attempt ${o.attempts}")
+                try { openPropagationLink(pn) } catch (e: Exception) { log("lxmf: link to ${pn.hex().take(8)} not started: ${e.message}") }
+            } else {
+                log("lxmf: no path to propagation node ${pn.hex().take(8)} for attempt ${o.attempts}, requesting one")
+                requestPathThrottled(pn)
+                scheduleAttempt(o, pn, pathRequest = true)
+            }
+        } else {
+            failMessage(o, "max delivery attempts reached (propagated)")
+        }
+    }
+
+    private fun openPropagationLink(pn: ByteArray): Link {
+        val l = node.links.initiate(pn)
+        l.onPacket = { _, plain, _ -> propagationSignal(plain) }
+        l.onEstablished = { trigger() }
+        l.onClosed = { ll -> lock.withLock { if (propagationLink === ll) propagationLink = null }; trigger() }
+        lock.withLock { propagationLink = l }
+        return l
+    }
+
+    /** The node's answer on the link to a single-packet upload with a bad stamp (propagation_transfer_signalling_packet). */
+    private fun propagationSignal(plain: ByteArray) {
+        val v = try { Msgpack.unpack(plain).first } catch (_: MsgpackException) { return } as? MpArray ?: return
+        if (v.items.firstOrNull()?.asLong() != ERROR_INVALID_STAMP) return
+        val rejected = lock.withLock { pendingOutbound.filter { it.method == LxMethod.PROPAGATED && it.state == LxState.SENDING } }
+        for (o in rejected) {
+            log("lxmf: the propagation node rejected the stamp of ${o.message}")
+            setState(o, LxState.REJECTED, "invalid propagation stamp")
+        }
+        trigger()
+    }
+
+    /** Encrypts for the recipient, stamps for the node and packs (LXMessage.pack for PROPAGATED), off the jobs thread. */
+    private fun buildPropagated(o: Outbound, k: KnownIdentity, info: PropagationNodeInfo) {
+        try {
+            if (o.state == LxState.CANCELLED) return
+            val id = k.identity ?: run { failMessage(o, "recipient identity unknown"); return }
+            val now = System.currentTimeMillis()
+            val ratchet = k.ratchet?.takeIf { it.size == Rns.RATCHET_LEN && now < k.ratchetAtMs + RATCHET_EXPIRY_MS }
+            val enc = id.encrypt(o.message.packed.copyOfRange(LxMessage.DEST_LEN, o.message.packed.size), ratchet)
+            var lxmfData = o.message.dest + enc
+            val transientId = Rns.sha256(lxmfData)
+            o.transientId = transientId
+            if (info.stampCost > 0) {
+                log("lxmf: generating a propagation stamp at cost ${info.stampCost} for ${o.message}")
+                val st = LxStamper.generateStamp(transientId, info.stampCost, cancelled = { o.state == LxState.CANCELLED }, expandRounds = LxStamper.WORKBLOCK_EXPAND_ROUNDS_PN)
+                if (st == null) { if (o.state != LxState.CANCELLED) failMessage(o, "propagation stamp generation failed"); return }
+                lxmfData += st.first
+            }
+            val packed = Msgpack.pack(MpArray(MpFloat(now / 1000.0), MpArray(MpBin(lxmfData))))
+            o.propagationPacked = packed
+            o.representation = if (packed.size <= LxMessage.LINK_PACKET_MAX_CONTENT) Representation.PACKET else Representation.RESOURCE
+            setState(o, LxState.OUTBOUND)
+            trigger()
+        } catch (e: Exception) {
+            failMessage(o, "propagation packing failed: ${e.message}")
+        }
+    }
+
+    /** The node took the message: SENT is as far as a propagated message gets here (LXMessage.__mark_propagated). */
+    private fun propagated(o: Outbound) {
+        lock.withLock { pendingOutbound.remove(o) }
+        log("lxmf: ${o.message} handed to the propagation node")
+        setState(o, LxState.SENT)
+        o.result.complete(LxState.SENT)
+    }
+
+    private fun transientSeen(id: ByteArray): Boolean = lock.withLock {
+        val h = id.hex()
+        if (processedTransientIds.containsKey(h)) return true
+        processedTransientIds[h] = System.currentTimeMillis()
+        if (processedTransientIds.size > 10_000) { val iter = processedTransientIds.entries.iterator(); repeat(1000) { if (iter.hasNext()) { iter.next(); iter.remove() } } }
+        false
+    }
+
+    /** One message from a node, dest || encrypted payload (lxmf_propagation on the client side). */
+    private fun ingestPropagated(data: ByteArray, iface: String): String {
+        if (data.size < LxMessage.OVERHEAD) return "too short"
+        if (transientSeen(Rns.sha256(data))) return "duplicate"
+        if (!data.copyOfRange(0, LxMessage.DEST_LEN).contentEquals(dest.hash)) return "not for us"
+        val plain = cfg.identity.decrypt(data.copyOfRange(LxMessage.DEST_LEN, data.size), dest.ratchetPrivs())?.first ?: return "could not decrypt"
+        return if (inbound(dest.hash + plain, LxMethod.PROPAGATED, iface) != null) "delivered" else "dropped"
+    }
+
+    /**
+     * Downloads what the propagation node holds for us (request_messages_from_propagation_node
+     * and the two /get rounds): the list of transient ids, then the messages we lack, then the
+     * ids received so the node drops them. One sync at a time; the result also lands in [lastSync].
+     */
+    fun sync(maxMessages: Int = 0): CompletableFuture<SyncResult> = lock.withLock {
+        syncFuture?.let { if (!it.isDone) return it }
+        val f = CompletableFuture<SyncResult>()
+        syncFuture = f
+        Thread({ runSync(maxMessages, f) }, "lxmf-sync").apply { isDaemon = true }.start()
+        f
+    }
+
+    private fun syncFail(f: CompletableFuture<SyncResult>, state: SyncState, why: String) {
+        syncState = state
+        val r = SyncResult(state, 0, 0, why)
+        lastSync = r
+        log("lxmf: sync failed: $why (${state.name.lowercase()})")
+        f.complete(r)
+    }
+
+    private fun runSync(maxMessages: Int, f: CompletableFuture<SyncResult>) {
+        syncProgress = 0f
+        val pn = propagationNode() ?: return syncFail(f, SyncState.NO_PATH, "no propagation node known")
+        try {
+            if (!node.paths.has(pn)) {
+                syncState = SyncState.PATH_REQUESTED
+                val wait = maxOf(PR_PATH_TIMEOUT_MS, pathRequestWaitMs())
+                try { node.requestPath(pn, wait).get(wait + 1000, TimeUnit.MILLISECONDS) } catch (_: Exception) {}
+                if (!node.paths.has(pn)) return syncFail(f, SyncState.NO_PATH, "no path to propagation node ${pn.hex().take(8)}")
+            }
+            var link = lock.withLock { propagationLink?.takeIf { it.state == LinkState.ACTIVE || it.state == LinkState.STALE } }
+            if (link == null) {
+                syncState = SyncState.LINK_ESTABLISHING
+                val l = lock.withLock { propagationLink?.takeIf { it.state == LinkState.PENDING || it.state == LinkState.HANDSHAKE } } ?: openPropagationLink(pn)
+                try { l.established.get(l.establishTimeout + 2000, TimeUnit.MILLISECONDS) } catch (e: Exception) {
+                    return syncFail(f, SyncState.LINK_FAILED, "link to ${pn.hex().take(8)} failed: ${e.cause?.message ?: e.message}")
+                }
+                link = l
+            }
+            syncState = SyncState.LINK_ESTABLISHED
+            node.links.identify(link, cfg.identity)
+            syncState = SyncState.REQUEST_SENT
+            val list = try {
+                node.links.request(link, MESSAGE_GET_PATH, MpArray(MpNil, MpNil)).result.get(SYNC_REQUEST_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            } catch (e: Exception) {
+                node.links.teardown(link); return syncFail(f, SyncState.TRANSFER_FAILED, "message list request failed: ${e.cause?.message ?: e.message}")
+            }
+            when (list.asLong()) {
+                ERROR_NO_IDENTITY -> { node.links.teardown(link); return syncFail(f, SyncState.NO_IDENTITY_RCVD, "the node wants identification") }
+                ERROR_NO_ACCESS -> { node.links.teardown(link); return syncFail(f, SyncState.NO_ACCESS, "the node refused access") }
+            }
+            val ids = (list as? MpArray)?.items?.mapNotNull { (it as? MpBin)?.value }
+                ?: run { node.links.teardown(link); return syncFail(f, SyncState.TRANSFER_FAILED, "invalid message list") }
+            if (ids.isEmpty()) {
+                syncState = SyncState.COMPLETE; syncProgress = 1f
+                val r = SyncResult(SyncState.COMPLETE, 0, 0)
+                lastSync = r
+                log("lxmf: sync complete, nothing waiting at ${pn.hex().take(8)}")
+                f.complete(r); return
+            }
+            val wants = ArrayList<MpValue>(); val haves = ArrayList<MpValue>()
+            for (id in ids) {
+                if (lock.withLock { processedTransientIds.containsKey(id.hex()) }) haves.add(MpBin(id))
+                else if (maxMessages <= 0 || wants.size < maxMessages) wants.add(MpBin(id))
+            }
+            log("lxmf: requesting ${wants.size} message(s) from ${pn.hex().take(8)}, ${haves.size} already here")
+            syncState = SyncState.RECEIVING
+            val got = try {
+                node.links.request(link, MESSAGE_GET_PATH, MpArray(MpArray(wants), MpArray(haves), MpInt(cfg.deliveryLimit / 1000L)))
+                    .result.get(SYNC_TRANSFER_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            } catch (e: Exception) {
+                node.links.teardown(link); return syncFail(f, SyncState.TRANSFER_FAILED, "message download failed: ${e.cause?.message ?: e.message}")
+            }
+            when (got.asLong()) {
+                ERROR_NO_IDENTITY -> { node.links.teardown(link); return syncFail(f, SyncState.NO_IDENTITY_RCVD, "the node wants identification") }
+                ERROR_NO_ACCESS -> { node.links.teardown(link); return syncFail(f, SyncState.NO_ACCESS, "the node refused access") }
+            }
+            syncState = SyncState.RESPONSE_RECEIVED
+            val msgs = (got as? MpArray)?.items?.mapNotNull { (it as? MpBin)?.value } ?: emptyList()
+            var received = 0; var duplicates = 0
+            val done = ArrayList<MpValue>()
+            for (m in msgs) {
+                when (val res = ingestPropagated(m, link.iface)) {
+                    "delivered" -> received++
+                    "duplicate" -> duplicates++
+                    else -> log("lxmf: propagated message not taken: $res")
+                }
+                done.add(MpBin(Rns.sha256(m)))
+            }
+            if (done.isNotEmpty()) {
+                // Tells the node which ones arrived so it deletes them; upstream waits for no answer.
+                try { node.links.request(link, MESSAGE_GET_PATH, MpArray(MpNil, MpArray(done))) } catch (e: Exception) { log("lxmf: could not confirm the sync: ${e.message}") }
+            }
+            syncState = SyncState.COMPLETE; syncProgress = 1f
+            val r = SyncResult(SyncState.COMPLETE, received, duplicates)
+            lastSync = r
+            log("lxmf: sync complete: $received new, $duplicates duplicate of ${msgs.size} from ${pn.hex().take(8)}")
+            f.complete(r)
+        } catch (e: Exception) {
+            syncFail(f, SyncState.FAILED, "sync failed: ${e.message}")
+        }
+    }
+
     /** Known lxmf.delivery peers from the path table. */
     data class Peer(val destHash: String, val displayName: String?, val stampCost: Int, val hops: Int, val iface: String, val lastSeenMs: Long, val hasRatchet: Boolean)
 
@@ -504,5 +833,13 @@ class LxmfRouter(val node: Node, cfg: Config) {
         const val DELIVERY_RETRY_WAIT_MS = 10_000L
         const val MAX_DELIVERY_ATTEMPTS = 5
         const val MAX_PATHLESS_TRIES = 1
+        /** LXMPeer.MESSAGE_GET_PATH and the error codes a node answers with. */
+        const val MESSAGE_GET_PATH = "/get"
+        const val ERROR_NO_IDENTITY = 0xf0L
+        const val ERROR_NO_ACCESS = 0xf1L
+        const val ERROR_INVALID_STAMP = 0xf5L
+        const val PR_PATH_TIMEOUT_MS = 10_000L
+        const val SYNC_REQUEST_TIMEOUT_MS = 60_000L
+        const val SYNC_TRANSFER_TIMEOUT_MS = 600_000L
     }
 }
