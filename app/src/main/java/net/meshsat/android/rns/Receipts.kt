@@ -72,7 +72,7 @@ internal fun Node.outbound(raw: ByteArray, dest: ByteArray, destType: Int): List
     if (hdr.packetType != Rns.PACKET_ANNOUNCE && destType != Rns.DEST_PLAIN && destType != Rns.DEST_GROUP) {
         val e = paths.get(dest)
         if (e != null && now() < e.expiresMs) {
-            val out = if (e.hops > 1) Header.rewriteForTransport(raw, e.nextHop) else raw
+            val out = if (!e.direct) Header.rewriteForTransport(raw, e.nextHop) else raw
             e.timestampMs = now()
             return if (transmit(e.iface, out)) listOf(e.iface) else emptyList()
         }

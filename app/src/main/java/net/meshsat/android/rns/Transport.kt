@@ -27,7 +27,7 @@ internal fun Node.forwardTransport(pkt: Packet): Boolean {
     val entry = paths.get(h.destHash)
     if (entry == null) { log("rns: packet in transport, no path to ${h.destHash.hex()}, dropping"); return false }
     val nowMs = now()
-    val out = if (entry.hops > 1) Header.rewriteForTransport(pkt.raw, entry.nextHop) else Header.stripTransport(pkt.raw).copyOf()
+    val out = if (!entry.direct) Header.rewriteForTransport(pkt.raw, entry.nextHop) else Header.stripTransport(pkt.raw).copyOf()
     out[1] = h.hops.toByte()
 
     if (h.packetType == Rns.PACKET_LINKREQUEST) {
@@ -77,7 +77,7 @@ internal fun Node.forwardHeader1(pkt: Packet): Boolean {
     val h = pkt.hdr
     val entry = paths.get(h.destHash) ?: return false
     if (entry.iface == pkt.iface) return false
-    val out = if (entry.hops > 1) Header.rewriteForTransport(pkt.raw, entry.nextHop) else pkt.raw.copyOf()
+    val out = if (!entry.direct) Header.rewriteForTransport(pkt.raw, entry.nextHop) else pkt.raw.copyOf()
     out[1] = h.hops.toByte()
     val nowMs = now()
     lock.withLock {

@@ -194,6 +194,28 @@ class NodeTest {
     }
 
     @Test
+    fun `a neighbour heard across a paid link gets HEADER_1 packets, however many hops it counts`() {
+        val (a, _) = node("a"); val (b, _) = node("b")
+        net.connect(a, "a", "sat", b, "b", "sat")
+        for (n in listOf(a, b)) n.setPaidPolicy("sat", PaidPolicy(listOf(), extraHops = 8))
+        val seen = java.util.concurrent.CopyOnWriteArrayList<Int>()
+        val bDest = b.addDestination("test.delivery") { proveAll = true; onPacket = { _, pkt -> seen.add(pkt.hdr.headerType) } }
+        for (n in listOf(a, b)) n.setPaidPolicy("sat", PaidPolicy(listOf(bDest.hash), extraHops = 8))
+        a.start(); b.start()
+        assertTrue(b.announce(bDest))
+        waitFor("A learns B over the paid link") { a.paths.has(bDest.hash) }
+        assertEquals(9, a.paths.hops(bDest.hash))
+        assertTrue(a.paths.get(bDest.hash)!!.direct)   // next hop is B itself
+        val r = a.sendData(bDest.hash, "to the neighbour".toByteArray())!!
+        assertTrue(r.result.get(5, TimeUnit.SECONDS).delivered)
+        assertEquals(listOf(Rns.HEADER_1), seen.toList())
+        // A HEADER_2 naming B's own destination as the transport id is still taken as local (older senders).
+        val raw = Header.rewriteForTransport(Header(destHash = bDest.hash, data = a.recall(bDest.hash)!!.identity!!.encrypt("tolerated".toByteArray())).pack(), bDest.hash)
+        assertTrue(b.inbound(raw, "sat"))
+        waitFor("tolerated packet delivered") { seen.size == 2 }
+    }
+
+    @Test
     fun `a paid interface carries only listed destinations, with extra hops`() {
         val (a, txA) = node("a"); val (b, txB) = node("b")
         net.connect(a, "a", "sat", b, "b", "sat")
