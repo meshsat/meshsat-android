@@ -20,6 +20,7 @@ import net.meshsat.android.engine.HealthScorer
 import net.meshsat.android.engine.InterfaceState
 import net.meshsat.android.engine.InterfaceManager
 import net.meshsat.android.engine.SigningService
+import net.meshsat.android.rns.paidPolicies
 import fi.iki.elonen.NanoHTTPD
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.first
@@ -58,6 +59,11 @@ class LocalApiServer(
     private val configManager: ConfigManager?,
     private val restartCallback: (() -> Unit)? = null,
     private val smsSendCallback: ((to: String, text: String) -> Unit)? = null,
+    /** LXMF send (MESHSAT-1553): destination hex, content, method (null = auto); returns the message hash. */
+    private val lxmfSendCallback: ((dest: String, content: String, method: net.meshsat.android.lxmf.LxMethod?) -> String)? = null,
+    private val lxmfMessagesCallback: ((limit: Int) -> List<net.meshsat.android.data.Message>)? = null,
+    /** The satellite allow-list: destinations, extra hops (-1 keeps), interval minutes (-1 keeps). */
+    private val rnsPaidCallback: ((dests: List<String>, extraHops: Int, minIntervalMin: Int) -> Unit)? = null,
     private val hubSettingsCallback: ((Map<String, String>) -> Unit)? = null,
 ) : NanoHTTPD("127.0.0.1", 0) {
 
@@ -183,6 +189,14 @@ class LocalApiServer(
             method == Method.POST && uri == "/api/settings/hub" -> handleHubSettings(session)
 
             // Iridium 9603 on the MeshSat node (MESHSAT-1236); both are free, no satellite session
+            // Reticulum and LXMF (MESHSAT-1553)
+            method == Method.GET && uri == "/api/lxmf/status" -> handleLxmfStatus()
+            method == Method.POST && uri == "/api/lxmf/announce" -> handleLxmfAnnounce()
+            method == Method.POST && uri == "/api/lxmf/send" -> handleLxmfSend(session)
+            method == Method.GET && uri == "/api/lxmf/messages" -> handleLxmfMessages(session)
+            method == Method.POST && uri == "/api/rns/paid" -> handleRnsPaid(session)
+            method == Method.GET && uri == "/api/rns/paths" -> handleRnsPaths()
+
             method == Method.GET && uri == "/api/iridium/status" -> handleIridiumStatus()
             method == Method.POST && uri == "/api/iridium/loopback" -> handleIridiumLoopback(session)
             // A drill: the live pipe stops taking writes, to watch the app recover (MESHSAT-1270)
@@ -487,6 +501,97 @@ class LocalApiServer(
     }
 
     // --- Iridium (MESHSAT-1236) ---
+
+    // ---------------------------------------------------------------------------
+    // Reticulum and LXMF (MESHSAT-1553)
+    // ---------------------------------------------------------------------------
+
+    private fun stack() = net.meshsat.android.service.GatewayService.rnsStack
+
+    private fun handleLxmfStatus(): Response {
+        val st = stack() ?: return jsonError(Response.Status.SERVICE_UNAVAILABLE, "Reticulum node not running")
+        val stats = st.node.stats()
+        return jsonOk(JSONObject().apply {
+            put("address", st.lxmfAddress)
+            put("display_name", st.lxmf.displayName)
+            put("transport_id", st.node.idHashHex)
+            put("paths", st.node.paths.count())
+            put("links", st.node.links.all().size)
+            put("rx_packets", stats.rxPackets); put("tx_packets", stats.txPackets)
+            put("announces_rx", stats.announcesRx); put("announces_tx", stats.announcesTx)
+            put("paid_tx", stats.paidTx); put("paid_suppressed", stats.paidSuppressed)
+            put("peers", JSONArray().apply {
+                for (p in st.lxmf.peers()) put(JSONObject().apply {
+                    put("dest", p.destHash); put("name", p.displayName ?: ""); put("stamp_cost", p.stampCost)
+                    put("hops", p.hops); put("interface", p.iface); put("last_seen_ms", p.lastSeenMs); put("ratchet", p.hasRatchet)
+                })
+            })
+            put("pending", JSONArray().apply {
+                for (o in st.lxmf.pending()) put(JSONObject().apply {
+                    put("hash", o.hashHex); put("dest", o.message.destHex); put("state", o.state.name.lowercase())
+                    put("method", o.method.name.lowercase()); put("attempts", o.attempts); put("error", o.lastError)
+                })
+            })
+            put("paid_policies", JSONObject().apply { for ((id, p) in st.node.paidPolicies()) put(id, p.serialize()) })
+        })
+    }
+
+    private fun handleLxmfAnnounce(): Response {
+        val st = stack() ?: return jsonError(Response.Status.SERVICE_UNAVAILABLE, "Reticulum node not running")
+        return jsonOk(JSONObject().put("sent", st.announce()).put("address", st.lxmfAddress))
+    }
+
+    /** {"dest": 32 hex, "content": text, "title"?: text, "method"?: "auto"|"direct"|"opportunistic"} */
+    private fun handleLxmfSend(session: IHTTPSession): Response {
+        val body = readBody(session) ?: return jsonError(Response.Status.BAD_REQUEST, "empty body")
+        val json = try { JSONObject(body) } catch (e: Exception) { return jsonError(Response.Status.BAD_REQUEST, "bad json") }
+        val dest = json.optString("dest", "").lowercase()
+        if (dest.length != 32 || !dest.all { it in "0123456789abcdef" }) return jsonError(Response.Status.BAD_REQUEST, "dest must be 32 hex characters")
+        val content = json.optString("content", "")
+        val method = when (json.optString("method", "auto")) {
+            "direct" -> net.meshsat.android.lxmf.LxMethod.DIRECT
+            "opportunistic" -> net.meshsat.android.lxmf.LxMethod.OPPORTUNISTIC
+            else -> null
+        }
+        val svc = lxmfSendCallback ?: return jsonError(Response.Status.SERVICE_UNAVAILABLE, "no sender")
+        return try {
+            jsonOk(JSONObject().put("hash", svc(dest, content, method)))
+        } catch (e: Exception) {
+            jsonError(Response.Status.SERVICE_UNAVAILABLE, e.message ?: "send failed")
+        }
+    }
+
+    private fun handleLxmfMessages(session: IHTTPSession): Response {
+        val limit = session.parms["limit"]?.toIntOrNull()?.coerceIn(1, 500) ?: 50
+        val rows = lxmfMessagesCallback?.invoke(limit) ?: return jsonError(Response.Status.SERVICE_UNAVAILABLE, "no store")
+        return jsonOk(JSONObject().put("messages", JSONArray().apply {
+            for (m in rows) put(JSONObject().apply {
+                put("id", m.id); put("direction", m.direction); put("peer", if (m.direction == "rx") m.sender else m.recipient)
+                put("text", m.text); put("title", m.rawText); put("timestamp", m.timestamp); put("state", m.forwardedTo)
+            })
+        }))
+    }
+
+    /** {"dests": [32 hex...], "extra_hops"?: n, "min_interval_min"?: n}: the satellite's allow-list, persisted. */
+    private fun handleRnsPaid(session: IHTTPSession): Response {
+        val body = readBody(session) ?: return jsonError(Response.Status.BAD_REQUEST, "empty body")
+        val json = try { JSONObject(body) } catch (e: Exception) { return jsonError(Response.Status.BAD_REQUEST, "bad json") }
+        val dests = ArrayList<String>()
+        json.optJSONArray("dests")?.let { arr -> for (i in 0 until arr.length()) arr.optString(i).lowercase().takeIf { it.length == 32 }?.let { dests.add(it) } }
+        val cb = rnsPaidCallback ?: return jsonError(Response.Status.SERVICE_UNAVAILABLE, "no node")
+        cb(dests, json.optInt("extra_hops", -1), json.optInt("min_interval_min", -1))
+        return jsonOk(JSONObject().put("dests", JSONArray(dests)))
+    }
+
+    private fun handleRnsPaths(): Response {
+        val st = stack() ?: return jsonError(Response.Status.SERVICE_UNAVAILABLE, "Reticulum node not running")
+        return jsonOk(JSONObject().put("paths", JSONArray().apply {
+            for (e in st.node.paths.all()) put(JSONObject().apply {
+                put("dest", e.destHash.joinToString("") { "%02x".format(it) }); put("hops", e.hops); put("interface", e.iface)
+                put("next_hop", e.nextHop.joinToString("") { "%02x".format(it) }); put("expires_ms", e.expiresMs)
+            })
+        }))
+    }
 
     private fun handleIridiumStatus(): Response {
         val spp = net.meshsat.android.service.GatewayService.iridiumSpp

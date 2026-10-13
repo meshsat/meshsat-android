@@ -81,6 +81,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 
 /**
  * Foreground service that keeps the Bluetooth connections alive: the MeshSat node over BLE,
@@ -245,6 +246,16 @@ class GatewayService : Service() {
         // Reticulum Transport Node (MESHSAT-199/267)
         var rnsTransportNode: net.meshsat.android.reticulum.RnsTransportNode? = null
             private set
+
+        // The upstream-compatible Reticulum node and the LXMF endpoint (MESHSAT-1553)
+        var rnsStack: net.meshsat.android.rns.RnsStack? = null
+            private set
+
+        /** A message the phone sent by LXMF: the row's forwardedTo carries the state. */
+        const val LXMF_QUEUED = "lxmf:queued"
+        const val LXMF_SENT = "lxmf:sent"
+        const val LXMF_DELIVERED = "lxmf:delivered"
+        const val LXMF_FAILED = "lxmf:failed"
 
         // This phone's Reticulum identity, the key that signs a contact card (MESHSAT-566/575)
         var routingIdentity: net.meshsat.android.routing.Identity? = null
@@ -520,6 +531,8 @@ class GatewayService : Service() {
         accessEval = null
         sosController?.stop()
         sosController = null
+        rnsStack?.stop()
+        rnsStack = null
         rnsTransportNode?.stop()
         rnsTransportNode = null
         hubRelayTransport?.shutdown()
@@ -697,6 +710,17 @@ class GatewayService : Service() {
                         }
                     },
                     smsSendCallback = smsSend,
+                    lxmfSendCallback = { dest, content, method -> sendLxmf(dest, content, method) },
+                    lxmfMessagesCallback = { limit -> runBlocking { db.messageDao().getByTransportSync("lxmf", limit) } },
+                    rnsPaidCallback = { dests, extraHops, minutes ->
+                        scope.launch {
+                            val s = net.meshsat.android.data.SettingsRepository(this@GatewayService)
+                            s.setRnsPaidDests(dests.joinToString(","))
+                            if (extraHops >= 0) s.setRnsPaidExtraHops(extraHops.toString())
+                            if (minutes >= 0) s.setRnsPaidMinIntervalMin(minutes.toString())
+                            rnsStack?.let { applyPaidPolicy(it) }
+                        }
+                    },
                     hubSettingsCallback = { settings ->
                         scope.launch {
                             val s = net.meshsat.android.data.SettingsRepository(this@GatewayService)
@@ -1831,7 +1855,7 @@ class GatewayService : Service() {
                         // may not have run yet (async coroutine race).
                         peerTcp.setReceiveCallback(net.meshsat.android.reticulum.RnsReceiveCallback { ifaceId, raw ->
                             rnsTransportNode?.let { node ->
-                                scope.launch { node.onPacketReceived(ifaceId, raw) }
+                                scope.launch { node.receive(ifaceId, raw) }
                             }
                         })
                         peerTcp.connect(peer.host, peer.port)
@@ -1896,7 +1920,7 @@ class GatewayService : Service() {
                 // Wire receive immediately: the transport node may not have started yet.
                 relay.setReceiveCallback(net.meshsat.android.reticulum.RnsReceiveCallback { ifaceId, raw ->
                     rnsTransportNode?.let { node ->
-                        scope.launch { node.onPacketReceived(ifaceId, raw) }
+                        scope.launch { node.receive(ifaceId, raw) }
                     }
                 })
                 relay.start()
@@ -2027,14 +2051,115 @@ class GatewayService : Service() {
                     hembReassembly.addFrame(frameData)
                 }
 
+                // The upstream-compatible node and the LXMF endpoint see every packet first (MESHSAT-1553).
+                val stack = initRnsStack(identity, rnsInterfaces)
+                node.upstreamInbound = { ifaceId, raw -> stack?.inbound(ifaceId, raw) == true }
+
                 node.start()
                 rnsTransportNode = node
+                stack?.start(announceIntervalMs)
 
                 Log.i("MeshSat", "Reticulum Transport Node started: ${identity.destHashHex} (${rnsInterfaces().size} interfaces)")
             } catch (e: Exception) {
                 Log.w("MeshSat", "Reticulum init failed (non-fatal): ${e.message}", e)
             }
         }
+    }
+
+    /**
+     * The upstream-compatible Reticulum node with the lxmf.delivery endpoint on the same
+     * interfaces (MESHSAT-1553). Inbound LXMF messages become rows of the messages table
+     * with transport "lxmf" and the peer's 32-hex address as the sender; an outbound one is
+     * inserted at queue time and its row follows the LXMF state in forwardedTo.
+     */
+    private suspend fun initRnsStack(
+        identity: net.meshsat.android.routing.Identity,
+        rnsInterfaces: () -> Map<String, net.meshsat.android.reticulum.RnsInterface>,
+    ): net.meshsat.android.rns.RnsStack? = try {
+        val keyStore = net.meshsat.android.crypto.SecureKeyStore.getInstance(this)
+        val name = settings.lxmfDisplayName.first().ifBlank {
+            settings.hubBridgeId.first().ifBlank { "MeshSat phone" }
+        }
+        val stack = net.meshsat.android.rns.RnsStack(
+            identity = identity,
+            interfaces = rnsInterfaces,
+            scope = scope,
+            keyStore = keyStore,
+            displayName = name,
+            onMessage = { m ->
+                scope.launch {
+                    db.messageDao().insert(
+                        Message(
+                            transport = "lxmf",
+                            direction = "rx",
+                            sender = m.sourceHex,
+                            recipient = m.destHex,
+                            text = m.contentString,
+                            rawText = if (m.title.isNotEmpty()) m.titleString else "",
+                            encrypted = false,
+                            timestamp = (m.timestamp * 1000).toLong().takeIf { it > 0 } ?: System.currentTimeMillis(),
+                            forwardedTo = if (m.signatureValid) "" else "lxmf:unverified",
+                        )
+                    )
+                    val from = GatewayService.rnsStack?.lxmf?.peerInfo(m.source)?.displayName ?: m.sourceHex.take(8)
+                    postMessageNotification("Reticulum: $from", m.contentString)
+                    interfaceManager?.recordActivity(m.iface)
+                }
+            },
+            onOutboundState = { o ->
+                scope.launch {
+                    val id = lxmfRows[o.hashHex] ?: return@launch
+                    val state = when (o.state) {
+                        net.meshsat.android.lxmf.LxState.DELIVERED -> LXMF_DELIVERED
+                        net.meshsat.android.lxmf.LxState.FAILED, net.meshsat.android.lxmf.LxState.REJECTED,
+                        net.meshsat.android.lxmf.LxState.CANCELLED -> LXMF_FAILED
+                        net.meshsat.android.lxmf.LxState.SENT, net.meshsat.android.lxmf.LxState.SENDING -> LXMF_SENT
+                        else -> LXMF_QUEUED
+                    }
+                    db.messageDao().setForwardedTo(id, state)
+                    if (o.state.terminal) lxmfRows.remove(o.hashHex)
+                }
+            },
+        )
+        applyPaidPolicy(stack)
+        rnsStack = stack
+        stack
+    } catch (e: Exception) {
+        Log.w("MeshSat", "Reticulum node init failed (non-fatal): ${e.message}", e)
+        null
+    }
+
+    /** Outbound LXMF messages by hash, to the row that shows their state. */
+    private val lxmfRows = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    /** The satellite's allow-list and extra hops from settings (MESHSAT-1553 P6). */
+    suspend fun applyPaidPolicy(stack: net.meshsat.android.rns.RnsStack) {
+        val dests = settings.rnsPaidDests.first().split(",").map { it.trim() }.filter { it.length == 32 }
+            .mapNotNull { h -> runCatching { ByteArray(16) { i -> h.substring(2 * i, 2 * i + 2).toInt(16).toByte() } }.getOrNull() }
+        val extra = settings.rnsPaidExtraHops.first().toIntOrNull() ?: 20
+        val minutes = settings.rnsPaidMinIntervalMin.first().toLongOrNull() ?: 5L
+        stack.setPaidPolicy(dests, extra, minutes * 60_000L)
+    }
+
+    /**
+     * Sends an LXMF message to a 32-hex delivery address and records it in the conversation;
+     * [method] null is auto (direct across the satellite). Returns the message hash.
+     */
+    fun sendLxmf(destHex: String, text: String, method: net.meshsat.android.lxmf.LxMethod? = null): String {
+        val stack = rnsStack ?: throw IllegalStateException("Reticulum node not running")
+        val dest = ByteArray(16) { i -> destHex.substring(2 * i, 2 * i + 2).toInt(16).toByte() }
+        val o = stack.send(dest, text, method = method)
+        scope.launch {
+            val id = db.messageDao().insert(
+                Message(
+                    transport = "lxmf", direction = "tx", sender = stack.lxmfAddress, recipient = destHex,
+                    text = text, encrypted = false, timestamp = System.currentTimeMillis(), forwarded = true, forwardedTo = LXMF_QUEUED,
+                )
+            )
+            lxmfRows[o.hashHex] = id
+            if (o.state.terminal) db.messageDao().setForwardedTo(id, if (o.state == net.meshsat.android.lxmf.LxState.DELIVERED) LXMF_DELIVERED else LXMF_FAILED)
+        }
+        return o.hashHex
     }
 
     private fun loadRulesFromDb() {
@@ -3364,6 +3489,8 @@ class GatewayService : Service() {
         iridium9704Spp?.let { spp ->
             scope.launch {
                 spp.receivedMessages.collect { payload ->
+                    // A framed Reticulum packet is the node's (MESHSAT-1553), not a text.
+                    if (net.meshsat.android.rns.ImtFraming.isFramed(payload)) return@collect
                     val text = payload.toString(Charsets.UTF_8)
                     val imei = spp.modemInfo.value.imei.ifBlank { "9704" }
                     val dedupKey = "iridium9704:${payload.contentHashCode()}"

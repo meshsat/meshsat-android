@@ -28,6 +28,9 @@ interface MessageDao {
     @Query("SELECT * FROM messages WHERE transport = :transport ORDER BY timestamp DESC LIMIT :limit")
     fun getByTransport(transport: String, limit: Int = 100): Flow<List<Message>>
 
+    @Query("SELECT * FROM messages WHERE transport = :transport ORDER BY timestamp DESC LIMIT :limit")
+    suspend fun getByTransportSync(transport: String, limit: Int = 100): List<Message>
+
     @Query("SELECT * FROM messages WHERE sender = :sender ORDER BY timestamp DESC LIMIT :limit")
     fun getBySender(sender: String, limit: Int = 500): Flow<List<Message>>
 

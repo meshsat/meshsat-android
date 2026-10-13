@@ -124,14 +124,9 @@ class RnsInterfaceTest {
     // --- Iridium 9704 (IMT) interface ---
 
     @Test
-    fun `Iridium 9704 RNS magic byte is 0x52`() {
-        assertEquals(0x52.toByte(), RnsIridium9704Interface.RNS_MAGIC)
-    }
-
-    @Test
-    fun `Iridium 9704 magic byte matches SBD magic byte`() {
-        // Both use 0x52 ('R') for protocol consistency
-        assertEquals(RnsIridiumInterface.SBD_RNS_MAGIC, RnsIridium9704Interface.RNS_MAGIC)
+    fun `Iridium 9704 packets wear CrossTalk's RNSI framing, not a magic byte`() {
+        // MESHSAT-1553 P6: "RNSI" + 0x01 + the raw packet, so a text and a packet never mix on the modem.
+        assertEquals("524e534901", net.meshsat.android.rns.ImtFraming.HEADER.joinToString("") { "%02x".format(it) })
     }
 
     // --- APRS interface ---

@@ -73,7 +73,7 @@ class Iridium9704Spp(private val context: Context) {
          */
         internal fun moStatusSettles(inFlightId: Int, statusId: Int): Boolean = statusId < 0 || statusId == inFlightId
         private const val MAX_SEGMENT_SIZE = 1446
-        private const val RAW_TOPIC = 244
+        const val RAW_TOPIC = 244   // IMT topic for raw payloads; the Reticulum interface sends on it too (MESHSAT-1553)
 
         /** Max IMT message size (100KB). */
         const val IMT_MAX_SIZE = 100_000

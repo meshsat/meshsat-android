@@ -79,6 +79,11 @@ class SettingsRepository(private val context: Context) {
         val KEY_RNS_ANNOUNCE_INTERVAL = stringPreferencesKey("rns_announce_interval_min")
         val KEY_RNS_TCP_LISTEN_PORT = stringPreferencesKey("rns_tcp_listen_port")
         val KEY_RNS_TRANSPORT_ENABLED = booleanPreferencesKey("rns_transport_enabled")
+        // Reticulum and LXMF as the clients speak them (MESHSAT-1553)
+        val KEY_LXMF_DISPLAY_NAME = stringPreferencesKey("lxmf_display_name")
+        val KEY_RNS_PAID_DESTS = stringPreferencesKey("rns_paid_dests")
+        val KEY_RNS_PAID_EXTRA_HOPS = stringPreferencesKey("rns_paid_extra_hops")
+        val KEY_RNS_PAID_MIN_INTERVAL_MIN = stringPreferencesKey("rns_paid_min_interval_min")
 
         // Hub Reporter settings (MESHSAT-292)
         val KEY_HUB_ENABLED = booleanPreferencesKey("hub_enabled")
@@ -574,6 +579,22 @@ class SettingsRepository(private val context: Context) {
     suspend fun setRnsTcpListenPort(port: String) {
         context.dataStore.edit { it[KEY_RNS_TCP_LISTEN_PORT] = port }
     }
+
+    /** The name other LXMF clients show for this phone; blank = the Hub bridge id or "MeshSat phone". */
+    val lxmfDisplayName: Flow<String> = context.dataStore.data.map { it[KEY_LXMF_DISPLAY_NAME] ?: "" }
+    suspend fun setLxmfDisplayName(name: String) { context.dataStore.edit { it[KEY_LXMF_DISPLAY_NAME] = name } }
+
+    /** Comma-separated 32-hex destinations that may be announced and path-requested across the satellite (MESHSAT-1553 P6). */
+    val rnsPaidDests: Flow<String> = context.dataStore.data.map { it[KEY_RNS_PAID_DESTS] ?: "" }
+    suspend fun setRnsPaidDests(dests: String) { context.dataStore.edit { it[KEY_RNS_PAID_DESTS] = dests } }
+
+    /** Hops added to every packet arriving over the satellite: 6 x (hops + 3) >= 2 x the one-way delay; 20 covers 60 s. */
+    val rnsPaidExtraHops: Flow<String> = context.dataStore.data.map { it[KEY_RNS_PAID_EXTRA_HOPS] ?: "20" }
+    suspend fun setRnsPaidExtraHops(hops: String) { context.dataStore.edit { it[KEY_RNS_PAID_EXTRA_HOPS] = hops } }
+
+    /** Minutes between two announces of one destination across the satellite. */
+    val rnsPaidMinIntervalMin: Flow<String> = context.dataStore.data.map { it[KEY_RNS_PAID_MIN_INTERVAL_MIN] ?: "5" }
+    suspend fun setRnsPaidMinIntervalMin(minutes: String) { context.dataStore.edit { it[KEY_RNS_PAID_MIN_INTERVAL_MIN] = minutes } }
 
     suspend fun setRnsTransportEnabled(enabled: Boolean) {
         context.dataStore.edit { it[KEY_RNS_TRANSPORT_ENABLED] = enabled }

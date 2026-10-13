@@ -2,28 +2,38 @@ package net.meshsat.android.reticulum
 
 import android.util.Log
 import net.meshsat.android.bt.Iridium9704Spp
+import net.meshsat.android.rns.ImtDedup
+import net.meshsat.android.rns.ImtFraming
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
- * Reticulum interface over Iridium IMT (RockBLOCK 9704 via HC-05 Bluetooth SPP).
+ * Reticulum over Iridium IMT: the RockBLOCK 9704 behind the node's pipe (or an
+ * HC-05), IMT topic 244. [MESHSAT-272, MESHSAT-1553 P6]
  *
- * Encapsulates Reticulum packets in IMT Mobile-Originated (MO) messages
- * using the JSPR protocol. Supports up to 100KB payloads — no Reticulum-layer
- * fragmentation needed.
+ * Every packet goes out as "RNSI" + 0x01 + the raw packet, CrossTalk's framing,
+ * so a Reticulum packet and a plain satellite text never get confused on the
+ * same modem; on receive only a framed message whose remainder parses as a
+ * packet is one, everything else stays a text for the satellite conversation.
  *
- * MO (send): Android → HC-05 → 9704 → Iridium → Ground Control → Hub
- * MT (receive): Hub → Ground Control → Iridium → 9704 → HC-05 → Android
- *
- * Cost: ~$0.05/message (Iridium IMT credit).
- * Latency: 30-90s (satellite acquisition + round-trip).
- *
- * [MESHSAT-272]
+ * Packets go to the modem one at a time, in the order they were handed over,
+ * and a failed MO is retried before the next packet goes: a Reticulum link
+ * sends its RTT packet and the first message back to back, and the far end
+ * drops a message that overtakes the RTT packet (the Bridge's sat_interface.go).
+ * The node never waits for an MO: send() queues and returns.
  */
 class RnsIridium9704Interface(
     private val spp: Iridium9704Spp,
     private val scope: CoroutineScope,
     override val interfaceId: String = "iridium9704_0",
+    private val queueSize: Int = 64,
+    /** A packet not sent by then is dropped. */
+    private val maxAgeMs: Long = 15 * 60_000L,
+    /** Waits between attempts; the last one repeats. */
+    private val retryBackoffMs: List<Long> = listOf(5_000L, 15_000L, 30_000L, 60_000L, 120_000L),
 ) : RnsInterface {
 
     override val name: String = "Iridium 9704 IMT"
@@ -35,76 +45,93 @@ class RnsIridium9704Interface(
         get() = spp.state.value == Iridium9704Spp.State.Ready
 
     private var receiveCallback: RnsReceiveCallback? = null
+    private var receiveJob: Job? = null
+    private var sendJob: Job? = null
+    private val dedup = ImtDedup()
+
+    private class Out(val wire: ByteArray, val queuedAtMs: Long)
+    private val queue = Channel<Out>(queueSize)
+
+    /** The send queue's counters. */
+    data class QueueStats(val queued: Long, val sent: Long, val retried: Long, val dropped: Long, val waiting: Int)
+    @Volatile private var queued = 0L
+    @Volatile private var sentCount = 0L
+    @Volatile private var retried = 0L
+    @Volatile private var dropped = 0L
+    @Volatile private var waiting = 0
+    fun queueStats(): QueueStats = QueueStats(queued, sentCount, retried, dropped, waiting)
 
     override fun setReceiveCallback(callback: RnsReceiveCallback?) {
         receiveCallback = callback
-        if (callback != null) {
-            startReceiving()
-        }
+        if (callback != null && receiveJob == null) startReceiving()
     }
 
-    /**
-     * Send a Reticulum packet via Iridium IMT MO.
-     *
-     * Prepends the RNS magic byte and sends the full payload in a single
-     * IMT message (up to 100KB — no fragmentation needed).
-     */
+    /** Queues a packet for the modem; null means queued, not sent. */
     override suspend fun send(packet: ByteArray): String? {
-        if (!isOnline) return "9704 interface offline"
-        if (packet.size + 1 > mtu) return "packet exceeds IMT MTU"
+        val wire = ImtFraming.encode(packet)
+        if (wire.size > mtu) return "packet exceeds IMT MTU"
+        if (sendJob == null) startSending()
+        val r = queue.trySend(Out(wire, System.currentTimeMillis()))
+        return if (r.isSuccess) { queued++; waiting++; null } else { dropped++; "9704 send queue full ($queueSize)" }
+    }
 
-        return try {
-            // Prepend RNS magic byte to distinguish from legacy IMT traffic
-            val payload = byteArrayOf(RNS_MAGIC) + packet
-
-            val status = spp.sendMessageBlocking(payload)
-            if (status == "mo_ack_received") {
-                Log.d(TAG, "RNS packet sent via IMT: ${packet.size}B")
-                null
-            } else {
-                "IMT MO failed: ${status ?: "timeout"}"
+    private fun startSending() {
+        sendJob = scope.launch {
+            for (out in queue) {
+                waiting--
+                sendOne(out)
             }
-        } catch (e: Exception) {
-            Log.w(TAG, "IMT send failed: ${e.message}")
-            e.message ?: "imt send failed"
         }
     }
 
-    /**
-     * Start observing the 9704's receivedMessages SharedFlow for incoming
-     * MT messages. Messages with the RNS magic byte are delivered to the
-     * receive callback.
-     */
-    private fun startReceiving() {
-        scope.launch {
-            spp.receivedMessages.collect { mtPayload ->
-                if (mtPayload.isEmpty() || mtPayload[0] != RNS_MAGIC) {
-                    Log.d(TAG, "MT message is not an RNS packet (no magic byte)")
-                    return@collect
+    /** One packet until it is sent or too old; the packets behind it wait, order matters more than latency. */
+    private suspend fun sendOne(out: Out) {
+        var attempt = 0
+        while (true) {
+            val age = System.currentTimeMillis() - out.queuedAtMs
+            if (age > maxAgeMs) {
+                dropped++
+                Log.w(TAG, "RNS packet dropped, not sent in ${age / 1000} s after $attempt attempts")
+                return
+            }
+            if (isOnline) {
+                val status = try { spp.sendMessageBlocking(out.wire, Iridium9704Spp.RAW_TOPIC) } catch (e: Exception) { Log.w(TAG, "IMT send failed: ${e.message}"); null }
+                if (status == "mo_ack_received") {
+                    sentCount++
+                    Log.i(TAG, "RNS packet sent over IMT: ${out.wire.size} B, attempt ${attempt + 1}")
+                    return
                 }
+                Log.w(TAG, "IMT MO failed (${status ?: "no answer"}), attempt ${attempt + 1}")
+            } else {
+                Log.d(TAG, "9704 not ready, RNS packet waits (attempt ${attempt + 1})")
+            }
+            retried++
+            val wait = retryBackoffMs[minOf(attempt, retryBackoffMs.size - 1)]
+            attempt++
+            delay(wait)
+        }
+    }
 
-                val packet = mtPayload.copyOfRange(1, mtPayload.size)
+    /** Framed MT messages become packets; the plain satellite conversation gets the rest elsewhere. */
+    private fun startReceiving() {
+        receiveJob = scope.launch {
+            spp.receivedMessages.collect { mt ->
+                val packet = ImtFraming.decode(mt) ?: return@collect
+                if (dedup.seen(mt)) { Log.d(TAG, "repeated IMT frame dropped"); return@collect }
+                Log.i(TAG, "RNS packet received over IMT: ${packet.size} B")
                 receiveCallback?.onReceive(interfaceId, packet)
-                Log.d(TAG, "RNS packet received via IMT MT: ${packet.size}B")
             }
         }
     }
 
-    override suspend fun start() {
-        // SPP lifecycle managed by GatewayService
-    }
+    override suspend fun start() { /* SPP lifecycle managed by GatewayService */ }
 
     override suspend fun stop() {
-        // SPP lifecycle managed by GatewayService
+        receiveJob?.cancel(); receiveJob = null
+        sendJob?.cancel(); sendJob = null
     }
 
     companion object {
         private const val TAG = "RnsIridium9704"
-
-        /**
-         * Magic byte prefix for RNS packets in IMT payloads.
-         * Same as SBD (0x52 = 'R' for Reticulum) for protocol consistency.
-         */
-        const val RNS_MAGIC: Byte = 0x52
     }
 }
