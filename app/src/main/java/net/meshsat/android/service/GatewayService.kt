@@ -102,6 +102,9 @@ class GatewayService : Service() {
         const val ACTION_SEND_MESH = "net.meshsat.android.SEND_MESH"
         const val ACTION_SEND_IRIDIUM = "net.meshsat.android.SEND_IRIDIUM"
         const val ACTION_SEND_SMS = "net.meshsat.android.SEND_SMS"
+        const val ACTION_SEND_LXMF = "net.meshsat.android.SEND_LXMF"
+        /** "direct", "opportunistic" or absent for auto (MESHSAT-1553). */
+        const val EXTRA_LXMF_METHOD = "lxmf_method"
         const val EXTRA_ADDRESS = "address"
         const val EXTRA_TEXT = "text"
         const val EXTRA_RECIPIENT = "recipient"
@@ -466,6 +469,28 @@ class GatewayService : Service() {
                 val text = intent.getStringExtra(EXTRA_TEXT) ?: return START_STICKY
                 val recipient = intent.getStringExtra(EXTRA_RECIPIENT) ?: return START_STICKY
                 scope.launch { sendSmsMessage(text, recipient) }
+            }
+            ACTION_SEND_LXMF -> {
+                val text = intent.getStringExtra(EXTRA_TEXT) ?: return START_STICKY
+                val recipient = intent.getStringExtra(EXTRA_RECIPIENT) ?: return START_STICKY
+                val method = when (intent.getStringExtra(EXTRA_LXMF_METHOD)) {
+                    "direct" -> net.meshsat.android.lxmf.LxMethod.DIRECT
+                    "opportunistic" -> net.meshsat.android.lxmf.LxMethod.OPPORTUNISTIC
+                    else -> null
+                }
+                try {
+                    sendLxmf(recipient, text, method)
+                } catch (e: Exception) {
+                    Log.w("MeshSat", "LXMF send to ${recipient.take(8)} refused: ${e.message}")
+                    scope.launch {
+                        db.messageDao().insert(
+                            Message(
+                                transport = "lxmf", direction = "tx", sender = rnsStack?.lxmfAddress ?: "", recipient = recipient,
+                                text = text, encrypted = false, timestamp = System.currentTimeMillis(), forwarded = true, forwardedTo = LXMF_FAILED,
+                            )
+                        )
+                    }
+                }
             }
         }
         return START_STICKY

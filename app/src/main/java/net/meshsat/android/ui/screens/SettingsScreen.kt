@@ -12,6 +12,7 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -38,6 +39,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.FilterChip
@@ -170,6 +172,10 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
     val rnsTcpHost by settings.rnsTcpHost.collectAsState(initial = "")
     val rnsTcpPort by settings.rnsTcpPort.collectAsState(initial = "4242")
     val rnsTcpTls by settings.rnsTcpTls.collectAsState(initial = false)
+    // Reticulum as the LXMF clients speak it (MESHSAT-1553)
+    val lxmfDisplayName by settings.lxmfDisplayName.collectAsState(initial = "")
+    val rnsPaidDests by settings.rnsPaidDests.collectAsState(initial = "")
+    val rnsPaidExtraHops by settings.rnsPaidExtraHops.collectAsState(initial = "20")
 
     // Hub Reporter settings (MESHSAT-292)
     val hubEnabled by settings.hubEnabled.collectAsState(initial = false)
@@ -208,6 +214,11 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
     // RNS TCP state (MESHSAT-268)
     var rnsTcpHostInput by remember(rnsTcpHost) { mutableStateOf(rnsTcpHost) }
     var rnsTcpPortInput by remember(rnsTcpPort) { mutableStateOf(rnsTcpPort) }
+    var lxmfNameInput by remember(lxmfDisplayName) { mutableStateOf(lxmfDisplayName) }
+    var paidDestsInput by remember(rnsPaidDests) { mutableStateOf(rnsPaidDests) }
+    var paidHopsInput by remember(rnsPaidExtraHops) { mutableStateOf(rnsPaidExtraHops) }
+    val lxmfAddress = GatewayService.rnsStack?.lxmfAddress
+        ?: GatewayService.routingIdentity?.let { net.meshsat.android.rns.RnsStack.lxmfAddressOf(it) } ?: ""
     val rnsTcpState = GatewayService.rnsTcpInterface?.state.collectOrNull()
 
     // Hub Reporter state (MESHSAT-292)
@@ -1587,9 +1598,109 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
             }
         }
 
-        // --- Reticulum TCP Section (MESHSAT-268) ---
+        // --- Reticulum: the LXMF address, name and announce; the satellite allow-list (MESHSAT-1553) ---
         if (section.shows(SetupSection.Integrations)) {
             SectionCard("Reticulum") {
+                Text("Your LXMF address", style = MaterialTheme.typography.bodyMedium)
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        text = lxmfAddress.ifBlank { "Starts with the gateway" },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (lxmfAddress.isBlank()) MeshSatTextMuted else MeshSatTeal,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (lxmfAddress.isNotBlank()) {
+                        IconButton(onClick = {
+                            val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                            clipboard.setPrimaryClip(android.content.ClipData.newPlainText("LXMF address", lxmfAddress))
+                            Toast.makeText(context, "Address copied", Toast.LENGTH_SHORT).show()
+                        }) {
+                            Icon(Icons.Default.ContentCopy, contentDescription = "Copy the address", tint = MeshSatTeal)
+                        }
+                    }
+                }
+                Text(
+                    text = "Sideband, CrossTalk, NomadNet and MeshChat reach this phone at this address. " +
+                        "The name below is what they show for it; it takes effect when the gateway restarts.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MeshSatTextMuted,
+                )
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        value = lxmfNameInput,
+                        onValueChange = { lxmfNameInput = it.take(40) },
+                        label = { Text("Display name", style = MaterialTheme.typography.bodySmall) },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                        textStyle = MaterialTheme.typography.bodyMedium,
+                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = MeshSatTeal, unfocusedBorderColor = MeshSatBorder),
+                    )
+                    Button(
+                        onClick = {
+                            scope.launch { settings.setLxmfDisplayName(lxmfNameInput.trim()) }
+                            Toast.makeText(context, "Name saved", Toast.LENGTH_SHORT).show()
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = MeshSatTeal),
+                    ) { Text("Save", style = MaterialTheme.typography.bodySmall) }
+                }
+                Button(
+                    onClick = {
+                        val sent = GatewayService.rnsStack?.announce() == true
+                        Toast.makeText(context, if (sent) "Announced" else "Nothing to announce on: no Reticulum link is up", Toast.LENGTH_SHORT).show()
+                    },
+                    enabled = GatewayService.rnsStack != null,
+                    colors = ButtonDefaults.buttonColors(containerColor = MeshSatTeal),
+                ) { Text("Announce now", style = MaterialTheme.typography.bodySmall) }
+
+                HorizontalDivider(color = MeshSatBorder, modifier = Modifier.padding(vertical = 8.dp))
+                Text("Reticulum by satellite", style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    text = "The satellite carries announces and path requests only for the addresses listed here (yours is " +
+                        "always included), and every packet arriving over it counts as this many extra hops, so the far " +
+                        "end waits for the satellite round trip: 20 covers a minute each way.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MeshSatTextMuted,
+                )
+                OutlinedTextField(
+                    value = paidDestsInput,
+                    onValueChange = { paidDestsInput = it },
+                    label = { Text("Addresses across the satellite, comma separated", style = MaterialTheme.typography.bodySmall) },
+                    minLines = 1, maxLines = 3,
+                    modifier = Modifier.fillMaxWidth(),
+                    textStyle = MaterialTheme.typography.bodySmall,
+                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = MeshSatTeal, unfocusedBorderColor = MeshSatBorder),
+                )
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        value = paidHopsInput,
+                        onValueChange = { paidHopsInput = it.filter { c -> c.isDigit() }.take(2) },
+                        label = { Text("Extra hops", style = MaterialTheme.typography.bodySmall) },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.weight(1f),
+                        textStyle = MaterialTheme.typography.bodyMedium,
+                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = MeshSatTeal, unfocusedBorderColor = MeshSatBorder),
+                    )
+                    Button(
+                        onClick = {
+                            val dests = paidDestsInput.split(",", " ", "\n").map { it.trim().lowercase() }.filter { net.meshsat.android.ui.Peers.isLxmf(it) }
+                            val hops = paidHopsInput.toIntOrNull()?.coerceIn(0, 32) ?: 20
+                            scope.launch {
+                                settings.setRnsPaidDests(dests.joinToString(","))
+                                settings.setRnsPaidExtraHops(hops.toString())
+                                GatewayService.rnsStack?.setPaidPolicy(
+                                    dests.map { h -> ByteArray(16) { i -> h.substring(2 * i, 2 * i + 2).toInt(16).toByte() } },
+                                    hops, (settings.rnsPaidMinIntervalMin.first().toLongOrNull() ?: 5L) * 60_000L,
+                                )
+                            }
+                            Toast.makeText(context, "Satellite list saved: ${dests.size} address(es), $hops extra hops", Toast.LENGTH_SHORT).show()
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = MeshSatTeal),
+                    ) { Text("Save", style = MaterialTheme.typography.bodySmall) }
+                }
+
+                HorizontalDivider(color = MeshSatBorder, modifier = Modifier.padding(vertical = 8.dp))
+                Text("Reticulum over TCP", style = MaterialTheme.typography.bodyMedium)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
