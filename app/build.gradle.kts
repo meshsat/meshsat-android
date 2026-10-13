@@ -217,6 +217,9 @@ dependencies {
     // BLE
     implementation("no.nordicsemi.android:ble:2.8.0")
 
+    // USB serial for an RNode on USB OTG (CP210x, CH34x, FTDI, CDC), MIT (MESHSAT-1553 P4)
+    implementation("com.github.mik3y:usb-serial-for-android:3.9.0")
+
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 

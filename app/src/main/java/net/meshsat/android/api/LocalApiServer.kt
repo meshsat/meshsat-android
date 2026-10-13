@@ -62,6 +62,8 @@ class LocalApiServer(
     /** LXMF send (MESHSAT-1553): destination hex, content, method (null = auto); returns the message hash. */
     private val lxmfSendCallback: ((dest: String, content: String, method: net.meshsat.android.lxmf.LxMethod?) -> String)? = null,
     private val lxmfMessagesCallback: ((limit: Int) -> List<net.meshsat.android.data.Message>)? = null,
+    /** RNode settings (rnode_enabled, rnode_port, rnode_preset, rnode_custom_params, rnode_airtime_limits), persisted and applied. */
+    private val rnodeCallback: ((Map<String, String>) -> Unit)? = null,
     /** The propagation node choice ("", "none" or 32 hex; null keeps) and the sync interval in minutes (null keeps), persisted. */
     private val lxmfPropagationCallback: ((node: String?, syncIntervalMin: String?) -> Unit)? = null,
     /** The satellite allow-list: destinations, extra hops (-1 keeps), interval minutes (-1 keeps). */
@@ -202,6 +204,8 @@ class LocalApiServer(
             method == Method.POST && uri == "/api/rns/paid" -> handleRnsPaid(session)
             method == Method.GET && uri == "/api/rns/paths" -> handleRnsPaths()
             method == Method.GET && uri == "/api/rns/auto" -> handleRnsAuto()
+            method == Method.GET && uri == "/api/rns/rnode" -> handleRnsRnode()
+            method == Method.POST && uri == "/api/rns/rnode" -> handleRnsRnodeSet(session)
 
             method == Method.GET && uri == "/api/iridium/status" -> handleIridiumStatus()
             method == Method.POST && uri == "/api/iridium/loopback" -> handleIridiumLoopback(session)
@@ -633,6 +637,55 @@ class LocalApiServer(
             put("devices", JSONArray(a.devices()))
             put("peers", JSONArray().apply { for (p in a.peers()) put(JSONObject().put("address", p.address).put("device", p.device).put("last_heard_ms", p.lastHeardMs)) })
         })
+    }
+
+    /** The RNode: settings in force, state, and what the radio reports. */
+    private fun handleRnsRnode(): Response {
+        val r = net.meshsat.android.service.GatewayService.rnsRnodeInterface
+            ?: return jsonOk(JSONObject().put("enabled", false).put("online", false))
+        val p = r.config.params
+        return jsonOk(JSONObject().apply {
+            put("enabled", true); put("online", r.isOnline); put("port", r.config.port); put("status", r.status); put("error", r.lastError)
+            put("device", r.deviceDescription)
+            put("params", JSONObject().put("frequency", p.frequency).put("bandwidth", p.bandwidth).put("txpower", p.txPower).put("sf", p.sf).put("cr", p.cr)
+                .put("airtime_limit_short", p.staLock).put("airtime_limit_long", p.ltaLock).put("bitrate_bps", p.bitrate()))
+            r.stats()?.let { s ->
+                put("radio", JSONObject().put("detected", s.detected).put("firmware", s.firmware).put("platform", net.meshsat.android.rnode.RnodeProtocol.platformName(s.platform))
+                    .put("frequency", s.frequency).put("bandwidth", s.bandwidth).put("txpower", s.txPower).put("sf", s.sf).put("cr", s.cr).put("radio_on", s.radioOn)
+                    .put("rssi", s.rssi).put("snr", s.snr).put("quality", s.quality).put("noise_floor", s.noiseFloor)
+                    .put("airtime_short", s.airtimeShort).put("airtime_long", s.airtimeLong).put("channel_load_short", s.channelLoadShort).put("channel_load_long", s.channelLoadLong)
+                    .put("battery_percent", s.batteryPercent).put("rx_packets", s.rxPackets).put("tx_packets", s.txPackets).put("rx_bytes", s.rxBytes).put("tx_bytes", s.txBytes))
+            }
+            put("presets", JSONArray().apply { for (pr in net.meshsat.android.rnode.RnodeProtocol.PRESETS) put(JSONObject().put("id", pr.id).put("label", pr.label)) })
+        })
+    }
+
+    /** {"enabled"?: bool, "port"?: "usb"|"ble:<addr>", "preset"?: id|"custom", "custom_params"?: "f,bw,txp,sf,cr", "airtime_limits"?: "s,l"} */
+    private fun handleRnsRnodeSet(session: IHTTPSession): Response {
+        val body = readBody(session) ?: return jsonError(Response.Status.BAD_REQUEST, "empty body")
+        val json = try { JSONObject(body) } catch (e: Exception) { return jsonError(Response.Status.BAD_REQUEST, "bad json") }
+        val m = HashMap<String, String>()
+        if (json.has("enabled")) m["rnode_enabled"] = json.optBoolean("enabled").toString()
+        if (json.has("port")) {
+            val port = json.optString("port").trim().lowercase()
+            if (port != "usb" && !(port.startsWith("ble:") && port.length == 21)) return jsonError(Response.Status.BAD_REQUEST, "port must be usb or ble:<address>")
+            m["rnode_port"] = if (port.startsWith("ble:")) "ble:" + port.removePrefix("ble:").uppercase() else port
+        }
+        if (json.has("preset")) {
+            val id = json.optString("preset")
+            if (id != "custom" && net.meshsat.android.rnode.RnodeProtocol.preset(id) == null) return jsonError(Response.Status.BAD_REQUEST, "unknown preset $id")
+            m["rnode_preset"] = id
+        }
+        if (json.has("custom_params")) {
+            val v = json.optString("custom_params")
+            val p = net.meshsat.android.data.parseRnodeParams(v) ?: return jsonError(Response.Status.BAD_REQUEST, "custom_params must be frequency,bandwidth,txpower,sf,cr")
+            p.validate()?.let { return jsonError(Response.Status.BAD_REQUEST, it) }
+            m["rnode_custom_params"] = v
+        }
+        if (json.has("airtime_limits")) m["rnode_airtime_limits"] = json.optString("airtime_limits")
+        val cb = rnodeCallback ?: return jsonError(Response.Status.SERVICE_UNAVAILABLE, "no settings")
+        cb(m)
+        return jsonOk(JSONObject().put("ok", true).put("applied", JSONObject(m as Map<*, *>)))
     }
 
     private fun handleLxmfMessages(session: IHTTPSession): Response {

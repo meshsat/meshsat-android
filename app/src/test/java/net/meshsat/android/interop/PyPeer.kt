@@ -31,6 +31,9 @@ class PyPeer private constructor(val name: String, private val proc: Process, va
         val listen: Int = 0,
         /** An AutoInterface on this network device (a veth end). */
         val auto: String? = null,
+        /** An RNodeInterface on this serial port (a software RNode's pty) with these radio parameters. */
+        val rnode: String? = null,
+        val rnodeParams: net.meshsat.android.rnode.RnodeProtocol.Params? = null,
         val name: String = "rnsnode",
         val stampCost: Int = 0,
         val enforce: Boolean = false,
@@ -59,6 +62,10 @@ class PyPeer private constructor(val name: String, private val proc: Process, va
             o.connect?.let { args += listOf("--connect", it) }
             if (o.listen != 0) args += listOf("--listen", o.listen.toString())
             o.auto?.let { args += listOf("--auto", it) }
+            o.rnode?.let { port ->
+                args += listOf("--rnode", port)
+                o.rnodeParams?.let { p -> args += listOf("--rnode-params", "${p.frequency},${p.bandwidth},${p.txPower},${p.sf},${p.cr}") }
+            }
             if (o.stampCost > 0) args += listOf("--stamp-cost", o.stampCost.toString())
             if (o.enforce) args += "--enforce-stamps"
             if (o.propagationNode) args += listOf("--propagation-node", "--propagation-cost", o.propagationCost.toString())

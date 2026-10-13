@@ -87,6 +87,11 @@ class SettingsRepository(private val context: Context) {
         val KEY_RNS_PAID_MIN_INTERVAL_MIN = stringPreferencesKey("rns_paid_min_interval_min")
         val KEY_LXMF_PROPAGATION_NODE = stringPreferencesKey("lxmf_propagation_node")
         val KEY_RNS_AUTO_ENABLED = booleanPreferencesKey("rns_auto_enabled")
+        val KEY_RNODE_ENABLED = booleanPreferencesKey("rnode_enabled")
+        val KEY_RNODE_PORT = stringPreferencesKey("rnode_port")
+        val KEY_RNODE_PRESET = stringPreferencesKey("rnode_preset")
+        val KEY_RNODE_CUSTOM_PARAMS = stringPreferencesKey("rnode_custom_params")
+        val KEY_RNODE_AIRTIME_LIMITS = stringPreferencesKey("rnode_airtime_limits")
         val KEY_LXMF_SYNC_INTERVAL_MIN = stringPreferencesKey("lxmf_sync_interval_min")
 
         // Hub Reporter settings (MESHSAT-292)
@@ -608,6 +613,30 @@ class SettingsRepository(private val context: Context) {
     val rnsAutoEnabled: Flow<Boolean> = context.dataStore.data.map { it[KEY_RNS_AUTO_ENABLED] ?: false }
     suspend fun setRnsAutoEnabled(enabled: Boolean) { context.dataStore.edit { it[KEY_RNS_AUTO_ENABLED] = enabled } }
 
+    // --- An RNode (LoRa radio) on USB OTG or Bluetooth LE as a Reticulum interface (MESHSAT-1553 P4) ---
+    val rnodeEnabled: Flow<Boolean> = context.dataStore.data.map { it[KEY_RNODE_ENABLED] ?: false }
+    suspend fun setRnodeEnabled(enabled: Boolean) { context.dataStore.edit { it[KEY_RNODE_ENABLED] = enabled } }
+    /** "usb" or "ble:<address>". */
+    val rnodePort: Flow<String> = context.dataStore.data.map { it[KEY_RNODE_PORT] ?: "usb" }
+    suspend fun setRnodePort(port: String) { context.dataStore.edit { it[KEY_RNODE_PORT] = port } }
+    /** A preset id (CrossTalk's four) or "custom". */
+    val rnodePreset: Flow<String> = context.dataStore.data.map { it[KEY_RNODE_PRESET] ?: "eu-868" }
+    suspend fun setRnodePreset(id: String) { context.dataStore.edit { it[KEY_RNODE_PRESET] = id } }
+    /** "frequency,bandwidth,txpower,sf,cr" for the custom preset. */
+    val rnodeCustomParams: Flow<String> = context.dataStore.data.map { it[KEY_RNODE_CUSTOM_PARAMS] ?: "867200000,125000,14,8,5" }
+    suspend fun setRnodeCustomParams(v: String) { context.dataStore.edit { it[KEY_RNODE_CUSTOM_PARAMS] = v } }
+    /** "short,long" airtime limits in percent, 0 = not set. */
+    val rnodeAirtimeLimits: Flow<String> = context.dataStore.data.map { it[KEY_RNODE_AIRTIME_LIMITS] ?: "0,0" }
+    suspend fun setRnodeAirtimeLimits(v: String) { context.dataStore.edit { it[KEY_RNODE_AIRTIME_LIMITS] = v } }
+
+    /** The radio parameters the settings resolve to, or null when the custom ones do not parse. */
+    suspend fun rnodeParams(): net.meshsat.android.rnode.RnodeProtocol.Params? {
+        val preset = rnodePreset.first()
+        val base = if (preset == "custom") parseRnodeParams(rnodeCustomParams.first()) else net.meshsat.android.rnode.RnodeProtocol.preset(preset)?.params
+        val air = rnodeAirtimeLimits.first().split(",").map { it.trim().toDoubleOrNull() ?: 0.0 }
+        return base?.copy(staLock = air.getOrElse(0) { 0.0 }, ltaLock = air.getOrElse(1) { 0.0 })
+    }
+
     /** The LXMF propagation node: "" = the nearest one heard, "none" = never, or a 32-hex lxmf.propagation address (MESHSAT-1553 P3b). */
     val lxmfPropagationNode: Flow<String> = context.dataStore.data.map { it[KEY_LXMF_PROPAGATION_NODE] ?: "" }
     suspend fun setLxmfPropagationNode(choice: String) { context.dataStore.edit { it[KEY_LXMF_PROPAGATION_NODE] = choice } }
@@ -819,4 +848,16 @@ class SettingsRepository(private val context: Context) {
     suspend fun setSosRun(json: String) {
         context.dataStore.edit { it[stringPreferencesKey("sos_run")] = json }
     }
+}
+
+/** "frequency,bandwidth,txpower,sf,cr" to radio parameters, or null. */
+fun parseRnodeParams(v: String): net.meshsat.android.rnode.RnodeProtocol.Params? {
+    val f = v.split(",").map { it.trim() }
+    if (f.size < 5) return null
+    val freq = f[0].toLongOrNull() ?: return null
+    val bw = f[1].toLongOrNull() ?: return null
+    val txp = f[2].toIntOrNull() ?: return null
+    val sf = f[3].toIntOrNull() ?: return null
+    val cr = f[4].toIntOrNull() ?: return null
+    return net.meshsat.android.rnode.RnodeProtocol.Params(freq, bw, txp, sf, cr)
 }
