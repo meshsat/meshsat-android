@@ -149,6 +149,7 @@ fun MessagesScreen(openChat: (String) -> Unit = {}) {
             "mesh" -> allMessages.filter { it.transport == "mesh" }
             "iridium" -> allMessages.filter { it.transport == "iridium" }
             "sms" -> allMessages.filter { it.transport == "sms" }
+            "lxmf" -> allMessages.filter { it.transport == "lxmf" }
             else -> allMessages
         }
     }
@@ -221,7 +222,7 @@ fun MessagesScreen(openChat: (String) -> Unit = {}) {
             modifier = Modifier.padding(bottom = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            listOf("all" to "All", "mesh" to "Mesh", "iridium" to "Satellite", "sms" to "SMS")
+            listOf("all" to "All", "mesh" to "Mesh", "iridium" to "Satellite", "lxmf" to "Reticulum", "sms" to "SMS")
                 .filter { it.first != "sms" || net.meshsat.android.sms.SmsCapability.included }
                 .forEach { (key, label) ->
                 FilterChip(
@@ -382,6 +383,7 @@ private fun ConversationCard(conv: ConversationSummary, onClick: () -> Unit) {
         "mesh" -> ColorMesh
         "iridium" -> ColorIridium
         "sms" -> ColorCellular
+        "lxmf" -> MeshSatTeal
         else -> MeshSatTextMuted
     }
     val timeStr = SimpleDateFormat("MM/dd HH:mm", Locale.getDefault()).format(Date(conv.lastTimestamp))
@@ -480,6 +482,9 @@ fun ConversationChatView(
     // the mesh, a phone number by SMS, the satellite conversation by satellite.
     var composeText by remember { mutableStateOf("") }
     var sendTransport by remember { mutableStateOf(Peers.defaultTransport(peer)) }
+    // An LXMF message goes Direct (a link, waits for the satellite round trip) or lets the
+    // router choose (opportunistic off the satellite). Direct is the safe default (MESHSAT-1553).
+    var lxmfDirect by remember { mutableStateOf(true) }
     val meshNodes = GatewayService.meshtasticBle?.nodes.collectOrNull()?.value.orEmpty()
 
     val meshConnected = GatewayService.meshtasticBle?.state.collectOrNull()?.value == MeshtasticBle.State.Connected
@@ -575,8 +580,14 @@ fun ConversationChatView(
                 SatelliteLimits.fits(composeText.trim().toByteArray(Charsets.UTF_8).size)
             val send = {
                 if (composeText.isNotBlank() && fitsTheLink) {
-                    sendMessage(context, composeText.trim(), sendTransport, peer, meshConnected, iridiumConnected)
+                    sendMessage(context, composeText.trim(), sendTransport, peer, meshConnected, iridiumConnected, lxmfDirect)
                     composeText = ""
+                }
+            }
+            if (sendTransport == "lxmf") {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(bottom = 4.dp)) {
+                    FilterChip(selected = lxmfDirect, onClick = { lxmfDirect = true }, label = { Text("Direct", style = MaterialTheme.typography.bodySmall) })
+                    FilterChip(selected = !lxmfDirect, onClick = { lxmfDirect = false }, label = { Text("Auto", style = MaterialTheme.typography.bodySmall) })
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -587,6 +598,7 @@ fun ConversationChatView(
                         Text(
                             when (sendTransport) {
                                 "iridium" -> "Message by satellite"
+                                "lxmf" -> "Message by Reticulum"
                                 "mesh" -> if (peer == Peers.MESH_ALL) "Message everyone on the mesh" else "Message on the mesh"
                                 else -> "Text message"
                             },
@@ -637,6 +649,15 @@ private fun composeHint(transport: String, text: String, peer: String, meshUp: B
             val size = if (bytes == 0) "" else " $bytes bytes, ${Words.count((bytes + 49) / 50, "credit")}."
             (if (satUp) "By satellite." else "By satellite, when the modem is back.") + size
         }
+        "lxmf" -> {
+            val name = Peers.lxmfName(peer)
+            val known = GatewayService.rnsStack?.node?.paths?.has(ByteArray(16) { i -> peer.substring(2 * i, 2 * i + 2).toInt(16).toByte() }) == true
+            when {
+                name != null && known -> "By Reticulum to $name. Direct waits for the far end, even by satellite."
+                known -> "By Reticulum. Direct waits for the far end, even by satellite."
+                else -> "By Reticulum, once a path to this address is found."
+            }
+        }
         "mesh" -> when {
             !meshUp -> "On the mesh, when your node is connected."
             peer == Peers.MESH_ALL -> "To everyone on the mesh channel."
@@ -653,8 +674,19 @@ private fun sendMessage(
     peer: String,
     meshConnected: Boolean,
     iridiumConnected: Boolean,
+    lxmfDirect: Boolean = true,
 ) {
     when (transport) {
+        "lxmf" -> {
+            // A Reticulum message to an LXMF address; the row shows queued, sent, delivered or failed.
+            context.startService(
+                Intent(context, GatewayService::class.java)
+                    .setAction(GatewayService.ACTION_SEND_LXMF)
+                    .putExtra(GatewayService.EXTRA_TEXT, text)
+                    .putExtra(GatewayService.EXTRA_RECIPIENT, peer)
+                    .putExtra(GatewayService.EXTRA_LXMF_METHOD, if (lxmfDirect) "direct" else "auto")
+            )
+        }
         "sms" -> {
             // Send SMS to the peer (encryption handled in GatewayService)
             // The message appears in the chat with its state; no toast claims success early.
@@ -693,7 +725,10 @@ private fun sendMessage(
 
 /** The delivery badge of a forwarded message: an Iridium send shows where it is in the queue. */
 private fun deliveryLabel(forwardedTo: String): String = when (forwardedTo) {
-    GatewayService.IRIDIUM_QUEUED -> "Queued"
+    GatewayService.IRIDIUM_QUEUED, GatewayService.LXMF_QUEUED -> "Queued"
+    GatewayService.LXMF_SENT -> "Sent"
+    GatewayService.LXMF_DELIVERED -> "Delivered"
+    GatewayService.LXMF_FAILED -> "Failed"
     GatewayService.IRIDIUM_UNCONFIRMED -> "May have been sent"
     "iridium:sbd", net.meshsat.android.sms.SmsStatusReceiver.SENT -> "Sent"
     GatewayService.IRIDIUM_DELIVERED -> "The Hub has it"
@@ -713,8 +748,11 @@ private fun deliveryLabel(forwardedTo: String): String = when (forwardedTo) {
 @Composable
 private fun DeliveryMark(forwardedTo: String) {
     val (icon, tint, label) = when (forwardedTo) {
-        GatewayService.IRIDIUM_QUEUED, net.meshsat.android.sms.SmsStatusReceiver.SENDING ->
+        GatewayService.IRIDIUM_QUEUED, GatewayService.LXMF_QUEUED, net.meshsat.android.sms.SmsStatusReceiver.SENDING ->
             Triple(Icons.Default.Schedule, MeshSatTextMuted, "Queued")
+        GatewayService.LXMF_FAILED -> Triple(Icons.Default.ErrorOutline, MeshSatRed, "Failed")
+        // Two checks only on the peer's proof, as LXMF clients show it.
+        GatewayService.LXMF_DELIVERED -> Triple(Icons.Default.DoneAll, MeshSatTeal, "Delivered")
         // The link dropped after the upload: it may have arrived, and it is being sent again.
         GatewayService.IRIDIUM_UNCONFIRMED -> Triple(Icons.AutoMirrored.Filled.HelpOutline, MeshSatAmber, "May have been sent")
         "iridium:failed", net.meshsat.android.sms.SmsStatusReceiver.FAILED ->
@@ -737,7 +775,7 @@ private fun ChatBubble(msg: Message, activeKey: String?) {
     val context = LocalContext.current
     val isSelf = msg.direction == "tx"
     val transportColor = when (msg.transport) {
-        "mesh" -> ColorMesh; "iridium" -> ColorIridium; "sms" -> ColorCellular; else -> MeshSatTextMuted
+        "mesh" -> ColorMesh; "iridium" -> ColorIridium; "sms" -> ColorCellular; "lxmf" -> MeshSatTeal; else -> MeshSatTextMuted
     }
 
     // Show decrypted text if SmsReceiver already decrypted it (stored in msg.text).
@@ -1094,6 +1132,11 @@ private fun NewMessageDialog(onPick: (String) -> Unit, onDismiss: () -> Unit) {
     val imei = GatewayService.iridiumSpp?.modemInfo.collectOrNull()?.value?.imei.orEmpty()
     var number by remember { mutableStateOf("") }
     val numberOk = number.trim().let { n -> n.length >= 6 && n.all { it.isDigit() || it == '+' || it == ' ' } }
+    // A Reticulum (LXMF) address, as Sideband and CrossTalk show it: 32 hex characters (MESHSAT-1553).
+    var lxmfAddress by remember { mutableStateOf("") }
+    val lxmfClean = lxmfAddress.trim().lowercase().removePrefix("<").removeSuffix(">").replace(" ", "")
+    val lxmfOk = Peers.isLxmf(lxmfClean)
+    val lxmfPeers = remember { GatewayService.rnsStack?.lxmf?.peers().orEmpty().sortedByDescending { it.lastSeenMs } }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1125,6 +1168,23 @@ private fun NewMessageDialog(onPick: (String) -> Unit, onDismiss: () -> Unit) {
                         onClick = { onPick(id) },
                     )
                 }
+                lxmfPeers.take(20).forEach { p ->
+                    NewMessageRow(
+                        title = p.displayName?.ifBlank { null } ?: "Reticulum ${p.destHash.take(8)}",
+                        detail = "By Reticulum, ${p.destHash.take(16)}... ${Words.count(p.hops, "hop")} away",
+                        color = MeshSatTeal,
+                        onClick = { onPick(p.destHash) },
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = lxmfAddress,
+                    onValueChange = { lxmfAddress = it },
+                    label = { Text("Or a Reticulum (LXMF) address, 32 hex characters") },
+                    singleLine = true,
+                    isError = lxmfAddress.isNotBlank() && !lxmfOk,
+                    modifier = Modifier.fillMaxWidth(),
+                )
                 // A phone number is an SMS peer; the Google Play edition has no SMS (MESHSAT-1335).
                 if (net.meshsat.android.sms.SmsCapability.included) {
                     Spacer(Modifier.height(8.dp))
@@ -1140,7 +1200,9 @@ private fun NewMessageDialog(onPick: (String) -> Unit, onDismiss: () -> Unit) {
             }
         },
         confirmButton = {
-            if (net.meshsat.android.sms.SmsCapability.included) {
+            if (lxmfOk) {
+                TextButton(onClick = { onPick(lxmfClean) }) { Text("Message this address") }
+            } else if (net.meshsat.android.sms.SmsCapability.included) {
                 TextButton(onClick = { onPick(number.trim().replace(" ", "")) }, enabled = numberOk) {
                     Text("Text this number")
                 }

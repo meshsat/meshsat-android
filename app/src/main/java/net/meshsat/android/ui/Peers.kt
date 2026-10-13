@@ -26,11 +26,16 @@ object Peers {
 
     fun isMesh(peer: String): Boolean = peer == MESH_ALL || isMeshNode(peer)
 
+    /** An LXMF delivery address: 32 hex characters, what Sideband and CrossTalk show (MESHSAT-1553). */
+    fun isLxmf(peer: String): Boolean =
+        peer.length == 32 && peer.all { it.isDigit() || it.lowercaseChar() in 'a'..'f' }
+
     /** The node number of a mesh peer, or null. */
     fun nodeNum(peer: String): Long? = if (isMeshNode(peer)) peer.drop(1).toLongOrNull(16) else null
 
     /** How a reply goes by default: the way this kind of peer is reached. */
     fun defaultTransport(peer: String): String = when {
+        isLxmf(peer) -> "lxmf"
         isMesh(peer) -> "mesh"
         isSatellite(peer) || peer == LEGACY_SELF -> "iridium"
         else -> "sms"
@@ -38,6 +43,7 @@ object Peers {
 
     /** The ways a message to this peer can go. */
     fun transportsFor(peer: String): List<String> = when {
+        isLxmf(peer) -> listOf("lxmf")
         isMesh(peer) -> listOf("mesh")
         isSatellite(peer) || peer == LEGACY_SELF -> listOf("iridium")
         else -> listOf("sms")
@@ -50,12 +56,21 @@ object Peers {
             ?.longName?.ifBlank { null } ?: "Node $peer"
         isSatellite(peer) -> "Satellite"
         peer == LEGACY_SELF -> "Sent from this phone"
+        isLxmf(peer) -> lxmfName(peer) ?: "Reticulum ${peer.take(8)}"
         else -> peer
     }
+
+    /** The display name an LXMF peer announced, when the node has heard it. */
+    fun lxmfName(peer: String): String? = try {
+        val stack = net.meshsat.android.service.GatewayService.rnsStack ?: return null
+        val dest = ByteArray(16) { i -> peer.substring(2 * i, 2 * i + 2).toInt(16).toByte() }
+        stack.lxmf.peerInfo(dest)?.displayName?.takeIf { it.isNotBlank() }
+    } catch (_: Exception) { null }
 
     /** A second line under the name: the id people may need, never the modem's IMEI. */
     fun detail(peer: String): String? = when {
         isMeshNode(peer) -> peer
+        isLxmf(peer) -> "By Reticulum (LXMF), $peer"
         isSatellite(peer) -> "By satellite, through Rock7 to the Hub"
         peer == MESH_ALL -> "The mesh channel"
         else -> null

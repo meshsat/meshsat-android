@@ -9,6 +9,7 @@ import net.meshsat.android.ui.theme.ColorRadio
 import net.meshsat.android.ui.theme.MeshSatAmber
 import net.meshsat.android.ui.theme.MeshSatGreen
 import net.meshsat.android.ui.theme.MeshSatRed
+import net.meshsat.android.ui.theme.MeshSatTeal
 import net.meshsat.android.ui.theme.MeshSatTextMuted
 import net.meshsat.android.ui.theme.MeshSatTextSecondary
 
@@ -45,7 +46,7 @@ object Words {
         "sms", "cellular" -> "SMS"
         "mqtt", "hub" -> "Hub"
         "aprs" -> "Ham radio"
-        "reticulum", "rns" -> "Reticulum"
+        "reticulum", "rns", "lxmf" -> "Reticulum"
         "tak" -> "TAK"
         else -> t.replaceFirstChar { it.uppercase() }
     }
@@ -57,6 +58,7 @@ object Words {
         "SMS" -> ColorCellular
         "Hub", "Hub relay" -> ColorHub
         "Ham radio" -> ColorRadio
+        "Reticulum" -> MeshSatTeal
         else -> MeshSatTextSecondary
     }
 
