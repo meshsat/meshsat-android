@@ -767,6 +767,15 @@ class GatewayService : Service() {
                             settings["tak_enabled"]?.let { s.setTakEnabled(it.toBoolean()) }
                             settings["tak_callsign_prefix"]?.let { s.setTakCallsignPrefix(it) }
                             settings["tak_mqtt_export"]?.let { s.setTakMqttExport(it.toBoolean()) }
+                            // Reticulum links and the LXMF name, so a test over WiFi needs no screen
+                            // (MESHSAT-1553); they take effect at the next gateway start.
+                            settings["rns_tcp_enabled"]?.let { s.setRnsTcpEnabled(it.toBoolean()) }
+                            settings["rns_tcp_host"]?.let { s.setRnsTcpHost(it) }
+                            settings["rns_tcp_port"]?.let { s.setRnsTcpPort(it) }
+                            settings["rns_tcp_tls"]?.let { s.setRnsTcpTls(it.toBoolean()) }
+                            settings["rns_tcp_listen_enabled"]?.let { s.setRnsTcpListenEnabled(it.toBoolean()) }
+                            settings["rns_tcp_listen_port"]?.let { s.setRnsTcpListenPort(it) }
+                            settings["lxmf_display_name"]?.let { s.setLxmfDisplayName(it) }
                             Log.i("MeshSat", "Hub settings updated via API (${settings.size} keys)")
                         }
                     },
