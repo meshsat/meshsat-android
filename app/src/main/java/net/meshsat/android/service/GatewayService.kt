@@ -2011,17 +2011,34 @@ class GatewayService : Service() {
                     localDestHash = localDestHash,
                 )
 
-                // Build RnsInterface map from available transports
+                // Build RnsInterface map from available transports. One instance per transport object,
+                // kept as long as that object lives: the map used to be rebuilt with fresh instances on
+                // every call, so the mesh interface's receive loop was never started and the 9704's send
+                // queue would not have been one queue (MESHSAT-1553). A new instance gets its receive
+                // callback (into the transport node, which hands the upstream node the first look) and
+                // its start() here, so an interface that appears after the node started still delivers.
+                val rnsIfaceCache = HashMap<String, Pair<Any, net.meshsat.android.reticulum.RnsInterface>>()
+                fun <T : Any> cached(id: String, source: T, make: (T) -> net.meshsat.android.reticulum.RnsInterface): net.meshsat.android.reticulum.RnsInterface =
+                    synchronized(rnsIfaceCache) {
+                        rnsIfaceCache[id]?.let { (src, iface) -> if (src === source) return@synchronized iface }
+                        val iface = make(source)
+                        rnsIfaceCache[id] = source to iface
+                        iface.setReceiveCallback(net.meshsat.android.reticulum.RnsReceiveCallback { _, raw ->
+                            rnsTransportNode?.let { n -> scope.launch { n.receive(id, raw) } }
+                        })
+                        scope.launch { try { iface.start() } catch (e: Exception) { Log.w("MeshSat", "RNS interface $id start failed: ${e.message}") } }
+                        iface
+                    }
                 val rnsInterfaces: () -> Map<String, net.meshsat.android.reticulum.RnsInterface> = {
                     val map = mutableMapOf<String, net.meshsat.android.reticulum.RnsInterface>()
                     meshtasticBle?.let { ble ->
-                        map["mesh_rns_0"] = net.meshsat.android.reticulum.RnsMeshtasticBleInterface(ble, scope)
+                        map["mesh_rns_0"] = cached("mesh_rns_0", ble) { net.meshsat.android.reticulum.RnsMeshtasticBleInterface(it, scope) }
                     }
                     iridiumSpp?.let { spp ->
-                        map["iridium_rns_0"] = net.meshsat.android.reticulum.RnsIridiumInterface(spp)
+                        map["iridium_rns_0"] = cached("iridium_rns_0", spp) { net.meshsat.android.reticulum.RnsIridiumInterface(it) }
                     }
                     iridium9704Spp?.let { spp ->
-                        map["iridium9704_rns_0"] = net.meshsat.android.reticulum.RnsIridium9704Interface(spp, scope)
+                        map["iridium9704_rns_0"] = cached("iridium9704_rns_0", spp) { net.meshsat.android.reticulum.RnsIridium9704Interface(it, scope) }
                     }
                     rnsTcpInterface?.let { tcp ->
                         map["tcp_rns_0"] = tcp
