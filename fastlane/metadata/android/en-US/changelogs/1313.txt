@@ -1,0 +1,1 @@
+MeshSat Android speaks Reticulum and LXMF as Sideband, CrossTalk, NomadNet and MeshChat do: an LXMF address of its own, messages with names and delivery ticks, and the RockBLOCK 9704 as a Reticulum link across the satellite.
