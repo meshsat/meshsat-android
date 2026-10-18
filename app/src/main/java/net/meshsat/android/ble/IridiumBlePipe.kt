@@ -78,10 +78,10 @@ class IridiumBlePipe internal constructor(
     /**
      * Take the modem: subscribe to STATUS and TX and wait until STATUS says the phone owns
      * it. Returns false when it did not within [timeoutMs]. A node without STATUS (firmware
-     * before a5038c8) counts as owned once TX is subscribed.
+     * before d59d75b) counts as owned once TX is subscribed.
      *
      * STATUS saying the node owns it is "wait", never a failure (MESHSAT-1372): with no phone
-     * subscribed the node uses the modem itself (firmware a95e2e5), so for up to about a second
+     * subscribed the node uses the modem itself (firmware 9541e45), so for up to about a second
      * after the TX subscribe it still reads 01 02, and with a session of its own in flight it
      * releases only after the result, up to 90 s. The owner's STATUS notification is what ends
      * the wait; the service keeps reading STATUS back while it lasts.

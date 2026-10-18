@@ -558,7 +558,7 @@ class IridiumSpp(private val clock: () -> Long = System::currentTimeMillis) {
             result.copy(mt = mt)
         } catch (e: LinkDroppedException) {
             // The node holds the modem and finishes the session on its own (firmware since
-            // bf2ba14); the outcome never reaches this phone. The ISU registers once every 3
+            // 3961ec4); the outcome never reaches this phone. The ISU registers once every 3
             // minutes and every SBDIX registers, so the hold runs from the session's start, as
             // it would after a 32 or 36 the node caught. The caller keeps the message for a
             // retry: it may have been sent, and a duplicate costs one credit, a loss costs more.
