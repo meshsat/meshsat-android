@@ -593,8 +593,8 @@ create-github-release:
 # =============================================================================
 # SDD CI gate (Tier 4B) — appended 2026-05-18
 # Validates spec/, STRIDE, observability, dispatch, outcomes against the
-# canonical validator at claude-gateway:scripts/validate-project-spec.py.
-# See claude-gateway:scripts/sdd-ci-snippet.yml for the canonical version.
+# canonical validator at the gateway repo's scripts/validate-project-spec.py.
+# See the gateway repo's scripts/sdd-ci-snippet.yml for the canonical version.
 # =============================================================================
 sdd_validate_spec:
   stage: validate
@@ -604,7 +604,7 @@ sdd_validate_spec:
     - pip install --quiet pyyaml
     - mkdir -p /opt/sdd/scripts
     # Pinned to an immutable commit rather than a moving feature-branch ref on
-    # another project (claude-gateway, project 30): a rename or delete there
+    # another project (the gateway repo, project 30): a rename or delete there
     # would otherwise fail this job, and with it the validate stage. Fail open
     # when the validator cannot be fetched — being unable to validate is not
     # the same as validation failing. Real spec violations still block below.

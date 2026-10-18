@@ -17,7 +17,7 @@
         "app/src/main/java/net/meshsat/android/config/AppMode.kt",
         "app/src/test/java/net/meshsat/android/PairedBridgesDaoTest.kt"
       ],
-      "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:testDebugUnitTest --tests net.meshsat.android.PairedBridgesDaoTest'",
+      "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/ansible/meshsat-android && ./gradlew :app:testDebugUnitTest --tests net.meshsat.android.PairedBridgesDaoTest'",
       "dependencies": [],
       "parallelizable": true,
       "bounded_context": "data",
@@ -63,7 +63,7 @@
         "app/src/test/java/net/meshsat/android/PairClaimClientTest.kt",
         "app/src/test/java/net/meshsat/android/PairedClientKeystoreTest.kt"
       ],
-      "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:testDebugUnitTest --tests net.meshsat.android.PairClaimClientTest --tests net.meshsat.android.PairedClientKeystoreTest'",
+      "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/ansible/meshsat-android && ./gradlew :app:testDebugUnitTest --tests net.meshsat.android.PairClaimClientTest --tests net.meshsat.android.PairedClientKeystoreTest'",
       "dependencies": [
         "T-001"
       ],
@@ -113,7 +113,7 @@
         "app/src/main/java/net/meshsat/android/data/RemovePairedBridge.kt",
         "app/src/test/java/net/meshsat/android/HybridShellTest.kt"
       ],
-      "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:testDebugUnitTest --tests net.meshsat.android.HybridShellTest'",
+      "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/ansible/meshsat-android && ./gradlew :app:testDebugUnitTest --tests net.meshsat.android.HybridShellTest'",
       "dependencies": [
         "T-002"
       ],

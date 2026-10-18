@@ -4,10 +4,10 @@
 
 ```bash
 # Build runs on nllei01androidsdk01 only — ADR-0002
-ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:assembleFdroidDebug'
-ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:testFdroidDebugUnitTest'
-ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:lintFdroidDebug'
-ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:assembleFdroidRelease'   # signed APKs (full edition); bundlePlayRelease for the Google Play AAB
+ssh ansible@nllei01androidsdk01 'cd /home/ansible/meshsat-android && ./gradlew :app:assembleFdroidDebug'
+ssh ansible@nllei01androidsdk01 'cd /home/ansible/meshsat-android && ./gradlew :app:testFdroidDebugUnitTest'
+ssh ansible@nllei01androidsdk01 'cd /home/ansible/meshsat-android && ./gradlew :app:lintFdroidDebug'
+ssh ansible@nllei01androidsdk01 'cd /home/ansible/meshsat-android && ./gradlew :app:assembleFdroidRelease'   # signed APKs (full edition); bundlePlayRelease for the Google Play AAB
 ```
 
 ## Version conventions
@@ -59,7 +59,7 @@ git -c user.name="Kyriakos Papadopoulos" -c user.email="ncpjfuzl@mxmx.email" com
   adr/                          ← architectural decisions
   spec/                         ← feature specs
   .agentic/slot-config.entry.json ← parallel-dev slot
-  .gitignore                    ← CLAUDE.md + .claude/ excluded
+  .gitignore                    ← local working notes excluded
 ```
 
 ## Release

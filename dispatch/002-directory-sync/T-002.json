@@ -6,13 +6,13 @@
     "youtrack_prefix": "MESHSAT",
     "matrix_room": "!miZJJDwFQZDkuMcBqL:matrix.nuclearlighters.net",
     "primary_language": "kotlin",
-    "test_command": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:testDebugUnitTest'",
-    "lint_command": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:lintDebug'",
+    "test_command": "ssh ansible@nllei01androidsdk01 'cd /home/ansible/meshsat-android && ./gradlew :app:testDebugUnitTest'",
+    "lint_command": "ssh ansible@nllei01androidsdk01 'cd /home/ansible/meshsat-android && ./gradlew :app:lintDebug'",
     "security_posture": "private network app; mTLS to paired bridges; Android Keystore for client cert + private keys; never store private key bytes outside Keystore",
     "parent_project": {
       "slug": "cubeos",
       "project_id": 16,
-      "spec_home": "/home/claude-runner/gitlab/products/cubeos/docs",
+      "spec_home": "~/gitlab/products/cubeos/docs",
       "note": "Track B of CubeOS \u2014 MeshSat. Companion to the meshsat/ Bridge (project 27); peers with meshsat/ and meshsat-hub/ in the 3-node mesh."
     }
   },
@@ -34,7 +34,7 @@
       "app/src/test/java/net/meshsat/android/DirectorySyncServiceTest.kt",
       "app/src/test/java/net/meshsat/android/ContactCardImporterTest.kt"
     ],
-    "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:testDebugUnitTest --tests net.meshsat.android.DirectorySyncServiceTest --tests net.meshsat.android.ContactCardImporterTest'",
+    "acceptance_test": "ssh ansible@nllei01androidsdk01 'cd /home/ansible/meshsat-android && ./gradlew :app:testDebugUnitTest --tests net.meshsat.android.DirectorySyncServiceTest --tests net.meshsat.android.ContactCardImporterTest'",
     "dependencies": [
       "T-001"
     ],
@@ -317,8 +317,8 @@
       "source": "docs/constitution.md \u00a7Article XIII"
     },
     {
-      "id": "claude-code-files-gitignored",
-      "short": "CLAUDE.md and .claude/ NEVER committed; spec-kit artefacts ARE committed",
+      "id": "local-notes-gitignored",
+      "short": "Local working notes NEVER committed; spec-kit artefacts ARE committed",
       "parent_article": "XVII",
       "my_article_ref": "n/a",
       "source": "docs/constitution.md \u00a7Article XVII"

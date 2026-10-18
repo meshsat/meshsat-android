@@ -8,7 +8,10 @@ REMOTE_DIR=/home/ansible/meshsat-android
 TARGET="${1:-assembleFdroidDebug}"
 
 # Sync source
-tar czf - --exclude='.gradle' --exclude='build' --exclude='.claude' --exclude='*.apk' --exclude='.git' . | \
+# Local-only files listed in the global git ignore stay off the build host too.
+LOCAL_EXCLUDES=()
+[ -f "$HOME/.config/git/ignore" ] && LOCAL_EXCLUDES=(--exclude-from="$HOME/.config/git/ignore")
+tar czf - --exclude='.gradle' --exclude='build' "${LOCAL_EXCLUDES[@]}" --exclude='*.apk' --exclude='.git' . | \
   ssh "$VM" "mkdir -p $REMOTE_DIR && cd $REMOTE_DIR && tar xzf -"
 
 # Build

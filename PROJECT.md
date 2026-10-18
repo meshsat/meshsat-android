@@ -1,6 +1,6 @@
 # Project Charter — MeshSat Android
 
-> Component-scoped charter. Parent project: `/home/claude-runner/gitlab/products/cubeos/docs/PROJECT.md` (CubeOS — Track B MeshSat sub-track). Authored 2026-05-18 against CGC ground truth.
+> Component-scoped charter. Parent project: `~/gitlab/products/cubeos/docs/PROJECT.md` (CubeOS — Track B MeshSat sub-track). Authored 2026-05-18 against CGC ground truth.
 
 ## Role in the MeshSat family
 
@@ -47,9 +47,9 @@ Inherits the full CubeOS project-level constitution + the MeshSat sub-family con
 
 ```bash
 # Build runs on a remote SDK host — see ADR-0002 for rationale
-ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:assembleDebug'
-ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:testDebugUnitTest'
-ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:lintDebug'
+ssh ansible@nllei01androidsdk01 'cd /home/ansible/meshsat-android && ./gradlew :app:assembleDebug'
+ssh ansible@nllei01androidsdk01 'cd /home/ansible/meshsat-android && ./gradlew :app:testDebugUnitTest'
+ssh ansible@nllei01androidsdk01 'cd /home/ansible/meshsat-android && ./gradlew :app:lintDebug'
 ```
 
 `app/build.gradle.kts`:
@@ -64,8 +64,8 @@ All 45 existing tests live FLAT at `app/src/test/java/net/meshsat/android/<Name>
 
 ## Source trace
 
-- `meshsat-android/CLAUDE.md` (local-only operator notes)
-- Parent: `/home/claude-runner/gitlab/products/cubeos/docs/architecture/02_ARCHITECTURE.md` (CubeOS system architecture)
-- Parent: `/home/claude-runner/gitlab/products/meshsat/meshsat/UX-MULTI-ACCESS-KIOSK-PAIRING.md` (pair-shell protocol design)
-- Parent: `/home/claude-runner/gitlab/products/meshsat/meshsat/EXECUTION-PLAN.md` (cross-cut Android stories under §6.5 + §6.8)
-- CGC audit: `claude-gateway/docs/sdd-audits/meshsat-android-cgc-2026-05-18.md`
+- the repo's local operator notes (not committed)
+- Parent: `~/gitlab/products/cubeos/docs/architecture/02_ARCHITECTURE.md` (CubeOS system architecture)
+- Parent: `~/gitlab/products/meshsat/meshsat/UX-MULTI-ACCESS-KIOSK-PAIRING.md` (pair-shell protocol design)
+- Parent: `~/gitlab/products/meshsat/meshsat/EXECUTION-PLAN.md` (cross-cut Android stories under §6.5 + §6.8)
+- CGC audit: `the gateway repo's docs/sdd-audits/meshsat-android-cgc-2026-05-18.md`

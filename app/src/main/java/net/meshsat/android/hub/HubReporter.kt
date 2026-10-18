@@ -422,7 +422,7 @@ class HubReporter(
      * the same SOS arriving by satellite, so one SOS pages once whichever way it arrives first. A
      * cancellation goes with [sos] false and a text the detector does not match. A test goes with
      * [asMessage] false, on the sos topic only: mo/decoded feeds the Hub's routing engine, whose relay
-     * routes text real phones (meshsat-hub CLAUDE.md rule 14). Blocks until the broker has it; false
+     * routes text real phones (Hub rule 14). Blocks until the broker has it; false
      * when the Hub is not connected or the publish failed.
      */
     fun publishSos(

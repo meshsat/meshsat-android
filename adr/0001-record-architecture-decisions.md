@@ -8,7 +8,7 @@ Accepted
 
 ## Context
 
-Component ADRs for `meshsat-android`. Parent CubeOS-family ADRs live in `/home/claude-runner/gitlab/products/cubeos/docs/adr/`. Sibling repo ADRs in `meshsat/adr/` + `meshsat-hub/adr/`.
+Component ADRs for `meshsat-android`. Parent CubeOS-family ADRs live in `~/gitlab/products/cubeos/docs/adr/`. Sibling repo ADRs in `meshsat/adr/` + `meshsat-hub/adr/`.
 
 ## Decision
 

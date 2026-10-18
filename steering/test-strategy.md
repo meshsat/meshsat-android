@@ -36,13 +36,13 @@ Flat is what the repo already does. Mixing flat + nested would require IDE confi
 
 ```bash
 # Whole suite
-ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:testFdroidDebugUnitTest'
+ssh ansible@nllei01androidsdk01 'cd /home/ansible/meshsat-android && ./gradlew :app:testFdroidDebugUnitTest'
 
 # Single test class
-ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:testFdroidDebugUnitTest --tests net.meshsat.android.KeyBundleImporterTest'
+ssh ansible@nllei01androidsdk01 'cd /home/ansible/meshsat-android && ./gradlew :app:testFdroidDebugUnitTest --tests net.meshsat.android.KeyBundleImporterTest'
 
 # Lint
-ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew :app:lintFdroidDebug'
+ssh ansible@nllei01androidsdk01 'cd /home/ansible/meshsat-android && ./gradlew :app:lintFdroidDebug'
 ```
 
 ## Coverage expectation

@@ -1,10 +1,10 @@
 # Constitution — MeshSat Android
 
-Inherits the full CubeOS project-level constitution at `/home/claude-runner/gitlab/products/cubeos/docs/constitution.md`. This file adds Android-specific articles (C-I through C-X). All facts CGC-verified 2026-05-18.
+Inherits the full CubeOS project-level constitution at `~/gitlab/products/cubeos/docs/constitution.md`. This file adds Android-specific articles (C-I through C-X). All facts CGC-verified 2026-05-18.
 
 ## Article C-I — Build host is `nllei01androidsdk01`
 
-The system shall build, test, and lint via the SDK host. The Gradle wrapper invocation MUST use `ssh ansible@nllei01androidsdk01 'cd /home/claude-runner/gitlab/products/meshsat/meshsat-android && ./gradlew <task>'`. Local workstation builds are not supported (no SDK + JDK 17 wiring assumed). See ADR-0002.
+The system shall build, test, and lint via the SDK host. The Gradle wrapper invocation MUST use `ssh ansible@nllei01androidsdk01 'cd /home/ansible/meshsat-android && ./gradlew <task>'`. Local workstation builds are not supported (no SDK + JDK 17 wiring assumed). See ADR-0002.
 
 ## Article C-II — BouncyCastle MUST be `addProvider`, NEVER `insertProviderAt`
 
