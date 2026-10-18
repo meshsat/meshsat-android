@@ -8,6 +8,7 @@ import android.content.Intent
 import android.net.Uri
 import android.telephony.SmsMessage
 import android.util.Log
+import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -28,6 +29,9 @@ class SmsStatusReceiver : BroadcastReceiver() {
         val deliveryId = intent.getLongExtra(EXTRA_DELIVERY_ID, -1L)
         val code = resultCode
         val report = if (intent.action == ACTION_DELIVERED) reportState(intent) else null
+        val key = intent.getStringExtra(EXTRA_ATTEMPT)?.let {
+            SmsPartKey(it, intent.getIntExtra(EXTRA_PART, -1), intent.getIntExtra(EXTRA_PARTS, 0))
+        }
         val pending = goAsync()
         CoroutineScope(Dispatchers.IO).launch {
             try {
@@ -36,15 +40,25 @@ class SmsStatusReceiver : BroadcastReceiver() {
                     ACTION_SENT -> if (messageId > 0) {
                         db.messageDao().setForwardedToUnlessDelivered(messageId, if (code == Activity.RESULT_OK) SENT else FAILED)
                     }
-                    ACTION_DELIVERED -> when (report) {
-                        SmsReport.Delivered -> {
-                            if (messageId > 0) db.messageDao().setForwardedTo(messageId, DELIVERED)
-                            // Delivered to the handset: the record says delivered, not only acked
-                            // with its status left at sent (MESHSAT-1584).
-                            if (deliveryId > 0) db.messageDeliveryDao().setAcked(deliveryId)
+                    ACTION_DELIVERED -> {
+                        val completion = when {
+                            report == null -> SmsCompletion.Open // unreadable: keep what it says
+                            key != null -> SmsPartLedger.record(db.smsPartReportDao(), key, report, messageId, deliveryId)
+                            // A report asked for before per-part reports, on the last part only: it
+                            // says nothing about the other parts (MESHSAT-1584).
+                            report == SmsReport.Failed -> SmsCompletion.Failed
+                            else -> SmsCompletion.Open
                         }
-                        SmsReport.Failed -> if (messageId > 0) db.messageDao().setForwardedTo(messageId, FAILED)
-                        else -> Unit // still pending at the carrier, or unreadable: keep what it says
+                        when (completion) {
+                            SmsCompletion.Delivered -> {
+                                if (messageId > 0) db.messageDao().setForwardedTo(messageId, DELIVERED)
+                                // Every part reached the handset: the record says delivered, not
+                                // only acked with its status left at sent (MESHSAT-1584).
+                                if (deliveryId > 0) db.messageDeliveryDao().setAcked(deliveryId)
+                            }
+                            SmsCompletion.Failed -> if (messageId > 0) db.messageDao().setForwardedTo(messageId, FAILED)
+                            SmsCompletion.Open -> Unit // a part is still pending or unconfirmed
+                        }
                     }
                 }
             } catch (e: Exception) {
@@ -59,7 +73,7 @@ class SmsStatusReceiver : BroadcastReceiver() {
         val pdu = intent.getByteArrayExtra("pdu") ?: return null
         val format = intent.getStringExtra("format") ?: "3gpp"
         return try {
-            SmsMessage.createFromPdu(pdu, format)?.let { SmsReport.fromStatus(it.status) }
+            SmsMessage.createFromPdu(pdu, format)?.let { SmsReport.from(format, it.status) }
         } catch (_: Exception) {
             null
         }
@@ -70,6 +84,9 @@ class SmsStatusReceiver : BroadcastReceiver() {
         const val ACTION_DELIVERED = "net.meshsat.android.SMS_STATUS_DELIVERED"
         private const val EXTRA_MESSAGE_ID = "message_id"
         private const val EXTRA_DELIVERY_ID = "delivery_id"
+        private const val EXTRA_ATTEMPT = "attempt"
+        private const val EXTRA_PART = "part"
+        private const val EXTRA_PARTS = "parts"
 
         const val SENDING = "sms:sending"
         const val SENT = "sms:sent"
@@ -87,19 +104,29 @@ class SmsStatusReceiver : BroadcastReceiver() {
             )
 
         /**
-         * The carrier's delivery report, for a chat message or a queued delivery. Mutable because
-         * Android adds the report's PDU to the intent; explicit (our own receiver), as a mutable
-         * PendingIntent must be.
+         * The carrier's delivery report on every part of one send, for a chat message or a queued
+         * delivery: one intent per part, under a new id for this send, so the receiver can tell
+         * the parts and the sends apart (MESHSAT-1584). Mutable because Android adds the report's
+         * PDU to the intent; explicit (our own receiver), as a mutable PendingIntent must be.
          */
-        fun deliveredIntent(context: Context, messageId: Long = -1L, deliveryId: Long = -1L): PendingIntent =
-            PendingIntent.getBroadcast(
-                context, 0,
-                Intent(ACTION_DELIVERED, Uri.parse("meshsat://sms/report/$messageId/$deliveryId"))
-                    .setClass(context, SmsStatusReceiver::class.java)
-                    .putExtra(EXTRA_MESSAGE_ID, messageId)
-                    .putExtra(EXTRA_DELIVERY_ID, deliveryId),
-                PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        fun deliveredIntents(context: Context, receipt: SmsReceipt, parts: Int): ArrayList<PendingIntent> {
+            val attempt = UUID.randomUUID().toString()
+            return ArrayList(
+                List(parts) { part ->
+                    PendingIntent.getBroadcast(
+                        context, 0,
+                        Intent(ACTION_DELIVERED, Uri.parse("meshsat://sms/report/$attempt/$part"))
+                            .setClass(context, SmsStatusReceiver::class.java)
+                            .putExtra(EXTRA_MESSAGE_ID, receipt.messageId)
+                            .putExtra(EXTRA_DELIVERY_ID, receipt.deliveryId)
+                            .putExtra(EXTRA_ATTEMPT, attempt)
+                            .putExtra(EXTRA_PART, part)
+                            .putExtra(EXTRA_PARTS, parts),
+                        PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+                    )
+                },
             )
+        }
     }
 }
 
@@ -114,6 +141,30 @@ enum class SmsReport {
     Delivered, CompletedUnconfirmed, Pending, Failed;
 
     companion object {
+        /** A report's status in the PDU format Android names: GSM/UMTS or CDMA; any other is unreadable. */
+        fun from(format: String?, status: Int): SmsReport? = when (format ?: "3gpp") {
+            "3gpp" -> fromStatus(status)
+            "3gpp2" -> fromCdmaStatus(status)
+            else -> null
+        }
+
+        /**
+         * A CDMA report (SmsMessage.getStatus): error class in bits 25-24, status code in bits
+         * 23-16 (3GPP2 C.S0015-B 4.5.21; AOSP SmsMessage.getStatus: "2 shifted left by 16 for CDMA
+         * indicates the previously sent message was received"). Only class 0 code 2 is the
+         * handset's receipt; class 3 is a permanent error; anything else says nothing final.
+         */
+        fun fromCdmaStatus(status: Int): SmsReport {
+            val errorClass = (status ushr 24) and 0x03
+            val code = (status ushr 16) and 0xFF
+            return when {
+                errorClass == 0 && code == 2 -> Delivered
+                errorClass == 3 -> Failed
+                else -> Pending
+            }
+        }
+
+        /** A GSM/UMTS report's TP-Status. */
         fun fromStatus(status: Int): SmsReport = when {
             status < 0 -> Pending
             status == 0 -> Delivered
@@ -123,3 +174,6 @@ enum class SmsReport {
         }
     }
 }
+
+/** Whose delivery report an SMS send asks for: a chat message, a queued delivery, or both. */
+data class SmsReceipt(val messageId: Long = -1L, val deliveryId: Long = -1L)

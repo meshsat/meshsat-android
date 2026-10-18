@@ -2864,7 +2864,7 @@ class GatewayService : Service() {
                     SmsSender.sendAndWait(
                         context = this, to = phone, text = textPreview,
                         // The carrier's delivery report marks the delivery acknowledged (MESHSAT-1246).
-                        deliveryIntent = if (deliveryId > 0) net.meshsat.android.sms.SmsStatusReceiver.deliveredIntent(this, deliveryId = deliveryId) else null,
+                        receipt = if (deliveryId > 0) net.meshsat.android.sms.SmsReceipt(deliveryId = deliveryId) else null,
                     )?.let { return it }
                     db.messageDao().insert(
                         Message(
@@ -4075,7 +4075,7 @@ class GatewayService : Service() {
                 msvqscEncoder = if (compressMode == "msvqsc") msvqscEncoder else null,
                 msvqscStages = stages,
                 sentIntent = net.meshsat.android.sms.SmsStatusReceiver.sentIntent(this, messageId),
-                deliveryIntent = net.meshsat.android.sms.SmsStatusReceiver.deliveredIntent(this, messageId = messageId),
+                receipt = net.meshsat.android.sms.SmsReceipt(messageId = messageId),
             )
         } catch (e: Exception) {
             Log.w("MeshSat", "SMS to $recipient failed: ${e.message}")

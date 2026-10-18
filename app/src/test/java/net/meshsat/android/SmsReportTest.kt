@@ -20,4 +20,19 @@ class SmsReportTest {
         assertEquals(SmsReport.Failed, SmsReport.fromStatus(0x65))
         assertEquals(SmsReport.Pending, SmsReport.fromStatus(-1))
     }
+
+    @Test
+    fun `a report is read in its own format`() {
+        assertEquals(SmsReport.Delivered, SmsReport.from("3gpp", 0x00))
+        assertEquals(SmsReport.Failed, SmsReport.from("3gpp", 0x40))
+        assertEquals(SmsReport.Delivered, SmsReport.from(null, 0x00)) // no format extra: GSM, as before
+        // CDMA: error class in bits 25-24, status code in bits 23-16; 2 << 16 is the receipt
+        // (SmsMessage.getStatus, 3GPP2 C.S0015-B 4.5.21). The GSM decoder called it a failure.
+        assertEquals(SmsReport.Delivered, SmsReport.from("3gpp2", 2 shl 16))
+        assertEquals(SmsReport.Pending, SmsReport.from("3gpp2", 0)) // class 0 code 0: accepted, not delivered
+        assertEquals(SmsReport.Pending, SmsReport.from("3gpp2", 3 shl 16)) // class 0 code 3: cancelled, not final here
+        assertEquals(SmsReport.Pending, SmsReport.from("3gpp2", (2 shl 24) or (2 shl 16))) // temporary error
+        assertEquals(SmsReport.Failed, SmsReport.from("3gpp2", (3 shl 24) or (0x07 shl 16))) // permanent error
+        assertEquals(null, SmsReport.from("ims", 0x00)) // a format we cannot read says nothing
+    }
 }

@@ -51,7 +51,7 @@ object SmsSender {
         msvqscEncoder: MsvqscEncoder? = null,
         msvqscStages: Int = 3,
         sentIntent: PendingIntent? = null,
-        deliveryIntent: PendingIntent? = null,
+        receipt: SmsReceipt? = null,
     ) {
         var payload: ByteArray = text.toByteArray(Charsets.UTF_8)
         var compressed = false
@@ -107,15 +107,15 @@ object SmsSender {
             Log.w(TAG, "No SmsManager on this device")
             return
         }
-        // The sent and delivery intents ride on the last part: its result stands for the message
-        // (MESHSAT-1246).
+        // The sent intent rides on the last part (MESHSAT-1246); every part asks for its own
+        // delivery report, and the message is delivered once all of them say so (MESHSAT-1584).
         val parts = smsManager.divideMessage(finalText)
+        val delivered = receipt?.let { SmsStatusReceiver.deliveredIntents(context, it, parts.size) }
         if (parts.size > 1) {
             val sent = ArrayList<PendingIntent?>(List(parts.size) { i -> if (i == parts.size - 1) sentIntent else null })
-            val delivered = ArrayList<PendingIntent?>(List(parts.size) { i -> if (i == parts.size - 1) deliveryIntent else null })
             smsManager.sendMultipartTextMessage(to, null, parts, sent, delivered)
         } else {
-            smsManager.sendTextMessage(to, null, finalText, sentIntent, deliveryIntent)
+            smsManager.sendTextMessage(to, null, finalText, sentIntent, delivered?.firstOrNull())
         }
     }
 
@@ -130,7 +130,7 @@ object SmsSender {
         to: String,
         text: String,
         timeoutMs: Long = 60_000L,
-        deliveryIntent: PendingIntent? = null,
+        receipt: SmsReceipt? = null,
     ): String? {
         val smsManager = SmsCapability.manager(context) ?: return "This device cannot send SMS"
         val parts = try {
@@ -155,9 +155,9 @@ object SmsSender {
                     PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_ONE_SHOT,
                 )
             }
-            // The carrier's delivery report, when asked for, rides on the last part (MESHSAT-1246).
-            val delivered = ArrayList<PendingIntent?>(List(parts.size) { i -> if (i == parts.size - 1) deliveryIntent else null })
-            if (parts.size == 1) smsManager.sendTextMessage(to, null, parts[0], sent[0], deliveryIntent)
+            // The carrier's delivery report, when asked for, on every part (MESHSAT-1246, 1584).
+            val delivered = receipt?.let { SmsStatusReceiver.deliveredIntents(context, it, parts.size) }
+            if (parts.size == 1) smsManager.sendTextMessage(to, null, parts[0], sent[0], delivered?.firstOrNull())
             else smsManager.sendMultipartTextMessage(to, null, parts, sent, delivered)
             repeat(parts.size) {
                 val code = withTimeoutOrNull(timeoutMs) { results.receive() }
