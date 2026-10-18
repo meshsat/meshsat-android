@@ -9,573 +9,573 @@ Generated from git history + tags by `scripts/sdd-generate-changelog.py` on 2026
 
 ### Added
 
-- local release telemetry ring buffer [MESHSAT-494] (b56a6856)
+- local release telemetry ring buffer [MESHSAT-494] (f6db9324)
 
 ### Changed
 
-- drop radio-config + audit-log screenshots, keep hero only [MESHSAT-496] (4335e794)
-- remove features-menu screenshot (didn't render well) [MESHSAT-496] (6cec8fd2)
-- comprehensive rewrite + 6 screenshots [MESHSAT-496] (7d908b93)
-- comprehensive README overhaul + GitHub metadata script [MESHSAT-496] (cf7798ed)
+- drop radio-config + audit-log screenshots, keep hero only [MESHSAT-496] (9a562e76)
+- remove features-menu screenshot (didn't render well) [MESHSAT-496] (ad954c59)
+- comprehensive rewrite + 6 screenshots [MESHSAT-496] (59ea95b3)
+- comprehensive README overhaul + GitHub metadata script [MESHSAT-496] (cebcbca9)
 
 
 ## [v2.8.5] - 2026-04-05
 
 ### Added
 
-- TOFU key pinning in KeyBundleImporter + bundle v2 [MESHSAT-495] (7bfce9d4)
+- TOFU key pinning in KeyBundleImporter + bundle v2 [MESHSAT-495] (f1ea6960)
 
 
 ## [v2.8.4] - 2026-04-05
 
 ### Changed
 
-- bump version to v2.8.4 (d9539b1f)
+- bump version to v2.8.4 (46ef3e01)
 
 ### Fixed
 
-- gate all I/O on connection state, silence disconnected-state spam [MESHSAT-499] (2d70a61e)
+- gate all I/O on connection state, silence disconnected-state spam [MESHSAT-499] (6ae63557)
 
 
 ## [v2.8.3] - 2026-04-05
 
 ### Fixed
 
-- correct ms/sec unit mismatch in PassScheduler OOM [MESHSAT-498] (2191f7b9)
-- cache pass predictions to prevent OOM in PassScheduler [MESHSAT-498] (c0036113)
+- correct ms/sec unit mismatch in PassScheduler OOM [MESHSAT-498] (07f405aa)
+- cache pass predictions to prevent OOM in PassScheduler [MESHSAT-498] (165dc7ec)
 
 
 ## [v2.8.2] - 2026-04-05
 
 ### Fixed
 
-- move BouncyCastle to end of JCA provider chain [MESHSAT-497] (d0ed2571)
+- move BouncyCastle to end of JCA provider chain [MESHSAT-497] (4ece0ea1)
 
 
 ## [v2.8.1] - 2026-04-05
 
 ### Changed
 
-- bump version to v2.8.1 (12b8e1df)
+- bump version to v2.8.1 (a4b3e19b)
 
 ### Fixed
 
-- add osmdroid keep rules to prevent white map tiles on release [MESHSAT-493] (300dc605)
+- add osmdroid keep rules to prevent white map tiles on release [MESHSAT-493] (e31a8a46)
 
 
 ## [v2.8.0] - 2026-04-05
 
 ### Added
 
-- add release signing with OpenBao + Play Store AAB (fc2d4201)
+- add release signing with OpenBao + Play Store AAB (32f3652c)
 
 ### Changed
 
-- bump version to v2.8.0 (03cae60e)
+- bump version to v2.8.0 (4673059c)
 
 ### Fixed
 
-- add dontwarn rules for Tink compile-time annotations (04d58c5d)
+- add dontwarn rules for Tink compile-time annotations (ad4499dd)
 
 
 ## [v2.7.0] - 2026-04-04
 
 ### Added
 
-- receive TAK positions from Hub broadcast + settings API [MESHSAT-448] (e28c3c44)
-- TAK/CoT-compliant Canvas markers — diamond, square, emergency [MESHSAT-464] (67679b84)
-- protobuf v1 + waypoint builder + enriched position [MESHSAT-456] (5060c443)
-- add TAK Settings section with enable/callsign/output toggles [MESHSAT-451] (98b8644c)
-- auto-forward + /api/sms/auto-forward endpoint [MESHSAT-447] (e7f30778)
-- add /api/sms/send to Android LocalApiServer [MESHSAT-447] (421629ff)
-- Android outbound SMAZ2 compress + wildcard key encrypt [MESHSAT-447] (6e5dfed9)
-- port SMAZ2 compressor/decompressor to Kotlin [MESHSAT-447] (9c256f61)
+- receive TAK positions from Hub broadcast + settings API [MESHSAT-448] (b64ab9a2)
+- TAK/CoT-compliant Canvas markers — diamond, square, emergency [MESHSAT-464] (d286d672)
+- protobuf v1 + waypoint builder + enriched position [MESHSAT-456] (8c400ff4)
+- add TAK Settings section with enable/callsign/output toggles [MESHSAT-451] (e122a0ac)
+- auto-forward + /api/sms/auto-forward endpoint [MESHSAT-447] (c3425937)
+- add /api/sms/send to Android LocalApiServer [MESHSAT-447] (296cf1b6)
+- Android outbound SMAZ2 compress + wildcard key encrypt [MESHSAT-447] (6d638416)
+- port SMAZ2 compressor/decompressor to Kotlin [MESHSAT-447] (f426352d)
 
 ### Changed
 
-- bump version to v2.7.0 (61d6e36c)
+- bump version to v2.7.0 (1175f6aa)
 
 ### Fixed
 
-- replace zoomToBoundingBox with direct center+zoom [MESHSAT-479] (7718d820)
-- debounce Room position Flow to prevent ANR from marker burst [MESHSAT-479] (1fceda50)
-- prevent ANR from repeated zoomToBoundingBox on marker updates [MESHSAT-479] (e9f7ed47)
-- subscribe to TAK broadcast topic for fleet-wide positions [MESHSAT-448] (7557d701)
-- use CotPrecision camelCase field names (altSrc, geoPointSrc) [MESHSAT-456] (5b467aaf)
-- use explicit getters for PrecisionLocation proto fields [MESHSAT-456] (028059ea)
-- use java_package imports for proto-generated classes [MESHSAT-456] (7635e8c3)
-- correct protobuf class names for java_multiple_files + proto3 [MESHSAT-456] (4a0e7f3c)
-- use explicit hasXxx() checks in protoToCotEvent [MESHSAT-456] (4e9f3873)
-- show SmsReceiver-decrypted text in Messages UI [MESHSAT-447] (9585794c)
-- fall back to Hub wildcard key (sms:*) for SMS decryption [MESHSAT-447] (a142d46c)
-- synchronize RLNC decoder to prevent concurrent ArrayIndexOutOfBounds [MESHSAT-447] (03a93c0b)
-- wire HeMB inbound detection on Android RnsTransportNode [MESHSAT-443] (0a1d499e)
+- replace zoomToBoundingBox with direct center+zoom [MESHSAT-479] (9122bad8)
+- debounce Room position Flow to prevent ANR from marker burst [MESHSAT-479] (5be19540)
+- prevent ANR from repeated zoomToBoundingBox on marker updates [MESHSAT-479] (67b563a8)
+- subscribe to TAK broadcast topic for fleet-wide positions [MESHSAT-448] (a3a9cb0d)
+- use CotPrecision camelCase field names (altSrc, geoPointSrc) [MESHSAT-456] (7e6dc96f)
+- use explicit getters for PrecisionLocation proto fields [MESHSAT-456] (dfe31b7d)
+- use java_package imports for proto-generated classes [MESHSAT-456] (d1d66756)
+- correct protobuf class names for java_multiple_files + proto3 [MESHSAT-456] (c2c928e8)
+- use explicit hasXxx() checks in protoToCotEvent [MESHSAT-456] (67855d65)
+- show SmsReceiver-decrypted text in Messages UI [MESHSAT-447] (7f96ca55)
+- fall back to Hub wildcard key (sms:*) for SMS decryption [MESHSAT-447] (5bdd2203)
+- synchronize RLNC decoder to prevent concurrent ArrayIndexOutOfBounds [MESHSAT-447] (5c77d3b8)
+- wire HeMB inbound detection on Android RnsTransportNode [MESHSAT-443] (9ea3c81b)
 
 
 ## [v2.6.1] - 2026-03-31
 
 ### Changed
 
-- bump version to v2.6.1 (38c103cb)
+- bump version to v2.6.1 (c08e3ded)
 
 ### Fixed
 
-- backport 2 HeMB bug fixes from bridge E2E integration [MESHSAT-415] (e2022e13)
+- backport 2 HeMB bug fixes from bridge E2E integration [MESHSAT-415] (6282976b)
 
 
 ## [v2.6.0] - 2026-03-29
 
 ### Added
 
-- port HeMB bearer bonding protocol to Android [MESHSAT-431] (b752c2da)
+- port HeMB bearer bonding protocol to Android [MESHSAT-431] (f83a402c)
 
 ### Changed
 
-- bump version to v2.6.0 (c10fa781)
-- rewrite README to match v2.5.0 feature set [MESHSAT-354] (dd59de14)
+- bump version to v2.6.0 (fcad2c20)
+- rewrite README to match v2.5.0 feature set [MESHSAT-354] (8652838c)
 
 
 ## [v2.5.0] - 2026-03-29
 
 ### Added
 
-- TLS+mTLS for TCP interface, BouncyCastle for Android 16 [MESHSAT-354] (39c80ae2)
+- TLS+mTLS for TCP interface, BouncyCastle for Android 16 [MESHSAT-354] (4bd91ac6)
 
 ### Changed
 
-- bump version to v2.5.0 (4c9edc48)
+- bump version to v2.5.0 (545cf856)
 
 
 ## [v2.4.1] - 2026-03-29
 
 ### Fixed
 
-- ping button uses HubReporter client, not MqttTransport (3ba47c1a)
+- ping button uses HubReporter client, not MqttTransport (f38fb17d)
 
 
 ## [v2.4.0] - 2026-03-29
 
 ### Fixed
 
-- mTLS trust store must include system CAs alongside custom CA (17a2a855)
+- mTLS trust store must include system CAs alongside custom CA (ad7068af)
 
 
 ## [v2.3.1] - 2026-03-29
 
 ### Added
 
-- ECDSA-P256 signed birth messages for Hub verification (424ec3b9)
+- ECDSA-P256 signed birth messages for Hub verification (1dfa61b6)
 
 
 ## [v2.3.0] - 2026-03-29
 
 ### Added
 
-- health LED, ping button, QR auto-populate fix (aef67178)
+- health LED, ping button, QR auto-populate fix (78a61af2)
 
 
 ## [v2.2.2] - 2026-03-28
 
 ### Fixed
 
-- support both inline and nonce QR formats (29326ea9)
+- support both inline and nonce QR formats (1419425d)
 
 
 ## [v2.2.1] - 2026-03-28
 
 ### Added
 
-- two-step QR provisioning (nonce URL + HTTPS claim) (e1cd3ad6)
+- two-step QR provisioning (nonce URL + HTTPS claim) (b397165d)
 
 
 ## [v2.2.0] - 2026-03-28
 
 ### Added
 
-- QR code Hub provisioning with mTLS auto-config (8b175baa)
+- QR code Hub provisioning with mTLS auto-config (c2c049aa)
 
 
 ## [v2.1.0] - 2026-03-28
 
 ### Added
 
-- wire MQTT Reticulum interface for Hub interop [MESHSAT-354] (b401254d)
+- wire MQTT Reticulum interface for Hub interop [MESHSAT-354] (42e6fba0)
 
 
 ## [v2.0.1] - 2026-03-28
 
 ### Added
 
-- add Cellular NITZ as stratum 0 time source [MESHSAT-410] (005c1731)
+- add Cellular NITZ as stratum 0 time source [MESHSAT-410] (475b3d92)
 
 ### Fixed
 
-- paid interface filter + bridge-compatible wire formats [MESHSAT-414] (31b05a97)
+- paid interface filter + bridge-compatible wire formats [MESHSAT-414] (192824e7)
 
 
 ## [v2.0.0] - 2026-03-28
 
 ### Added
 
-- DTN + FEC + Time Sync + RLNC protocol enhancements [MESHSAT-407] [MESHSAT-408] [MESHSAT-409] [MESHSAT-410] [MESHSAT-411] (b3e14bac)
+- DTN + FEC + Time Sync + RLNC protocol enhancements [MESHSAT-407] [MESHSAT-408] [MESHSAT-409] [MESHSAT-410] [MESHSAT-411] (6961c7ca)
 
 
 ## [v1.9.1] - 2026-03-28
 
 ### Fixed
 
-- use online OSM tiles — MBTiles offline never rendered (413f904f)
+- use online OSM tiles — MBTiles offline never rendered (8d75d804)
 
 
 ## [v1.9.0] - 2026-03-28
 
 ### Fixed
 
-- use osmdroid auto-detect for MBTiles + MapScreen outside NavHost (197fa660)
+- use osmdroid auto-detect for MBTiles + MapScreen outside NavHost (24ec8ded)
 
 
 ## [v1.8.5] - 2026-03-28
 
 ### Fixed
 
-- move MapScreen outside NavHost to prevent view detachment (44724ebe)
+- move MapScreen outside NavHost to prevent view detachment (62f7468b)
 
 
 ## [v1.8.4] - 2026-03-27
 
 ### Fixed
 
-- restart tile provider threads after view re-attach (995666ab)
+- restart tile provider threads after view re-attach (86fbc747)
 
 
 ## [v1.8.3] - 2026-03-27
 
 ### Fixed
 
-- singleton MapView to survive Compose NavHost tab switches (8e99535f)
+- singleton MapView to survive Compose NavHost tab switches (56932e21)
 
 
 ## [v1.8.2] - 2026-03-27
 
 ### Fixed
 
-- proper osmdroid lifecycle management for tile persistence (891b7a4e)
+- proper osmdroid lifecycle management for tile persistence (f7334de1)
 
 
 ## [v1.8.1] - 2026-03-27
 
 ### Fixed
 
-- tile provider persistence and dark mode color inversion (885900ba)
+- tile provider persistence and dark mode color inversion (11a5f174)
 
 
 ## [v1.8.0] - 2026-03-27
 
 ### Added
 
-- replace Leaflet/WebView with osmdroid native map rendering (a76504fa)
+- replace Leaflet/WebView with osmdroid native map rendering (ac4f5e02)
 
 
 ## [v1.7.1] - 2026-03-27
 
 ### Added
 
-- vector tile rendering, offline-first, bundled world map [MESHSAT-402] (812c516e)
-- vector tile rendering with dark/light themes and offline-first default (b5eda0ad)
+- vector tile rendering, offline-first, bundled world map [MESHSAT-402] (d5a8dd4d)
+- vector tile rendering with dark/light themes and offline-first default (c8cc0d15)
 
 ### Changed
 
-- bump version to v1.7.1 (306ecf52)
+- bump version to v1.7.1 (fd44f774)
 
 
 ## [v1.6.0] - 2026-03-27
 
 ### Added
 
-- offline MBTiles map tile support (db278060)
+- offline MBTiles map tile support (2237f093)
 
 ### Changed
 
-- bump version to v1.6.0 (99761d06)
+- bump version to v1.6.0 (d9df407f)
 
 
 ## [v1.5.5] - 2026-03-27
 
 ### Changed
 
-- bump version to v1.5.5 (053ca6d0)
+- bump version to v1.5.5 (53c27681)
 
 ### Fixed
 
-- nuclear reset for corrupted EncryptedSharedPreferences (9ebbb7b5)
+- nuclear reset for corrupted EncryptedSharedPreferences (6e083d76)
 
 
 ## [v1.5.4] - 2026-03-27
 
 ### Fixed
 
-- load tiles via WebViewAssetLoader instead of file:// origin (a66a2078)
+- load tiles via WebViewAssetLoader instead of file:// origin (5705155b)
 
 
 ## [v1.5.3] - 2026-03-27
 
 ### Changed
 
-- bump version to v1.5.3 (2ba96366)
+- bump version to v1.5.3 (fa11c6f7)
 
 ### Fixed
 
-- handle corrupted EncryptedSharedPreferences on startup (7c0bf59b)
+- handle corrupted EncryptedSharedPreferences on startup (ca71986d)
 
 
 ## [v1.5.2] - 2026-03-27
 
 ### Changed
 
-- bump version to v1.5.2 (dfbacfb3)
+- bump version to v1.5.2 (18b7e3d4)
 
 ### Fixed
 
-- foreground service crash on Android 14+ when BT permission denied (aff681f2)
+- foreground service crash on Android 14+ when BT permission denied (b30a5ea0)
 
 
 ## [v1.5.1] - 2026-03-27
 
 ### Added
 
-- dashboard widget reorder dialog with persistent order [MESHSAT-401] (73cc818c)
+- dashboard widget reorder dialog with persistent order [MESHSAT-401] (a7e0e131)
 
 ### Changed
 
-- bump version to v1.5.1 (95897f60)
+- bump version to v1.5.1 (29bba386)
 
 
 ## [v1.5.0] - 2026-03-27
 
 ### Added
 
-- Iridium credit tracking and gauge visualization [MESHSAT-399] (655c7fd0)
-- Reticulum widget and dashboard enhancements [MESHSAT-396] [MESHSAT-397] [MESHSAT-398] [MESHSAT-400] (fa736a0c)
-- credential management screen with PEM import [MESHSAT-391] (34944471)
-- wire pass scheduler, mTLS, registry, and TCP peers [MESHSAT-386] [MESHSAT-387] [MESHSAT-388] [MESHSAT-392] (d66735ea)
-- announce interval and routing config UI [MESHSAT-394] (3a9fb369)
-- YAML config export/import matching Bridge format [MESHSAT-393] (2965d991)
-- TCP multi-peer management with Room DB [MESHSAT-392] (590ccb24)
-- multi-instance transport registry [MESHSAT-388] (8a1e5875)
-- mTLS client certificate support for Hub MQTT/NATS [MESHSAT-387] (01b555bb)
-- pass-aware scheduling — 4-mode transport polling [MESHSAT-386] (9e4c1b08)
-- add service restart API and UI button [MESHSAT-395] (ac51ef32)
-- implement send_mt, flush_burst, config_update, reboot commands [MESHSAT-390] (241b8522)
-- preserve OTA-learned node identity on config download merge [MESHSAT-389] (35edb689)
-- credential import via Hub sync + QR bundles [MESHSAT-369] (a00b58e0)
+- Iridium credit tracking and gauge visualization [MESHSAT-399] (6b29b551)
+- Reticulum widget and dashboard enhancements [MESHSAT-396] [MESHSAT-397] [MESHSAT-398] [MESHSAT-400] (1352ccba)
+- credential management screen with PEM import [MESHSAT-391] (913581ec)
+- wire pass scheduler, mTLS, registry, and TCP peers [MESHSAT-386] [MESHSAT-387] [MESHSAT-388] [MESHSAT-392] (d8dd26d0)
+- announce interval and routing config UI [MESHSAT-394] (32bb6677)
+- YAML config export/import matching Bridge format [MESHSAT-393] (16a735ba)
+- TCP multi-peer management with Room DB [MESHSAT-392] (ad000fec)
+- multi-instance transport registry [MESHSAT-388] (ace56e41)
+- mTLS client certificate support for Hub MQTT/NATS [MESHSAT-387] (4beeec04)
+- pass-aware scheduling — 4-mode transport polling [MESHSAT-386] (69f89cae)
+- add service restart API and UI button [MESHSAT-395] (3ea511d2)
+- implement send_mt, flush_burst, config_update, reboot commands [MESHSAT-390] (732dead6)
+- preserve OTA-learned node identity on config download merge [MESHSAT-389] (ed0f1aac)
+- credential import via Hub sync + QR bundles [MESHSAT-369] (e6cc52ad)
 
 ### Changed
 
-- bump version to v1.5.0 (60341fb3)
+- bump version to v1.5.0 (d4ab14c7)
 
 
 ## [v1.4.0] - 2026-03-23
 
 ### Added
 
-- add TCP_HDLC encapsulation enum for stock RNS wire compat [MESHSAT-199] (216fee10)
-- HubReporter — bridge-to-hub uplink protocol for Android [MESHSAT-292] (81f6cafa)
-- add RnsAstrocastInterface + GatewayService integration [MESHSAT-12] (2e234c9f)
-- add TCP, BLE peripheral, Tor, and WireGuard interfaces [MESHSAT-268/269/270/271] (dc52780b)
-- wire RnsTransportNode into GatewayService lifecycle [MESHSAT-267] (be291f9d)
-- add RnsIridium9704Interface for Reticulum over IMT [MESHSAT-272] (a023cf27)
-- add Transport Node with forwarding table and packet relay [MESHSAT-199] (dbd8c26d)
-- integrate Iridium 9704 transport into GatewayService [MESHSAT-245] (0a6c622a)
-- add RockBLOCK 9704 IMT transport via Bluetooth SPP [MESHSAT-245] (cfb61904)
-- add Meshtastic radio config tab with all settings [MESHSAT-243] (7a0ed6d0)
-- adopt official Meshtastic protobuf bindings [MESHSAT-241] (ba6ebfc9)
+- add TCP_HDLC encapsulation enum for stock RNS wire compat [MESHSAT-199] (757aac7b)
+- HubReporter — bridge-to-hub uplink protocol for Android [MESHSAT-292] (5368bfb3)
+- add RnsAstrocastInterface + GatewayService integration [MESHSAT-12] (a3cf8abe)
+- add TCP, BLE peripheral, Tor, and WireGuard interfaces [MESHSAT-268/269/270/271] (e33ad781)
+- wire RnsTransportNode into GatewayService lifecycle [MESHSAT-267] (dc529803)
+- add RnsIridium9704Interface for Reticulum over IMT [MESHSAT-272] (13e6b72b)
+- add Transport Node with forwarding table and packet relay [MESHSAT-199] (c92dbcdf)
+- integrate Iridium 9704 transport into GatewayService [MESHSAT-245] (e7bd29f3)
+- add RockBLOCK 9704 IMT transport via Bluetooth SPP [MESHSAT-245] (5dd7fbc7)
+- add Meshtastic radio config tab with all settings [MESHSAT-243] (8bc2f4e7)
+- adopt official Meshtastic protobuf bindings [MESHSAT-241] (d724e4ef)
 
 ### Changed
 
-- bump version to v1.4.0 (83f50817)
-- add RnsIridium9704Interface unit tests [MESHSAT-272] (a6dc75bf)
+- bump version to v1.4.0 (4284781a)
+- add RnsIridium9704Interface unit tests [MESHSAT-272] (d3d5bebf)
 
 
 ## [v1.3.4] - 2026-03-20
 
 ### Changed
 
-- bump version to v1.3.4 (8215041e)
+- bump version to v1.3.4 (157a1192)
 
 ### Fixed
 
-- start service after permissions + bundle Leaflet locally (003d70c8)
+- start service after permissions + bundle Leaflet locally (a75e5653)
 
 
 ## [v1.3.3] - 2026-03-20
 
 ### Changed
 
-- bump version to v1.3.3 (8bd12092)
+- bump version to v1.3.3 (5ac0e285)
 
 ### Fixed
 
-- crash on start + map always visible (cf1b4174)
+- crash on start + map always visible (aaa30ab1)
 
 
 ## [v1.3.2] - 2026-03-20
 
 ### Changed
 
-- bump version to v1.3.2 (c6b2848b)
+- bump version to v1.3.2 (2e647817)
 
 ### Fixed
 
-- crash after 1min + no cell tower location (a20e2e7f)
+- crash after 1min + no cell tower location (b284a7ac)
 
 
 ## [v1.3.1] - 2026-03-20
 
 ### Changed
 
-- bump version to v1.3.1 (61019e45)
+- bump version to v1.3.1 (84192ec7)
 
 ### Fixed
 
-- maps not loading — WebView needs non-null base URL for external resources (8b2b3257)
+- maps not loading — WebView needs non-null base URL for external resources (7336a0ae)
 
 
 ## [v1.3.0] - 2026-03-20
 
 ### Added
 
-- add message fragmentation support — parity with Bridge [MESHSAT-234] (26c88002)
-- wire directed messaging with ACK/REJ into GatewayService [MESHSAT-232] (7cd9eb9f)
-- directed messaging with ACK/REJ tracking [MESHSAT-232] (f880ff8e)
-- add smart position beaconing with corner pegging [MESHSAT-231] (d79a010b)
-- add smart position beaconing with corner pegging [MESHSAT-231] (fe093482)
-- APRS-IS direct connect — standalone APRS station without APRSDroid [MESHSAT-230] (5dee4142)
-- Astronode S serial protocol driver + SPP transport [MESHSAT-12] (15c12e32)
-- CoT v2.0 generation + ATAK integration + inbound CoT parsing [MESHSAT-191] (5d441c3b)
-- QR code key sync with Hub, AES-GCM wire format tests [MESHSAT-205] (1666cf20)
-- per-channel compression toggle — disable MSVQ-SC for Iridium [MESHSAT-203] (f7d51bfd)
-- bidirectional SMS relay between Android and Hub via MQTT [MESHSAT-196] (6e5d6251)
-- path discovery with cost-aware routing, reliable resource transfer [MESHSAT-222] [MESHSAT-223] (ed9792fb)
-- 5 transport interfaces — BLE, SMS, Iridium, APRS, MQTT [MESHSAT-213] [MESHSAT-215] [MESHSAT-216] [MESHSAT-218] [MESHSAT-220] (f37804be)
-- Meshtastic BLE interface adapter for Reticulum packets [MESHSAT-213] (c1590152)
-- ECDH link handshake with HKDF key derivation [MESHSAT-211] (95e07865)
-- wire-compatible announce with 64-byte public_key field [MESHSAT-209] (2c2f4219)
-- wire-compatible packet format, destination hash, announce data [MESHSAT-208] (36dcb8d3)
-- protocol version byte, SBD fragmentation, cert pinning, APRS UI [MESHSAT-190] [MESHSAT-192] [MESHSAT-195] (e74457db)
-- Android APRS adapter — KISS codec, AX.25, APRS encode/decode [MESHSAT-138] (609d0525)
-- Android MQTT client for Hub connectivity [MESHSAT-137] (244ba2d4)
+- add message fragmentation support — parity with Bridge [MESHSAT-234] (6ecfeda3)
+- wire directed messaging with ACK/REJ into GatewayService [MESHSAT-232] (3ba23ac1)
+- directed messaging with ACK/REJ tracking [MESHSAT-232] (3d636466)
+- add smart position beaconing with corner pegging [MESHSAT-231] (20c90736)
+- add smart position beaconing with corner pegging [MESHSAT-231] (d55919ac)
+- APRS-IS direct connect — standalone APRS station without APRSDroid [MESHSAT-230] (b3abe9c5)
+- Astronode S serial protocol driver + SPP transport [MESHSAT-12] (b2afce6d)
+- CoT v2.0 generation + ATAK integration + inbound CoT parsing [MESHSAT-191] (ca141565)
+- QR code key sync with Hub, AES-GCM wire format tests [MESHSAT-205] (df1dcffa)
+- per-channel compression toggle — disable MSVQ-SC for Iridium [MESHSAT-203] (89f8b47f)
+- bidirectional SMS relay between Android and Hub via MQTT [MESHSAT-196] (8b6529f8)
+- path discovery with cost-aware routing, reliable resource transfer [MESHSAT-222] [MESHSAT-223] (dd9e4061)
+- 5 transport interfaces — BLE, SMS, Iridium, APRS, MQTT [MESHSAT-213] [MESHSAT-215] [MESHSAT-216] [MESHSAT-218] [MESHSAT-220] (92616794)
+- Meshtastic BLE interface adapter for Reticulum packets [MESHSAT-213] (e67bd36b)
+- ECDH link handshake with HKDF key derivation [MESHSAT-211] (d80cfa06)
+- wire-compatible announce with 64-byte public_key field [MESHSAT-209] (5f92f05f)
+- wire-compatible packet format, destination hash, announce data [MESHSAT-208] (b19f3f83)
+- protocol version byte, SBD fragmentation, cert pinning, APRS UI [MESHSAT-190] [MESHSAT-192] [MESHSAT-195] (64fb7e55)
+- Android APRS adapter — KISS codec, AX.25, APRS encode/decode [MESHSAT-138] (2f75599b)
+- Android MQTT client for Hub connectivity [MESHSAT-137] (c6b19978)
 
 ### Changed
 
-- bump version to v1.3.0 (318a110b)
+- bump version to v1.3.0 (839a0082)
 
 ### Fixed
 
-- align CRC byte order with Go bridge + cross-impl test vectors [MESHSAT-233] (9d750be1)
+- align CRC byte order with Go bridge + cross-impl test vectors [MESHSAT-233] (436bd137)
 
 ### Security
 
-- hardware-backed Android Keystore for all crypto keys [MESHSAT-194] (de9b043a)
+- hardware-backed Android Keystore for all crypto keys [MESHSAT-194] (dfadad3e)
 
 
 ## [v1.2.1] - 2026-03-16
 
 ### Fixed
 
-- lazy SMS permission request with banner in Messages screen (e85149b0)
+- lazy SMS permission request with banner in Messages screen (96ba9a07)
 
 
 ## [v1.2.0] - 2026-03-16
 
 ### Added
 
-- Peers screen, message tabs, map layers, status bar, topology stats, interface tabs [MESHSAT-74] [MESHSAT-75] (31a82de2)
-- dashboard overhaul + pass elevation chart [MESHSAT-72] [MESHSAT-73] (649d43fa)
+- Peers screen, message tabs, map layers, status bar, topology stats, interface tabs [MESHSAT-74] [MESHSAT-75] (7168493e)
+- dashboard overhaul + pass elevation chart [MESHSAT-72] [MESHSAT-73] (75779b13)
 
 
 ## [v1.1.1] - 2026-03-16
 
 ### Fixed
 
-- maps tiles, SMS permissions, navigation redesign (e04b0574)
+- maps tiles, SMS permissions, navigation redesign (ff9a7de5)
 
 
 ## [v1.1.0] - 2026-03-16
 
 ### Added
 
-- Phase J satellite pass predictor [MESHSAT-69] (d3ad450d)
-- add radio config + device admin screen [MESHSAT-68] (dc3745d1)
-- Phase I interface management screen [MESHSAT-67] (092265a1)
-- Phase H bridge rules management UI [MESHSAT-66] (25df6bda)
+- Phase J satellite pass predictor [MESHSAT-69] (ab942598)
+- add radio config + device admin screen [MESHSAT-68] (64ec5534)
+- Phase I interface management screen [MESHSAT-67] (76462997)
+- Phase H bridge rules management UI [MESHSAT-66] (53296e93)
 
 ### Fixed
 
-- audit log screen (Android), battery/lifecycle, dynamic interfaces, reboot confirm [MESHSAT-70] [MESHSAT-71] (5319f20a)
+- audit log screen (Android), battery/lifecycle, dynamic interfaces, reboot confirm [MESHSAT-70] [MESHSAT-71] (8410f45f)
 
 
 ## [v1.0.2] - 2026-03-16
 
 ### Fixed
 
-- maps grey square, invasive SMS perms, add dark/light theme toggle (3e679878)
+- maps grey square, invasive SMS perms, add dark/light theme toggle (ae8e42d6)
 
 
 ## [v1.0.1] - 2026-03-16
 
 ### Fixed
 
-- crash on service creation — defensive startForeground + try/catch init (76ef385b)
+- crash on service creation — defensive startForeground + try/catch init (237fe72c)
 
 
 ## [v1.0.0] - 2026-03-16
 
 ### Added
 
-- close MESHSAT-57 parity gaps — dedup wiring, telemetry, UI fixes, 59 unit tests [MESHSAT-57] (3606ebc2)
-- Phase G UI parity — settings, topology, deliveries, geofence [MESHSAT-65] (64a31b7f)
-- Phase F config, signing, and local REST API [MESHSAT-64] (c68b8c92)
-- Phase E routing layer — identity, announce, link manager [MESHSAT-63] (8a0454b5)
-- Phase D field intelligence — deadman, geofence, health, codecs, burst [MESHSAT-62] (c0b93c88)
-- Phase C transport hardening — state machine, store-forward, QoS [MESHSAT-61] (6e2743a7)
-- port Go gateway routing to Kotlin — Phase B [MESHSAT-60] (93ccf790)
-- add core infrastructure — channel registry, dedup, rate limiter, transform pipeline [MESHSAT-59] (ab9679b4)
-- add MSVQ-SC compression settings UI [MESHSAT-28] (78e77489)
-- MSVQ-SC lossy semantic compression for SMS [MESHSAT-28] (36812fa1)
+- close MESHSAT-57 parity gaps — dedup wiring, telemetry, UI fixes, 59 unit tests [MESHSAT-57] (dfa02167)
+- Phase G UI parity — settings, topology, deliveries, geofence [MESHSAT-65] (edd2e247)
+- Phase F config, signing, and local REST API [MESHSAT-64] (50279374)
+- Phase E routing layer — identity, announce, link manager [MESHSAT-63] (f4ba2fbc)
+- Phase D field intelligence — deadman, geofence, health, codecs, burst [MESHSAT-62] (a7f3e57a)
+- Phase C transport hardening — state machine, store-forward, QoS [MESHSAT-61] (3f6f8b85)
+- port Go gateway routing to Kotlin — Phase B [MESHSAT-60] (9686718d)
+- add core infrastructure — channel registry, dedup, rate limiter, transform pipeline [MESHSAT-59] (c3616257)
+- add MSVQ-SC compression settings UI [MESHSAT-28] (ed0c47fb)
+- MSVQ-SC lossy semantic compression for SMS [MESHSAT-28] (92439b5c)
 
 ### Changed
 
-- README rewrite, issue templates, contributing guide [MESHSAT-57] (1572a03c)
-- add pipeline for APK build + GitLab/GitHub releases [CUBEOS-72] (aebd8549)
+- README rewrite, issue templates, contributing guide [MESHSAT-57] (27079018)
+- add pipeline for APK build + GitLab/GitHub releases [CUBEOS-72] (1de5dab5)
 
 ### Fixed
 
-- audit fixes — ProGuard rules, tensor leak, thread safety, NaN guard (678b44f1)
-- use bash to run gradlew (chmod fails on read-only checkout) (c41dfdae)
+- audit fixes — ProGuard rules, tensor leak, thread safety, NaN guard (5f82f507)
+- use bash to run gradlew (chmod fails on read-only checkout) (e9f184fb)
 
 
 ## [v0.3.0] - 2026-03-11
 
 ### Added
 
-- chat replies, per-conv encryption, GPS map, device info, notifications [CUBEOS-72] (2dd4db66)
+- chat replies, per-conv encryption, GPS map, device info, notifications [CUBEOS-72] (16ed3456)
 
 ### Fixed
 
-- SMS detection, per-conversation keys, signal graphs [CUBEOS-72] (265f512f)
+- SMS detection, per-conversation keys, signal graphs [CUBEOS-72] (8428e112)
 
 
 ## [v0.2.0] - 2026-03-11
 
 ### Added
 
-- conversations, map, SOS, signal graphs, bug fixes [CUBEOS-72] (117f4316)
-- register as default SMS app candidate for GrapheneOS [CUBEOS-70] (000e5005)
+- conversations, map, SOS, signal graphs, bug fixes [CUBEOS-72] (a8478141)
+- register as default SMS app candidate for GrapheneOS [CUBEOS-70] (9017d0eb)
 
 ### Fixed
 
-- keep Rules tab, move Crypto to Settings, remove duplicate screens [CUBEOS-72] (64999dfd)
-- BLE scan, SMS decrypt logging, message UX improvements [CUBEOS-72] (de2bccf9)
+- keep Rules tab, move Crypto to Settings, remove duplicate screens [CUBEOS-72] (6160ac9b)
+- BLE scan, SMS decrypt logging, message UX improvements [CUBEOS-72] (3f6a5a3b)
 
 
 ## [v0.1.0] - 2026-03-11
@@ -587,18 +587,18 @@ _No commits within window._
 
 ### Added
 
-- persist rules to Room, message search, signal polling, About screen, key sharing [CUBEOS-70] (f20a655b)
-- rules UI, Iridium message flow, mesh send, app icon, ProGuard [CUBEOS-70] (ac12f0a7)
-- add BLE, SPP, rules engine, and wire transports into gateway service [CUBEOS-70] (7ff43392)
-- initial Android app with SMS decrypt and MeshSat-dark UI [CUBEOS-70] (946fb0a9)
+- persist rules to Room, message search, signal polling, About screen, key sharing [CUBEOS-70] (d7caac63)
+- rules UI, Iridium message flow, mesh send, app icon, ProGuard [CUBEOS-70] (647f5ca7)
+- add BLE, SPP, rules engine, and wire transports into gateway service [CUBEOS-70] (5095378e)
+- initial Android app with SMS decrypt and MeshSat-dark UI [CUBEOS-70] (f9631fb4)
 
 ### Changed
 
-- add MeshSat-to-MeshSat encrypted SMS section [CUBEOS-70] (391e2553)
-- Initial commit: README and GPLv3 license [CUBEOS-70] (671fee20)
+- add MeshSat-to-MeshSat encrypted SMS section [CUBEOS-70] (50ca040d)
+- Initial commit: README and GPLv3 license [CUBEOS-70] (e892cf79)
 
 ### Fixed
 
-- increase Gradle heap for 8GB LXC, build passes [CUBEOS-70] (f00156cf)
-- build config — Gradle wrapper, AndroidX, BuildConfig, memory tuning [CUBEOS-70] (048113db)
+- increase Gradle heap for 8GB LXC, build passes [CUBEOS-70] (adcc5519)
+- build config — Gradle wrapper, AndroidX, BuildConfig, memory tuning [CUBEOS-70] (92fdac5e)
 
