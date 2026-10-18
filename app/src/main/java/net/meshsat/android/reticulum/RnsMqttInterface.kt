@@ -7,9 +7,9 @@ import net.meshsat.android.mqtt.MqttTransport
 /**
  * Reticulum interface over MQTT (Hub connectivity).
  *
- * Publishes Reticulum packets on meshsat/{deviceId}/reticulum/tx.
- * Receives packets from Hub via the existing MQTT message callback —
- * the Hub publishes relayed packets to meshsat/{deviceId}/reticulum/rx.
+ * Publishes Reticulum packets on {root}/{deviceId}/reticulum/tx, under the tenant's topic root
+ * of the transport's connection (MESHSAT-1467). Receives packets from Hub via the existing MQTT
+ * message callback — the Hub publishes relayed packets to {root}/{deviceId}/reticulum/rx.
  *
  * MTU: Reticulum standard (500 bytes). Cost: free. Latency: <1s.
  *
@@ -35,11 +35,14 @@ class RnsMqttInterface(
         receiveCallback = callback
     }
 
+    /** Where packets go: under the tenant's topic root of the transport's connection. */
+    internal fun txTopic(): String = "${mqtt.topicRoot}/${deviceId()}/reticulum/tx"
+
     override suspend fun send(packet: ByteArray): String? {
         if (!isOnline) return "MQTT interface offline"
 
         return try {
-            val topic = "meshsat/${deviceId()}/reticulum/tx"
+            val topic = txTopic()
             val payload = Base64.encodeToString(packet, Base64.NO_WRAP)
             mqtt.publishRaw(topic, qos = 1, retained = false, payload = payload)
             Log.d(TAG, "RNS packet sent via MQTT: ${packet.size}B to $topic")

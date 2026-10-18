@@ -49,6 +49,8 @@ class HubTenantWiringTest {
             val t = MqttTransport(scope)
             t.connect("tcp://127.0.0.1:1", "dev-1", topicPrefix = "meshsat/acme")
             assertEquals("meshsat/acme", t.topicRoot)
+            // The Reticulum interface over that connection publishes under the same root.
+            assertEquals("meshsat/acme/dev-1/reticulum/tx", net.meshsat.android.reticulum.RnsMqttInterface(t, { "dev-1" }).txTopic())
             t.disconnect()
             val bad = MqttTransport(scope)
             bad.connect("tcp://127.0.0.1:1", "dev-1", topicPrefix = "meshsat/a.b")

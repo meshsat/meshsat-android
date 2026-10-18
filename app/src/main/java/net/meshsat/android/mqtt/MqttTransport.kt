@@ -317,7 +317,7 @@ class MqttTransport(
     /** The tenant's topic root (MESHSAT-1467); the Reticulum route hints stay the Hub's own. */
     @Volatile private var root = net.meshsat.android.hub.HubTopics.DEFAULT_ROOT
 
-    /** The topic root of the last connect, for the tests. */
+    /** The topic root of the last connect; the Reticulum interface publishes under it too. */
     internal val topicRoot: String get() = root
 
     private fun topicPosition() = "$root/$deviceId/position"
