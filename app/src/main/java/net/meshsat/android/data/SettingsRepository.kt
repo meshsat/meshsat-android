@@ -98,6 +98,8 @@ class SettingsRepository(private val context: Context) {
         val KEY_HUB_ENABLED = booleanPreferencesKey("hub_enabled")
         val KEY_HUB_URL = stringPreferencesKey("hub_url")
         val KEY_HUB_BRIDGE_ID = stringPreferencesKey("hub_bridge_id")
+        /** The tenant's topic root from the provisioning bundle; blank = the platform tenant (MESHSAT-1467). */
+        val KEY_HUB_TOPIC_PREFIX = stringPreferencesKey("hub_topic_prefix")
         val KEY_HUB_CALLSIGN = stringPreferencesKey("hub_callsign")
         val KEY_HUB_USERNAME = stringPreferencesKey("hub_username")
         val KEY_HUB_HEALTH_INTERVAL = stringPreferencesKey("hub_health_interval") // seconds as string
@@ -667,6 +669,10 @@ class SettingsRepository(private val context: Context) {
         it[KEY_HUB_CALLSIGN] ?: ""
     }
 
+    val hubTopicPrefix: Flow<String> = context.dataStore.data.map {
+        it[KEY_HUB_TOPIC_PREFIX] ?: ""
+    }
+
     val hubUsername: Flow<String> = context.dataStore.data.map {
         it[KEY_HUB_USERNAME] ?: ""
     }
@@ -694,6 +700,10 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setHubBridgeId(id: String) {
         context.dataStore.edit { it[KEY_HUB_BRIDGE_ID] = id }
+    }
+
+    suspend fun setHubTopicPrefix(prefix: String) {
+        context.dataStore.edit { it[KEY_HUB_TOPIC_PREFIX] = prefix }
     }
 
     suspend fun setHubCallsign(callsign: String) {

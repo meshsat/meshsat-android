@@ -40,16 +40,16 @@ class HubProtocolTest {
 
     @Test
     fun `topic builders produce correct paths`() {
-        assertEquals("meshsat/bridge/pi-01/birth", HubTopics.bridgeBirth("pi-01"))
-        assertEquals("meshsat/bridge/pi-01/death", HubTopics.bridgeDeath("pi-01"))
-        assertEquals("meshsat/bridge/pi-01/health", HubTopics.bridgeHealth("pi-01"))
-        assertEquals("meshsat/bridge/pi-01/cmd", HubTopics.bridgeCmd("pi-01"))
-        assertEquals("meshsat/bridge/pi-01/cmd/response", HubTopics.bridgeCmdResponse("pi-01"))
-        assertEquals("meshsat/bridge/pi-01/device/mesh-abc/birth", HubTopics.deviceBirth("pi-01", "mesh-abc"))
-        assertEquals("meshsat/bridge/pi-01/device/mesh-abc/death", HubTopics.deviceDeath("pi-01", "mesh-abc"))
-        assertEquals("meshsat/dev-01/position", HubTopics.devicePosition("dev-01"))
-        assertEquals("meshsat/dev-01/telemetry", HubTopics.deviceTelemetry("dev-01"))
-        assertEquals("meshsat/dev-01/sos", HubTopics.deviceSOS("dev-01"))
+        assertEquals("meshsat/bridge/pi-01/birth", HubTopics.PLATFORM.bridgeBirth("pi-01"))
+        assertEquals("meshsat/bridge/pi-01/death", HubTopics.PLATFORM.bridgeDeath("pi-01"))
+        assertEquals("meshsat/bridge/pi-01/health", HubTopics.PLATFORM.bridgeHealth("pi-01"))
+        assertEquals("meshsat/bridge/pi-01/cmd", HubTopics.PLATFORM.bridgeCmd("pi-01"))
+        assertEquals("meshsat/bridge/pi-01/cmd/response", HubTopics.PLATFORM.bridgeCmdResponse("pi-01"))
+        assertEquals("meshsat/bridge/pi-01/device/mesh-abc/birth", HubTopics.PLATFORM.deviceBirth("pi-01", "mesh-abc"))
+        assertEquals("meshsat/bridge/pi-01/device/mesh-abc/death", HubTopics.PLATFORM.deviceDeath("pi-01", "mesh-abc"))
+        assertEquals("meshsat/dev-01/position", HubTopics.PLATFORM.devicePosition("dev-01"))
+        assertEquals("meshsat/dev-01/telemetry", HubTopics.PLATFORM.deviceTelemetry("dev-01"))
+        assertEquals("meshsat/dev-01/sos", HubTopics.PLATFORM.deviceSOS("dev-01"))
     }
 
     @Test
@@ -255,29 +255,29 @@ class HubProtocolTest {
 
     @Test
     fun `the TAK export topic is the bridge's own subtree`() {
-        assertEquals("meshsat/bridge/pixel9a/tak/cot/out", HubTopics.takCotOut("pixel9a"))
+        assertEquals("meshsat/bridge/pixel9a/tak/cot/out", HubTopics.PLATFORM.takCotOut("pixel9a"))
         // An id is written the way the Hub writes one into a topic.
-        assertEquals("meshsat/bridge/kit%2B1%2F2/tak/cot/out", HubTopics.takCotOut("kit+1/2"))
+        assertEquals("meshsat/bridge/kit%2B1%2F2/tak/cot/out", HubTopics.PLATFORM.takCotOut("kit+1/2"))
     }
 
     @Test
     fun `what the Hub delivers arrives on two subscriptions`() {
         assertEquals(
             listOf("meshsat/broadcast/tak/cot/in", "meshsat/broadcast/tak/cot/in/+"),
-            HubTopics.takCotInFilters().toList(),
+            HubTopics.PLATFORM.takCotInFilters().toList(),
         )
     }
 
     @Test
     fun `the sender of a delivered TAK event is the topic's last segment`() {
         // From a TAK server: no sender.
-        assertEquals("", HubTopics.takCotSender("meshsat/broadcast/tak/cot/in"))
-        assertEquals("pixel9a", HubTopics.takCotSender("meshsat/broadcast/tak/cot/in/pixel9a"))
-        assertEquals("kit%2B1", HubTopics.takCotSender("meshsat/broadcast/tak/cot/in/kit%2B1"))
-        assertEquals("", HubTopics.takCotSender("meshsat/broadcast/tak/cot/in/"))
-        assertEquals("", HubTopics.takCotSender("meshsat/broadcast/tak/cot/in/pixel9a/more"))
-        assertEquals("", HubTopics.takCotSender("meshsat/broadcast/tak/cot/inpixel9a"))
-        assertEquals("", HubTopics.takCotSender("meshsat/bridge/pixel9a/tak/cot/out"))
+        assertEquals("", HubTopics.PLATFORM.takCotSender("meshsat/broadcast/tak/cot/in"))
+        assertEquals("pixel9a", HubTopics.PLATFORM.takCotSender("meshsat/broadcast/tak/cot/in/pixel9a"))
+        assertEquals("kit%2B1", HubTopics.PLATFORM.takCotSender("meshsat/broadcast/tak/cot/in/kit%2B1"))
+        assertEquals("", HubTopics.PLATFORM.takCotSender("meshsat/broadcast/tak/cot/in/"))
+        assertEquals("", HubTopics.PLATFORM.takCotSender("meshsat/broadcast/tak/cot/in/pixel9a/more"))
+        assertEquals("", HubTopics.PLATFORM.takCotSender("meshsat/broadcast/tak/cot/inpixel9a"))
+        assertEquals("", HubTopics.PLATFORM.takCotSender("meshsat/bridge/pixel9a/tak/cot/out"))
     }
 
     @Test

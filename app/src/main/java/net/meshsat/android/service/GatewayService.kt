@@ -947,7 +947,8 @@ class GatewayService : Service() {
                     handleMqttInbound(topic, payload)
                 }
                 transport.connect(brokerUrl, deviceId, username, password, certPin, certPinBackup,
-                    clientCertPem = clientCert, clientKeyPem = clientKey, caCertPem = caCert)
+                    clientCertPem = clientCert, clientKeyPem = clientKey, caCertPem = caCert,
+                    topicPrefix = settings.hubTopicPrefix.first())
                 mqttTransport = transport
 
                 // Initialize Reticulum MQTT interface (MESHSAT-354)
@@ -1005,6 +1006,7 @@ class GatewayService : Service() {
                 val clientCert = settings.hubClientCertPem.first()
                 val clientKey = settings.hubClientKeyPem.first()
                 val caCert = settings.hubCaCertPem.first()
+                val topicPrefix = settings.hubTopicPrefix.first()
 
                 val config = net.meshsat.android.hub.HubReporterConfig(
                     hubUrl = hubUrl,
@@ -1018,6 +1020,7 @@ class GatewayService : Service() {
                     clientCertPem = clientCert,
                     clientKeyPem = clientKey,
                     caCertPem = caCert,
+                    topicPrefix = topicPrefix,
                 )
 
                 val reporter = net.meshsat.android.hub.HubReporter(
@@ -2434,7 +2437,8 @@ class GatewayService : Service() {
                     val transport = mqttTransport ?: MqttTransport(scope).also { mqttTransport = it }
                     transport.connect(brokerUrl, deviceId,
                         settings.mqttUsername.first(), settings.mqttPassword.first(),
-                        settings.mqttCertPin.first(), settings.mqttCertPinBackup.first())
+                        settings.mqttCertPin.first(), settings.mqttCertPinBackup.first(),
+                        topicPrefix = settings.hubTopicPrefix.first())
                     null
                 }
                 interfaceId.startsWith("aprs") -> {

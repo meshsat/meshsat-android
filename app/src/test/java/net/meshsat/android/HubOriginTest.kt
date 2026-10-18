@@ -51,7 +51,7 @@ class HubOriginTest {
 
     @Test
     fun `a phone number never reaches a topic with its plus sign`() {
-        val topic = HubTopics.deviceMODecoded(HubTopics.segment("+31600000000"))
+        val topic = HubTopics.PLATFORM.deviceMODecoded(HubTopics.segment("+31600000000"))
         assertEquals("meshsat/%2B31600000000/mo/decoded", topic)
         assertFalse(topic.contains("+"))
     }

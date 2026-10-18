@@ -50,52 +50,86 @@ object HubProtocol {
 
 // --- Topic builders ---
 
-object HubTopics {
-    fun bridgeBirth(bridgeID: String) = "meshsat/bridge/$bridgeID/birth"
-    fun bridgeDeath(bridgeID: String) = "meshsat/bridge/$bridgeID/death"
-    fun bridgeHealth(bridgeID: String) = "meshsat/bridge/$bridgeID/health"
-    fun bridgeCmd(bridgeID: String) = "meshsat/bridge/$bridgeID/cmd"
-    fun bridgeCmdResponse(bridgeID: String) = "meshsat/bridge/$bridgeID/cmd/response"
+/**
+ * Every Hub topic under one tenant's root (MESHSAT-1467, HeMB-NG contract C13), as the Bridge's
+ * hubreporter.Topics: "meshsat" for the platform tenant, "meshsat/{tenant}" for an organisation's,
+ * as the provisioning bundle gives it in mqtt_topic_prefix. The broker confines an organisation's
+ * credential to its tenant's root, so a phone on the platform root could publish nothing at all.
+ * [PLATFORM] is the platform tenant's; [of] checks a bundle's prefix.
+ */
+class HubTopics private constructor(val root: String) {
+    fun bridgeBirth(bridgeID: String) = "$root/bridge/$bridgeID/birth"
+    fun bridgeDeath(bridgeID: String) = "$root/bridge/$bridgeID/death"
+    fun bridgeHealth(bridgeID: String) = "$root/bridge/$bridgeID/health"
+    fun bridgeCmd(bridgeID: String) = "$root/bridge/$bridgeID/cmd"
+    fun bridgeCmdResponse(bridgeID: String) = "$root/bridge/$bridgeID/cmd/response"
     /** The Hub's receipt for an MO from one of this bridge's modems (MESHSAT-1246). */
-    fun bridgeMOAck(bridgeID: String) = "meshsat/bridge/$bridgeID/mo/ack"
-    fun deviceBirth(bridgeID: String, deviceID: String) = "meshsat/bridge/$bridgeID/device/$deviceID/birth"
-    fun deviceDeath(bridgeID: String, deviceID: String) = "meshsat/bridge/$bridgeID/device/$deviceID/death"
-    fun devicePosition(deviceID: String) = "meshsat/$deviceID/position"
-    fun deviceTelemetry(deviceID: String) = "meshsat/$deviceID/telemetry"
-    fun deviceSOS(deviceID: String) = "meshsat/$deviceID/sos"
-    fun deviceMODecoded(deviceID: String) = "meshsat/$deviceID/mo/decoded"
+    fun bridgeMOAck(bridgeID: String) = "$root/bridge/$bridgeID/mo/ack"
+    fun deviceBirth(bridgeID: String, deviceID: String) = "$root/bridge/$bridgeID/device/$deviceID/birth"
+    fun deviceDeath(bridgeID: String, deviceID: String) = "$root/bridge/$bridgeID/device/$deviceID/death"
+    fun devicePosition(deviceID: String) = "$root/$deviceID/position"
+    fun deviceTelemetry(deviceID: String) = "$root/$deviceID/telemetry"
+    fun deviceSOS(deviceID: String) = "$root/$deviceID/sos"
+    fun deviceMODecoded(deviceID: String) = "$root/$deviceID/mo/decoded"
 
     /**
      * Where this bridge exports the Cursor-on-Target it builds ("MQTT Export to Hub"). The bridge's
      * own subtree: the broker lets every bridge publish there and nowhere device-shaped for TAK, and
      * the Hub forwards what arrives to the tenant's TAK servers (MESHSAT-1463, meshsat-hub 1458).
      */
-    fun takCotOut(bridgeID: String) = "meshsat/bridge/${segment(bridgeID)}/tak/cot/out"
+    fun takCotOut(bridgeID: String) = "$root/bridge/${segment(bridgeID)}/tak/cot/out"
 
     /**
      * What the Hub delivers back (meshsat-hub MESHSAT-1461): an event from one of the tenant's TAK
      * servers on this topic, and an event another bridge of the tenant exported one level below it,
      * with that bridge's id as the last segment.
      */
-    const val TAK_COT_IN = "meshsat/broadcast/tak/cot/in"
+    val takCotIn: String get() = "$root/broadcast/tak/cot/in"
 
     /** The two subscriptions that receive what the Hub delivers. */
-    fun takCotInFilters(): Array<String> = arrayOf(TAK_COT_IN, "$TAK_COT_IN/+")
+    fun takCotInFilters(): Array<String> = arrayOf(takCotIn, "$takCotIn/+")
 
     /**
      * The bridge that exported a delivered event, as the topic names it (percent-encoded, as
      * [segment] writes it), or "" for an event from a TAK server and for any other topic.
      */
     fun takCotSender(topic: String): String {
-        val prefix = "$TAK_COT_IN/"
+        val prefix = "$takCotIn/"
         if (!topic.startsWith(prefix)) return ""
         val rest = topic.substring(prefix.length)
         return if (rest.isEmpty() || rest.contains('/')) "" else rest
     }
 
-    /** A topic segment as the Hub writes it: + # / % percent-encoded (meshsat-hub hubmqtt.EncodeSegment). */
-    fun segment(id: String): String =
-        id.replace("%", "%25").replace("+", "%2B").replace("#", "%23").replace("/", "%2F")
+    companion object {
+        const val DEFAULT_ROOT = "meshsat"
+
+        /** The platform tenant's topics. */
+        val PLATFORM = HubTopics(DEFAULT_ROOT)
+
+        /** Second topic segments that are not tenants on the Hub (store.ReservedTenantIDs, hubmqtt). */
+        private val RESERVED = setOf("bridge", "hub", "broadcast", "reticulum", "federation", "routed", "relay")
+
+        private fun plainTenant(s: String): Boolean =
+            s.length in 1..64 && s.all { it in 'a'..'z' || it in 'A'..'Z' || it in '0'..'9' || it == '-' || it == '_' }
+
+        /**
+         * The topics for a bundle's mqtt_topic_prefix: blank or "meshsat" is the platform tenant,
+         * "meshsat/{tenant}" an organisation's. Null for anything else (a wildcard, a slash, a dot
+         * or a reserved word there would move the phone onto other topics).
+         */
+        fun of(prefix: String): HubTopics? {
+            val p = prefix.trim()
+            if (p.isEmpty() || p == DEFAULT_ROOT) return PLATFORM
+            if (!p.startsWith("$DEFAULT_ROOT/")) return null
+            val tenant = p.removePrefix("$DEFAULT_ROOT/")
+            if (!plainTenant(tenant) || tenant in RESERVED) return null
+            return HubTopics(p)
+        }
+
+        /** A topic segment as the Hub writes it: + # / % percent-encoded (meshsat-hub hubmqtt.EncodeSegment). */
+        fun segment(id: String): String =
+            id.replace("%", "%25").replace("+", "%2B").replace("#", "%23").replace("/", "%2F")
+    }
 }
 
 // --- Shared types ---

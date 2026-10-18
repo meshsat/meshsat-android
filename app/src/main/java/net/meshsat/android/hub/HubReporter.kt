@@ -51,6 +51,17 @@ class HubReporter(
     /** The name this phone reports to the Hub as, for status lines in the app. */
     val bridgeId: String get() = config.bridgeId
 
+    /**
+     * Every Hub topic, under the tenant's root from the bundle (MESHSAT-1467). Null when the stored
+     * prefix is not a tenant root; then the reporter does not connect, rather than publish on
+     * topics the broker refuses.
+     */
+    private val tenantTopics: HubTopics? = HubTopics.of(config.topicPrefix)
+    private val topics: HubTopics = tenantTopics ?: HubTopics.PLATFORM
+
+    /** The topic root the reporter uses, for the tests. */
+    internal val topicRoot: String get() = topics.root
+
     companion object {
         private const val TAG = "HubReporter"
         private const val QOS_FIRE_AND_FORGET = 0
@@ -122,7 +133,7 @@ class HubReporter(
         }
         return try {
             c.publish(
-                HubTopics.deviceMODecoded(device),
+                topics.deviceMODecoded(device),
                 MqttMessage(decoded.toString().toByteArray(StandardCharsets.UTF_8)).apply { qos = QOS_AT_LEAST_ONCE },
             )
             true
@@ -141,6 +152,12 @@ class HubReporter(
     fun start() {
         if (config.hubUrl.isBlank() || config.bridgeId.isBlank()) {
             Log.w(TAG, "Cannot start: Hub URL or bridge ID not configured")
+            return
+        }
+        if (tenantTopics == null) {
+            _lastError.value = "The topic root \"${config.topicPrefix}\" is not meshsat or meshsat/<tenant>"
+            _state.value = State.Error
+            Log.w(TAG, "Cannot start: ${_lastError.value}")
             return
         }
         _state.value = State.Connecting
@@ -194,7 +211,7 @@ class HubReporter(
                     // Set LWT (Last Will and Testament) — death message on ungraceful disconnect
                     val lwt = BridgeDeath(bridgeId = config.bridgeId, reason = "lwt")
                     setWill(
-                        HubTopics.bridgeDeath(config.bridgeId),
+                        topics.bridgeDeath(config.bridgeId),
                         lwt.toJson().toString().toByteArray(StandardCharsets.UTF_8),
                         QOS_AT_LEAST_ONCE,
                         false,
@@ -323,7 +340,7 @@ class HubReporter(
                 // Publish bridge death
                 val death = BridgeDeath(bridgeId = config.bridgeId, reason = "shutdown")
                 publish(
-                    HubTopics.bridgeDeath(config.bridgeId),
+                    topics.bridgeDeath(config.bridgeId),
                     QOS_AT_LEAST_ONCE,
                     retained = false,
                     death.toJson().toString(),
@@ -347,7 +364,7 @@ class HubReporter(
     /** Publish a ping message and return delivery time in ms. Throws on failure. */
     fun ping(): Long {
         val c = client ?: throw IllegalStateException("Not connected")
-        val topic = HubTopics.bridgeHealth(config.bridgeId)
+        val topic = topics.bridgeHealth(config.bridgeId)
         val start = System.currentTimeMillis()
         val msg = org.eclipse.paho.client.mqttv3.MqttMessage("{\"ping\":true}".toByteArray())
         msg.qos = 1
@@ -361,7 +378,7 @@ class HubReporter(
     fun publishDeviceBirth(birth: DeviceBirth) {
         activeDevices.add(birth.deviceId)
         publish(
-            HubTopics.deviceBirth(config.bridgeId, birth.deviceId),
+            topics.deviceBirth(config.bridgeId, birth.deviceId),
             QOS_AT_LEAST_ONCE,
             retained = false,
             birth.toJson().toString(),
@@ -377,7 +394,7 @@ class HubReporter(
             reason = reason,
         )
         publish(
-            HubTopics.deviceDeath(config.bridgeId, deviceId),
+            topics.deviceDeath(config.bridgeId, deviceId),
             QOS_AT_LEAST_ONCE,
             retained = false,
             death.toJson().toString(),
@@ -389,7 +406,7 @@ class HubReporter(
     /** Publish device position to meshsat/{deviceId}/position. */
     fun publishDevicePosition(deviceId: String, position: DevicePosition) {
         publish(
-            HubTopics.devicePosition(deviceId),
+            topics.devicePosition(deviceId),
             QOS_AT_LEAST_ONCE,
             retained = true,
             position.toJson().toString(),
@@ -402,13 +419,13 @@ class HubReporter(
      * not be sent when it was true is not worth sending later (MESHSAT-1463).
      */
     fun publishTakCot(xml: String) {
-        publish(HubTopics.takCotOut(config.bridgeId), QOS_AT_LEAST_ONCE, retained = false, xml)
+        publish(topics.takCotOut(config.bridgeId), QOS_AT_LEAST_ONCE, retained = false, xml)
     }
 
     /** Publish device telemetry to meshsat/{deviceId}/telemetry. */
     fun publishDeviceTelemetry(deviceId: String, telemetry: DeviceTelemetry) {
         publish(
-            HubTopics.deviceTelemetry(deviceId),
+            topics.deviceTelemetry(deviceId),
             QOS_AT_LEAST_ONCE,
             retained = true,
             telemetry.toJson().toString(),
@@ -460,9 +477,9 @@ class HubReporter(
         }
         return try {
             if (asMessage) {
-                c.publish(HubTopics.deviceMODecoded(device), MqttMessage(decoded.toString().toByteArray(StandardCharsets.UTF_8)).apply { qos = QOS_AT_LEAST_ONCE })
+                c.publish(topics.deviceMODecoded(device), MqttMessage(decoded.toString().toByteArray(StandardCharsets.UTF_8)).apply { qos = QOS_AT_LEAST_ONCE })
             }
-            c.publish(HubTopics.deviceSOS(device), MqttMessage(event.toString().toByteArray(StandardCharsets.UTF_8)).apply { qos = QOS_AT_LEAST_ONCE })
+            c.publish(topics.deviceSOS(device), MqttMessage(event.toString().toByteArray(StandardCharsets.UTF_8)).apply { qos = QOS_AT_LEAST_ONCE })
             true
         } catch (e: Exception) {
             Log.w(TAG, "SOS publish to the Hub failed: ${e.message}")
@@ -473,7 +490,7 @@ class HubReporter(
     /** Respond to a Hub command. */
     fun publishCommandResponse(response: CommandResponse) {
         publish(
-            HubTopics.bridgeCmdResponse(config.bridgeId),
+            topics.bridgeCmdResponse(config.bridgeId),
             QOS_AT_LEAST_ONCE,
             retained = false,
             response.toJson().toString(),
@@ -484,11 +501,11 @@ class HubReporter(
 
     /** Subscribe to the command topic and what the Hub delivers of TAK, then publish the birth. */
     private fun subscribeAndAnnounce(c: MqttClient) {
-        val topics = arrayOf(
-            HubTopics.bridgeCmd(config.bridgeId),
-            HubTopics.bridgeMOAck(config.bridgeId),
-        ) + HubTopics.takCotInFilters()
-        c.subscribe(topics, IntArray(topics.size) { QOS_AT_LEAST_ONCE })
+        val filters = arrayOf(
+            topics.bridgeCmd(config.bridgeId),
+            topics.bridgeMOAck(config.bridgeId),
+        ) + topics.takCotInFilters()
+        c.subscribe(filters, IntArray(filters.size) { QOS_AT_LEAST_ONCE })
         publishBirth()
     }
 
@@ -515,7 +532,7 @@ class HubReporter(
         }
 
         publish(
-            HubTopics.bridgeBirth(config.bridgeId),
+            topics.bridgeBirth(config.bridgeId),
             QOS_AT_LEAST_ONCE,
             retained = true,
             birthJson.toString(),
@@ -578,7 +595,7 @@ class HubReporter(
             interfaces = ifaceHealthList,
         )
         publish(
-            HubTopics.bridgeHealth(config.bridgeId),
+            topics.bridgeHealth(config.bridgeId),
             QOS_FIRE_AND_FORGET,
             retained = false,
             health.toJson().toString(),
@@ -593,7 +610,7 @@ class HubReporter(
         // tenant exported. What this bridge exported itself comes back on the topic that names it as
         // the sender, and is dropped by that topic (MESHSAT-1463).
         if (topic.contains("/tak/cot/in")) {
-            if (isOwnTakExport(topic, config.bridgeId)) return
+            if (isOwnTakExport(topic, config.bridgeId, topics)) return
             onTakCot?.invoke(payload)
             return
         }
@@ -832,6 +849,8 @@ data class HubReporterConfig(
     val clientCertPem: String = "",
     val clientKeyPem: String = "",
     val caCertPem: String = "",
+    /** The tenant's topic root from the bundle (mqtt_topic_prefix); blank = the platform tenant. */
+    val topicPrefix: String = "",
 )
 
 /**
@@ -840,8 +859,8 @@ data class HubReporterConfig(
  * a TLS or DNS error). Pure, so it has a test.
  */
 /** Whether a delivered TAK event is one this bridge exported itself, by the topic it arrived on. */
-internal fun isOwnTakExport(topic: String, bridgeId: String): Boolean {
-    val sender = HubTopics.takCotSender(topic)
+internal fun isOwnTakExport(topic: String, bridgeId: String, topics: HubTopics = HubTopics.PLATFORM): Boolean {
+    val sender = topics.takCotSender(topic)
     return sender.isNotEmpty() && sender == HubTopics.segment(bridgeId)
 }
 

@@ -42,6 +42,8 @@ object ProvisionImporter {
         val caCertPem: String,
         val certExpiry: String,
         val reticulumTcp: String,
+        /** The tenant's topic root ("meshsat" or "meshsat/<tenant>"; MESHSAT-1467). */
+        val topicPrefix: String = "",
     )
 
     /** Check if a scanned string is a provisioning URL. */
@@ -198,7 +200,7 @@ object ProvisionImporter {
     }
 
     /** Parse the JSON bundle returned by the claim endpoint. */
-    private fun parseBundle(jsonStr: String): ProvisionBundle {
+    internal fun parseBundle(jsonStr: String): ProvisionBundle {
         val json = JSONObject(jsonStr)
         val v = json.optString("v", "1")
         return ProvisionBundle(
@@ -212,6 +214,7 @@ object ProvisionImporter {
             caCertPem = json.optString("ca", ""),
             certExpiry = json.optString("cert_exp", ""),
             reticulumTcp = json.optString("ret_tcp", ""),
+            topicPrefix = json.optString("mqtt_topic_prefix", ""),
         )
     }
 
@@ -225,6 +228,9 @@ object ProvisionImporter {
         // Hub MQTT settings
         settings.setHubUrl(bundle.mqttUrl)
         settings.setHubBridgeId(bundle.bridgeId)
+        // Always written, so a phone moved from an organisation back to the platform tenant leaves
+        // the old root behind (MESHSAT-1467).
+        settings.setHubTopicPrefix(bundle.topicPrefix)
         settings.setHubUsername(bundle.username)
         settings.setHubPassword(bundle.password)
         settings.setHubEnabled(true)

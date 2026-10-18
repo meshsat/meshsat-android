@@ -66,11 +66,20 @@ class MqttTransport(
         clientCertPem: String = "",
         clientKeyPem: String = "",
         caCertPem: String = "",
+        /** The tenant's topic root from the Hub's bundle; blank = the platform tenant (MESHSAT-1467). */
+        topicPrefix: String = "",
     ) {
         if (brokerUrl.isBlank() || deviceId.isBlank()) {
             Log.w(TAG, "Cannot connect: broker URL or device ID is blank")
             return
         }
+        val tenant = net.meshsat.android.hub.HubTopics.of(topicPrefix)
+        if (tenant == null) {
+            Log.w(TAG, "Cannot connect: the topic root \"$topicPrefix\" is not meshsat or meshsat/<tenant>")
+            _state.value = State.Error
+            return
+        }
+        root = tenant.root
         this.deviceId = deviceId
         // A reconnect replaces the client: the old one is closed, not left reconnecting
         // under the same client id (MESHSAT-1305).
@@ -305,17 +314,23 @@ class MqttTransport(
 
     // --- Topic helpers ---
 
-    private fun topicPosition() = "meshsat/$deviceId/position"
-    private fun topicSOS() = "meshsat/$deviceId/sos"
-    private fun topicTelemetry() = "meshsat/$deviceId/telemetry"
-    private fun topicMODecoded() = "meshsat/$deviceId/mo/decoded"
-    private fun topicHealth() = "meshsat/$deviceId/status/health"
-    private fun topicMTSend() = "meshsat/$deviceId/mt/send"
-    private fun topicTAKInbound() = "meshsat/$deviceId/tak/cot/in"
-    private fun topicTAKBroadcast() = "meshsat/broadcast/tak/cot/in"
-    private fun topicConfigUpdate() = "meshsat/$deviceId/config/update"
-    private fun topicSmsInbound() = "meshsat/$deviceId/sms/inbound"
-    private fun topicSmsOutbound() = "meshsat/$deviceId/sms/outbound"
-    private fun topicReticulumRx() = "meshsat/$deviceId/reticulum/rx"
+    /** The tenant's topic root (MESHSAT-1467); the Reticulum route hints stay the Hub's own. */
+    @Volatile private var root = net.meshsat.android.hub.HubTopics.DEFAULT_ROOT
+
+    /** The topic root of the last connect, for the tests. */
+    internal val topicRoot: String get() = root
+
+    private fun topicPosition() = "$root/$deviceId/position"
+    private fun topicSOS() = "$root/$deviceId/sos"
+    private fun topicTelemetry() = "$root/$deviceId/telemetry"
+    private fun topicMODecoded() = "$root/$deviceId/mo/decoded"
+    private fun topicHealth() = "$root/$deviceId/status/health"
+    private fun topicMTSend() = "$root/$deviceId/mt/send"
+    private fun topicTAKInbound() = "$root/$deviceId/tak/cot/in"
+    private fun topicTAKBroadcast() = "$root/broadcast/tak/cot/in"
+    private fun topicConfigUpdate() = "$root/$deviceId/config/update"
+    private fun topicSmsInbound() = "$root/$deviceId/sms/inbound"
+    private fun topicSmsOutbound() = "$root/$deviceId/sms/outbound"
+    private fun topicReticulumRx() = "$root/$deviceId/reticulum/rx"
     private fun topicReticulumRoutes() = "meshsat/reticulum/routes"
 }
