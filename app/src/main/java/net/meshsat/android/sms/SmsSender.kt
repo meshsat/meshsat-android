@@ -42,7 +42,7 @@ object SmsSender {
     // The play edition declares no SMS permission, so lint sees these SmsManager calls as
     // unguarded; SmsCapability.manager answers null there and nothing is ever sent (MESHSAT-1335).
     @SuppressLint("MissingPermission")
-    fun send(
+    suspend fun send(
         context: Context,
         to: String,
         text: String,

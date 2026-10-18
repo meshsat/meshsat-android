@@ -3,9 +3,11 @@ package net.meshsat.android
 import kotlinx.coroutines.runBlocking
 import net.meshsat.android.data.SmsPartReport
 import net.meshsat.android.data.SmsPartReportDao
+import net.meshsat.android.data.SmsSend
 import net.meshsat.android.sms.SmsCompletion
 import net.meshsat.android.sms.SmsPartKey
 import net.meshsat.android.sms.SmsPartLedger
+import net.meshsat.android.sms.SmsReceipt
 import net.meshsat.android.sms.SmsReport
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -57,9 +59,13 @@ class HembNgFixturesTest {
 
     private class Table : SmsPartReportDao {
         val rows = mutableMapOf<Pair<String, Int>, SmsPartReport>()
+        val sends = mutableMapOf<String, SmsSend>()
         override suspend fun partsOf(attempt: String) = rows.values.filter { it.attempt == attempt }
         override suspend fun put(report: SmsPartReport) { rows[report.attempt to report.part] = report }
         override suspend fun pruneBefore(before: Long) = 0
+        override suspend fun register(send: SmsSend): Long { sends.putIfAbsent(send.attempt, send); return 1 }
+        override suspend fun sendOf(attempt: String) = sends[attempt]
+        override suspend fun pruneSendsBefore(before: Long) = 0
     }
 
     @Test
@@ -68,6 +74,7 @@ class HembNgFixturesTest {
         assertTrue(vectors.size >= 8)
         for ((parts, reports, want) in vectors) {
             val table = Table()
+            SmsPartLedger.register(table, "send", parts.toInt(), SmsReceipt(), now = 1_000L)
             var last = SmsCompletion.Open
             for (r in reports.split(',')) {
                 val (part, state) = r.split(':')

@@ -29,8 +29,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         TelemetryEntity::class,
         ContactEntity::class,
         SmsPartReport::class,
+        SmsSend::class,
     ],
-    version = 19,
+    version = 20,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -247,6 +248,19 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /** Migration 19→20: each SMS send's part count and owner, fixed before it goes out [MESHSAT-1584]. */
+        val MIGRATION_19_20 = object : Migration(19, 20) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Room's own CREATE statement for SmsSend (AppDatabase_Impl), as for contacts below.
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `sms_sends` (" +
+                        "`attempt` TEXT NOT NULL, `parts` INTEGER NOT NULL, " +
+                        "`message_id` INTEGER NOT NULL, `delivery_id` INTEGER NOT NULL, " +
+                        "`created_at` INTEGER NOT NULL, PRIMARY KEY(`attempt`))"
+                )
+            }
+        }
+
         /** Cards handed over by QR code (MESHSAT-566, 575); nothing else changes. */
         val MIGRATION_16_17 = object : Migration(16, 17) {
             override fun migrate(db: SupportSQLiteDatabase) {
@@ -267,21 +281,20 @@ abstract class AppDatabase : RoomDatabase() {
 
         fun getInstance(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
-                INSTANCE ?: Room.databaseBuilder(
-                    context.applicationContext,
-                    AppDatabase::class.java,
-                    "meshsat.db"
-                )
-                    .addMigrations(
-                        MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9,
-                        MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13,
-                        MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16,
-                        MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19,
-                    )
-                    .fallbackToDestructiveMigration()
-                    .build()
-                    .also { INSTANCE = it }
+                INSTANCE ?: build(context, "meshsat.db").also { INSTANCE = it }
             }
         }
+
+        /** The app's database under [name], with every migration; tests open their own file. */
+        fun build(context: Context, name: String): AppDatabase =
+            Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, name)
+                .addMigrations(
+                    MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9,
+                    MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13,
+                    MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16,
+                    MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20,
+                )
+                .fallbackToDestructiveMigration()
+                .build()
     }
 }

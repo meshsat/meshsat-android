@@ -40,26 +40,9 @@ class SmsStatusReceiver : BroadcastReceiver() {
                     ACTION_SENT -> if (messageId > 0) {
                         db.messageDao().setForwardedToUnlessDelivered(messageId, if (code == Activity.RESULT_OK) SENT else FAILED)
                     }
-                    ACTION_DELIVERED -> {
-                        val completion = when {
-                            report == null -> SmsCompletion.Open // unreadable: keep what it says
-                            key != null -> SmsPartLedger.record(db.smsPartReportDao(), key, report, messageId, deliveryId)
-                            // A report asked for before per-part reports, on the last part only: it
-                            // says nothing about the other parts (MESHSAT-1584).
-                            report == SmsReport.Failed -> SmsCompletion.Failed
-                            else -> SmsCompletion.Open
-                        }
-                        when (completion) {
-                            SmsCompletion.Delivered -> {
-                                if (messageId > 0) db.messageDao().setForwardedTo(messageId, DELIVERED)
-                                // Every part reached the handset: the record says delivered, not
-                                // only acked with its status left at sent (MESHSAT-1584).
-                                if (deliveryId > 0) db.messageDeliveryDao().setAcked(deliveryId)
-                            }
-                            SmsCompletion.Failed -> if (messageId > 0) db.messageDao().setForwardedTo(messageId, FAILED)
-                            SmsCompletion.Open -> Unit // a part is still pending or unconfirmed
-                        }
-                    }
+                    // The part's evidence and the outcome in one transaction (MESHSAT-1584);
+                    // an unreadable report keeps what the records say.
+                    ACTION_DELIVERED -> if (report != null) SmsReceipts.apply(db, key, report, messageId, deliveryId)
                 }
             } catch (e: Exception) {
                 Log.w("SmsStatus", "Could not record an SMS status: ${e.message}")
@@ -106,11 +89,19 @@ class SmsStatusReceiver : BroadcastReceiver() {
         /**
          * The carrier's delivery report on every part of one send, for a chat message or a queued
          * delivery: one intent per part, under a new id for this send, so the receiver can tell
-         * the parts and the sends apart (MESHSAT-1584). Mutable because Android adds the report's
-         * PDU to the intent; explicit (our own receiver), as a mutable PendingIntent must be.
+         * the parts and the sends apart (MESHSAT-1584). The send is registered first with its part
+         * count and owner; if that fails, no report is asked for and the message stays at sent.
+         * Mutable because Android adds the report's PDU to the intent; explicit (our own
+         * receiver), as a mutable PendingIntent must be.
          */
-        fun deliveredIntents(context: Context, receipt: SmsReceipt, parts: Int): ArrayList<PendingIntent> {
+        suspend fun deliveredIntents(context: Context, receipt: SmsReceipt, parts: Int): ArrayList<PendingIntent>? {
             val attempt = UUID.randomUUID().toString()
+            try {
+                SmsPartLedger.register(AppDatabase.getInstance(context).smsPartReportDao(), attempt, parts, receipt)
+            } catch (e: Exception) {
+                Log.w("SmsStatus", "Could not register an SMS send; no delivery report asked for: ${e.message}")
+                return null
+            }
             return ArrayList(
                 List(parts) { part ->
                     PendingIntent.getBroadcast(
