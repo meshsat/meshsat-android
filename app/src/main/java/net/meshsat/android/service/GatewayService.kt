@@ -2700,12 +2700,9 @@ class GatewayService : Service() {
                     }
                 }
                 // A satellite send that reported a failure after the upload may have arrived: the chat
-                // shows "May have been sent" until a retry is confirmed (MESHSAT-1243).
-                disp.onUnconfirmed = { del, _ ->
-                    if (del.channel == "iridium_0" && del.msgRef.startsWith("msg:")) {
-                        del.msgRef.removePrefix("msg:").toLongOrNull()?.let { db.messageDao().setForwardedTo(it, IRIDIUM_UNCONFIRMED) }
-                    }
-                }
+                // shows "May have been sent" until a retry is confirmed (MESHSAT-1243), never over the
+                // Hub's receipt for an earlier session (FE-R5).
+                disp.onUnconfirmed = { del, _ -> SatelliteChat.unconfirmed(db.messageDao(), del) }
                 disp.start(interfaces)
                 dispatcher = disp
 
@@ -4115,16 +4112,8 @@ class GatewayService : Service() {
      * acknowledged, and a chat message gets its second tick.
      */
     private suspend fun onHubReceipt(imei: String, momsn: Int) {
-        val ref = "$imei:$momsn"
-        val dao = db.messageDeliveryDao()
-        val rows = dao.getBySatRef(ref)
-        if (rows.isEmpty()) return
-        dao.markAckedBySatRef(ref)
-        for (del in rows) {
-            val msgId = del.msgRef.removePrefix("msg:").toLongOrNull()
-            if (del.msgRef.startsWith("msg:") && msgId != null) db.messageDao().setForwardedTo(msgId, IRIDIUM_DELIVERED)
-        }
-        Log.i("MeshSat", "The Hub has MOMSN $momsn: ${rows.size} delivery(ies) confirmed")
+        val confirmed = SatelliteChat.hubReceipt(db, "$imei:$momsn")
+        if (confirmed > 0) Log.i("MeshSat", "The Hub has MOMSN $momsn: $confirmed delivery(ies) confirmed")
     }
 
     // --- SOS (MESHSAT-1249) ---
