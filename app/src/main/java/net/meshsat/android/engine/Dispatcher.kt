@@ -150,15 +150,24 @@ class Dispatcher(
     // Per-interface worker jobs
     private val workers = ConcurrentHashMap<String, Job>()
 
+    // The start-up repair; workers send nothing before it is done ([start]).
+    @Volatile private var recovery: Job? = null
+
     /**
      * Start the dispatcher: launch per-interface workers and background reapers.
      * @param interfaces Map of interface ID → channel type for all enabled interfaces.
      */
     fun start(interfaces: Map<String, String>) {
-        scope.launch {
+        // Done before any worker takes a row: a recovery that ran after a worker's claim would set
+        // that live send back to retry, and its outcome would then find the row taken (FE-R4).
+        recovery = scope.launch {
             // Cancel runaway deliveries
             val cancelled = deliveryDao.cancelRunaway()
             if (cancelled > 0) Log.w(TAG, "Cancelled $cancelled runaway deliveries")
+
+            // A confirmed delivery an older worker set back to retry is sent, not sent again
+            val settled = deliveryDao.settleConfirmed()
+            if (settled > 0) Log.i(TAG, "Settled $settled confirmed deliveries that were left waiting")
 
             // Recover stale 'sending' deliveries
             val recovered = deliveryDao.recoverStale()
@@ -202,6 +211,7 @@ class Dispatcher(
             // Poll loop
             while (isActive) {
                 delay(2.seconds)
+                recovery?.join()
                 processBatch(interfaceId)
             }
         }
@@ -410,10 +420,14 @@ class Dispatcher(
         // Re-check status (may have changed)
         val fresh = deliveryDao.getById(del.id) ?: return true
         if (fresh.status in listOf("sent", "dead", "cancelled", "delivered")) return true
+        // The checks before a send read the row; what they write changes it only while it still
+        // waits and is not confirmed (review 2026-10-18 23:31, FE-R4), so a delivery report or a
+        // cancel that commits meanwhile is never overwritten.
         if (mayDeliver?.invoke(fresh) == false) {
-            deliveryDao.setStatus(del.id, "dead", "cancelled")
-            audit("drop", channelId, fresh, "cancelled")
-            Log.i(TAG, "Delivery ${del.id} stopped: ${fresh.msgRef} was cancelled")
+            if (deliveryDao.dropWaiting(del.id, "dead", "cancelled") > 0) {
+                audit("drop", channelId, fresh, "cancelled")
+                Log.i(TAG, "Delivery ${del.id} stopped: ${fresh.msgRef} was cancelled")
+            }
             return true
         }
 
@@ -422,15 +436,16 @@ class Dispatcher(
             val egressMsg = RouteMessage(text = del.textPreview)
             val matches = accessEvaluator.evaluateEgress(channelId, egressMsg)
             if (matches.isEmpty()) {
-                deliveryDao.setStatus(del.id, "denied", "egress rules denied")
-                Log.i(TAG, "Delivery ${del.id} denied by egress rules on $channelId")
+                if (deliveryDao.dropWaiting(del.id, "denied", "egress rules denied") > 0) {
+                    Log.i(TAG, "Delivery ${del.id} denied by egress rules on $channelId")
+                }
                 return true
             }
         }
 
         // TTL check before send (P0 exempt)
         if (del.priority > 0 && del.expiresAt != null && System.currentTimeMillis() > del.expiresAt) {
-            deliveryDao.setStatus(del.id, "expired", "TTL expired before send")
+            deliveryDao.dropWaiting(del.id, "expired", "TTL expired before send")
             return true
         }
 
@@ -438,7 +453,11 @@ class Dispatcher(
         // stopped meanwhile. Cancelled mid-send, the row stayed 'sending' until the app restarted,
         // and a satellite session that did go out would have been sent (and billed) again.
         return withContext(NonCancellable) {
-            deliveryDao.setStatus(del.id, "sending")
+            // The row is taken for this send in one statement, only while it still waits and is
+            // not confirmed (FE-R4): one confirmed, cancelled or held since it was read is not sent.
+            // Every later write of this send matches only a row that is still 'sending', so a
+            // delivery report that commits while the send is out is never undone.
+            if (deliveryDao.claimForSend(del.id) == 0) return@withContext true
 
             val payload = del.payload ?: del.textPreview.toByteArray()
             val error = deliveryCallback.deliver(
@@ -454,17 +473,23 @@ class Dispatcher(
                     // Trying again cannot help (a message too long for the link): stop here,
                     // rather than spend every retry and the queue's patience on it.
                     val why = error.removePrefix(NEVER).trim()
-                    deliveryDao.setStatus(del.id, "dead", why)
-                    audit("drop", channelId, del, why.take(80))
-                    Log.w(TAG, "Delivery ${del.id} can never go by $channelId: $why")
+                    if (deliveryDao.finishSend(del.id, "dead", why) == 0) {
+                        Log.i(TAG, "Delivery ${del.id} can never go by $channelId, but it was confirmed meanwhile: it stays so")
+                    } else {
+                        audit("drop", channelId, del, why.take(80))
+                        Log.w(TAG, "Delivery ${del.id} can never go by $channelId: $why")
+                    }
                     true
                 }
                 error.startsWith(NOT_NOW) -> {
                     // Not this message's failure (the satellite modem's pause after a session found
                     // no network): wait it out without counting a try.
                     val waitMs = error.removePrefix(NOT_NOW).substringBefore(' ').toLongOrNull() ?: 60_000L
-                    deliveryDao.deferRetry(del.id, System.currentTimeMillis() + waitMs, error)
-                    Log.i(TAG, "Delivery ${del.id} waits ${waitMs / 1000} s: $channelId cannot send now")
+                    if (deliveryDao.deferRetry(del.id, System.currentTimeMillis() + waitMs, error) == 0) {
+                        Log.i(TAG, "Delivery ${del.id} was confirmed meanwhile: it does not wait for $channelId")
+                    } else {
+                        Log.i(TAG, "Delivery ${del.id} waits ${waitMs / 1000} s: $channelId cannot send now")
+                    }
                     false
                 }
                 else -> {
@@ -485,9 +510,17 @@ class Dispatcher(
     private suspend fun handleSuccess(channelId: String, del: MessageDeliveryEntity) {
         // Assign egress sequence number
         val seqNum = sequenceTracker.nextEgressSeq(channelId)
-        deliveryDao.setSeqNum(del.id, seqNum)
 
-        deliveryDao.setStatus(del.id, "sent")
+        // For QoS >= 1, mark ACK as pending (at-least-once semantics). Not on the mesh: the
+        // ledger's mesh sends are broadcasts, which never ask for an ACK (MESHSAT-1112), so none can
+        // come; waiting for one made every mesh send "No confirmation came back" after 30 s. It
+        // stays sent: accepted by the radio, not confirmed (MESHSAT-1584).
+        val ackPending = del.qosLevel >= 1 && !channelId.startsWith("mesh")
+        // Sent, the sequence number and the ACK wait in one statement, and only while this send
+        // still holds the row (FE-R4): a delivery report that came in first stays, and one that comes
+        // later finds the row sent and confirms it. They were three writes, and a report between
+        // them ended as sent with an ACK still pending, then timed out.
+        val held = deliveryDao.markSent(del.id, seqNum, ackPending) > 0
         audit("deliver", channelId, del)
         try {
             onSent?.invoke(del)
@@ -500,22 +533,19 @@ class Dispatcher(
         val woke = deliveryDao.retryNowForChannel(channelId)
         if (woke > 0) Log.i(TAG, "$woke more deliveries for $channelId are due now: a send just worked")
 
-        // For QoS >= 1, mark ACK as pending (at-least-once semantics). Not on the mesh: the
-        // ledger's mesh sends are broadcasts, which never ask for an ACK (MESHSAT-1112), so none can
-        // come; waiting for one made every mesh send "No confirmation came back" after 30 s. It
-        // stays sent: accepted by the radio, not confirmed (MESHSAT-1584).
-        if (del.qosLevel >= 1 && !channelId.startsWith("mesh")) {
-            deliveryDao.setAckPending(del.id)
-            Log.i(TAG, "Delivery ${del.id} sent to $channelId (seq=$seqNum, ack=pending)")
-        } else {
-            Log.i(TAG, "Delivery ${del.id} sent to $channelId (seq=$seqNum, qos=0)")
+        when {
+            !held -> Log.i(TAG, "Delivery ${del.id} sent to $channelId (seq=$seqNum); it was confirmed meanwhile and stays so")
+            ackPending -> Log.i(TAG, "Delivery ${del.id} sent to $channelId (seq=$seqNum, ack=pending)")
+            else -> Log.i(TAG, "Delivery ${del.id} sent to $channelId (seq=$seqNum, qos=0)")
         }
     }
 
     private suspend fun handleFailure(channelId: String, del: MessageDeliveryEntity, error: String) {
+        // Each write below changes the row only while this send holds it (FE-R4): a delivery an
+        // earlier send's report confirmed while this one was out is not retried and not dropped.
         // QoS 0: no retry
         if (del.qosLevel == 0) {
-            deliveryDao.setStatus(del.id, "dead", error)
+            if (deliveryDao.finishSend(del.id, "dead", error) == 0) return confirmedMeanwhile(channelId, del, error)
             audit("drop", channelId, del, error.take(80))
             Log.i(TAG, "QoS 0 delivery ${del.id} failed (no retry): $error")
             return
@@ -523,7 +553,7 @@ class Dispatcher(
 
         val newRetries = del.retries + 1
         if (del.maxRetries > 0 && newRetries >= del.maxRetries) {
-            deliveryDao.setStatus(del.id, "dead", error)
+            if (deliveryDao.finishSend(del.id, "dead", error) == 0) return confirmedMeanwhile(channelId, del, error)
             audit("drop", channelId, del, error.take(80))
             Log.w(TAG, "Delivery ${del.id} exhausted retries ($newRetries): $error")
             return
@@ -531,8 +561,12 @@ class Dispatcher(
 
         // Schedule retry with backoff
         val nextRetry = calculateNextRetry(channelId, newRetries, del.priority, moStatusOf(error))
-        deliveryDao.scheduleRetry(del.id, newRetries, nextRetry, error)
+        if (deliveryDao.scheduleRetry(del.id, newRetries, nextRetry, error) == 0) return confirmedMeanwhile(channelId, del, error)
         Log.w(TAG, "Delivery ${del.id} retry $newRetries scheduled for $channelId: $error")
+    }
+
+    private fun confirmedMeanwhile(channelId: String, del: MessageDeliveryEntity, error: String) {
+        Log.i(TAG, "Delivery ${del.id}: this send by $channelId failed ($error), but the delivery was confirmed meanwhile: no retry")
     }
 
     /**

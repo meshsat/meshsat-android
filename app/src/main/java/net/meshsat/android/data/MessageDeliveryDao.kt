@@ -14,25 +14,88 @@ interface MessageDeliveryDao {
     @Query("SELECT * FROM message_deliveries WHERE id = :id")
     suspend fun getById(id: Long): MessageDeliveryEntity?
 
+    /** What the worker may send now. Never a delivery the far end has confirmed (FE-R4, below). */
     @Query("""
         SELECT * FROM message_deliveries
         WHERE channel = :channel AND status IN ('queued', 'retry')
           AND (next_retry IS NULL OR next_retry <= :now)
           AND (priority = 0 OR expires_at IS NULL OR expires_at > :now)
+          AND COALESCE(ack_status, '') != 'acked'
         ORDER BY priority ASC, created_at ASC
         LIMIT :limit
     """)
     suspend fun getPending(channel: String, now: Long, limit: Int = 10): List<MessageDeliveryEntity>
 
+    /** The LXMF ledger's state (GatewayService); the delivery worker writes through the guarded calls below. */
     @Query("UPDATE message_deliveries SET status = :status, last_error = :lastError, updated_at = :now WHERE id = :id")
     suspend fun setStatus(id: Long, status: String, lastError: String = "", now: Long = System.currentTimeMillis())
 
-    @Query("UPDATE message_deliveries SET status = 'retry', retries = :retries, next_retry = :nextRetry, last_error = :lastError, updated_at = :now WHERE id = :id")
-    suspend fun scheduleRetry(id: Long, retries: Int, nextRetry: Long, lastError: String, now: Long = System.currentTimeMillis())
+    // --- The delivery worker's writes (review 2026-10-18 23:31, FE-R4, MESHSAT-1584) ---
+    //
+    // A confirmation (an SMS delivery report, an ACK, the Hub's satellite receipt) can commit at any
+    // moment while a send is in flight, from another thread. The worker therefore takes a row in one
+    // statement ([claimForSend]) and every later write of that send matches only a row that is still
+    // 'sending'. Every confirmation moves the row out of 'sending' in its own statement ([setAcked],
+    // [markAckedBySatRef]), so the worker's later writes find nothing to change and a confirmed
+    // delivery is never set back to sent, pending, retry or dead. No transaction is held while a send
+    // waits for the modem or the carrier.
 
-    /** Wait until [nextRetry] without counting a try: the channel could not take it just now. */
-    @Query("UPDATE message_deliveries SET status = 'retry', next_retry = :nextRetry, last_error = :lastError, updated_at = :now WHERE id = :id")
-    suspend fun deferRetry(id: Long, nextRetry: Long, lastError: String, now: Long = System.currentTimeMillis())
+    /**
+     * Take a waiting delivery for one send. Returns 0 when it is no longer waiting (confirmed,
+     * cancelled, held or taken since it was read); then nothing is sent.
+     */
+    @Query("""
+        UPDATE message_deliveries SET status = 'sending', updated_at = :now
+        WHERE id = :id AND status IN ('queued', 'retry') AND COALESCE(ack_status, '') != 'acked'
+    """)
+    suspend fun claimForSend(id: Long, now: Long = System.currentTimeMillis()): Int
+
+    /**
+     * The send went out: sent, its sequence number and, when [ackPending], the wait for its ACK, in
+     * one statement. Returns 0 when a confirmation came in first; it stays.
+     */
+    @Query("""
+        UPDATE message_deliveries
+        SET status = 'sent', seq_num = :seqNum, last_error = '',
+            ack_status = CASE WHEN :ackPending AND COALESCE(ack_status, '') != 'acked' THEN 'pending' ELSE ack_status END,
+            ack_timestamp = CASE WHEN :ackPending AND COALESCE(ack_status, '') != 'acked' THEN :now ELSE ack_timestamp END,
+            updated_at = :now
+        WHERE id = :id AND status = 'sending'
+    """)
+    suspend fun markSent(id: Long, seqNum: Long, ackPending: Boolean, now: Long = System.currentTimeMillis()): Int
+
+    /**
+     * A waiting delivery stops before it is sent ('dead' when cancelled, 'denied', 'expired'). 0 when
+     * it was confirmed, cancelled or taken since it was read.
+     */
+    @Query("""
+        UPDATE message_deliveries SET status = :status, last_error = :lastError, updated_at = :now
+        WHERE id = :id AND status IN ('queued', 'retry') AND COALESCE(ack_status, '') != 'acked'
+    """)
+    suspend fun dropWaiting(id: Long, status: String, lastError: String, now: Long = System.currentTimeMillis()): Int
+
+    /** This send ends for good ('dead'). 0 when it was confirmed meanwhile. */
+    @Query("UPDATE message_deliveries SET status = :status, last_error = :lastError, updated_at = :now WHERE id = :id AND status = 'sending'")
+    suspend fun finishSend(id: Long, status: String, lastError: String, now: Long = System.currentTimeMillis()): Int
+
+    /** This send failed and is tried again at [nextRetry]. 0 when it was confirmed meanwhile: no retry. */
+    @Query("UPDATE message_deliveries SET status = 'retry', retries = :retries, next_retry = :nextRetry, last_error = :lastError, updated_at = :now WHERE id = :id AND status = 'sending'")
+    suspend fun scheduleRetry(id: Long, retries: Int, nextRetry: Long, lastError: String, now: Long = System.currentTimeMillis()): Int
+
+    /** Wait until [nextRetry] without counting a try: the channel could not take it just now. 0 when it was confirmed meanwhile. */
+    @Query("UPDATE message_deliveries SET status = 'retry', next_retry = :nextRetry, last_error = :lastError, updated_at = :now WHERE id = :id AND status = 'sending'")
+    suspend fun deferRetry(id: Long, nextRetry: Long, lastError: String, now: Long = System.currentTimeMillis()): Int
+
+    /**
+     * A confirmed delivery left waiting by a worker from before FE-R4 (set back to retry after its
+     * delivery report) is sent, not sent again. Sent is the claim that certainly holds; ack_status
+     * keeps the confirmation. Runs at start, before the first send.
+     */
+    @Query("""
+        UPDATE message_deliveries SET status = 'sent', next_retry = NULL, updated_at = :now
+        WHERE COALESCE(ack_status, '') = 'acked' AND status IN ('queued', 'retry', 'held', 'sending')
+    """)
+    suspend fun settleConfirmed(now: Long = System.currentTimeMillis()): Int
 
     @Query("UPDATE message_deliveries SET status = 'dead', last_error = 'cancelled', updated_at = :now WHERE id = :id AND status IN ('queued', 'retry')")
     suspend fun cancel(id: Long, now: Long = System.currentTimeMillis())
@@ -96,7 +159,8 @@ interface MessageDeliveryDao {
     @Query("UPDATE message_deliveries SET next_retry = :now, updated_at = :now WHERE channel = :channel AND status = 'retry'")
     suspend fun retryNowForChannel(channel: String, now: Long = System.currentTimeMillis()): Int
 
-    @Query("UPDATE message_deliveries SET status = 'retry', last_error = 'recovered after restart', next_retry = :now, updated_at = :now WHERE status = 'sending'")
+    /** A send the app stopped in the middle of (the row still 'sending' at start) is tried again; never a confirmed one. */
+    @Query("UPDATE message_deliveries SET status = 'retry', last_error = 'recovered after restart', next_retry = :now, updated_at = :now WHERE status = 'sending' AND COALESCE(ack_status, '') != 'acked'")
     suspend fun recoverStale(now: Long = System.currentTimeMillis()): Int
 
     /** The satellite session ("imei:momsn") a delivery went out in (MESHSAT-1246). */
@@ -106,12 +170,18 @@ interface MessageDeliveryDao {
     @Query("SELECT * FROM message_deliveries WHERE sat_ref = :ref")
     suspend fun getBySatRef(ref: String): List<MessageDeliveryEntity>
 
-    /** The far end confirmed it: the Hub's receipt for a satellite session, or an SMS delivery report. */
-    @Query("UPDATE message_deliveries SET ack_status = 'acked', ack_timestamp = :now, updated_at = :now WHERE sat_ref = :ref")
+    /**
+     * The Hub has the satellite session's message: the delivery is acknowledged. A row the worker
+     * still holds or would retry becomes sent in the same statement, so the worker's later writes
+     * leave the confirmation alone (FE-R4).
+     */
+    @Query("""
+        UPDATE message_deliveries
+        SET ack_status = 'acked', ack_timestamp = :now, updated_at = :now,
+            status = CASE WHEN status IN ('queued', 'retry', 'held', 'sending') THEN 'sent' ELSE status END
+        WHERE sat_ref = :ref
+    """)
     suspend fun markAckedBySatRef(ref: String, now: Long = System.currentTimeMillis()): Int
-
-    @Query("UPDATE message_deliveries SET ack_status = 'acked', ack_timestamp = :now, updated_at = :now WHERE id = :id")
-    suspend fun markAcked(id: Long, now: Long = System.currentTimeMillis()): Int
 
     /** The deliveries of one SOS (msg_ref "sos:<run>:..."), for its result screen (MESHSAT-1249). */
     @Query("SELECT * FROM message_deliveries WHERE msg_ref LIKE :prefix || '%' ORDER BY created_at ASC, id ASC")
@@ -138,18 +208,15 @@ interface MessageDeliveryDao {
 
     // --- Phase C: Sequence numbers ---
 
-    /** Assign a sequence number to a delivery (set before sending). */
-    @Query("UPDATE message_deliveries SET seq_num = :seqNum, updated_at = :now WHERE id = :id")
-    suspend fun setSeqNum(id: Long, seqNum: Long, now: Long = System.currentTimeMillis())
+    // The sequence number is written with the send's outcome ([markSent]).
 
     // --- Phase C: ACK tracking ---
 
-    /** Set ACK status to 'pending' after successful send (QoS >= 1). */
-    @Query("UPDATE message_deliveries SET ack_status = 'pending', ack_timestamp = :now, updated_at = :now WHERE id = :id")
-    suspend fun setAckPending(id: Long, now: Long = System.currentTimeMillis())
+    // The wait for an ACK starts with the send's outcome ([markSent]).
 
     /**
-     * Mark delivery as ACKed → promotes status to 'delivered'.
+     * Mark delivery as ACKed → promotes status to 'delivered', from any state, the worker's included:
+     * its later writes match only 'sending' and so leave this alone (FE-R4).
      */
     @Query("UPDATE message_deliveries SET ack_status = 'acked', ack_timestamp = :now, status = 'delivered', updated_at = :now WHERE id = :id")
     suspend fun setAcked(id: Long, now: Long = System.currentTimeMillis())

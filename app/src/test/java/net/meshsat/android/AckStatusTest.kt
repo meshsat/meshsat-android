@@ -91,8 +91,8 @@ class AckStatusTest {
             when (name) {
                 "getPending" -> if (served) emptyList<MessageDeliveryEntity>() else { served = true; listOf(row) }
                 "getById" -> row
-                "setStatus" -> { calls.add("status:${args[1]}"); Unit }
-                "setAckPending" -> { calls.add("ackPending"); Unit }
+                "claimForSend" -> 1
+                "markSent" -> { calls.add("status:sent"); if (args[2] == true) calls.add("ackPending"); 1 }
                 else -> None
             }
         }

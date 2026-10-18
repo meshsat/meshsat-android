@@ -70,7 +70,8 @@ class DispatcherInFlightTest {
             when (name) {
                 "getPending" -> if (served) emptyList<MessageDeliveryEntity>() else { served = true; listOf(row) }
                 "getById" -> row
-                "setStatus" -> { statuses.add(args[1] as String); Unit }
+                "claimForSend" -> { statuses.add("sending"); 1 }
+                "markSent" -> { statuses.add("sent"); 1 }
                 else -> NONE
             }
         }
@@ -144,8 +145,9 @@ class DispatcherInFlightTest {
             when (name) {
                 "getPending" -> if (served) emptyList<MessageDeliveryEntity>() else { served = true; rows }
                 "getById" -> rows.first { it.id == args[0] as Long }
-                "deferRetry" -> { calls.add("defer:${args[0]}"); Unit }
-                "scheduleRetry" -> { calls.add("retry:${args[0]}"); Unit }
+                "claimForSend" -> 1
+                "deferRetry" -> { calls.add("defer:${args[0]}"); 1 }
+                "scheduleRetry" -> { calls.add("retry:${args[0]}"); 1 }
                 else -> NONE
             }
         }
@@ -182,6 +184,7 @@ class DispatcherInFlightTest {
             when (name) {
                 "getPending" -> if (served) emptyList<MessageDeliveryEntity>() else { served = true; listOf(row) }
                 "getById" -> row
+                "claimForSend" -> 1
                 "retryNowForChannel" -> { woken.add(args[0] as String); 2 }
                 else -> NONE
             }
@@ -200,6 +203,72 @@ class DispatcherInFlightTest {
             withTimeout(10_000) { while (woken.isEmpty()) delay(10) }
             assertEquals(listOf("iridium_0"), woken.toList())
         } finally {
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun `a delivery the worker can no longer take is not sent`() = runBlocking {
+        // Confirmed, cancelled or held between the batch read and the claim (FE-R4).
+        val row = MessageDeliveryEntity(id = 9, msgRef = "msg:9", channel = "sms_0", textPreview = "x", maxRetries = 0)
+        val claims = Collections.synchronizedList(mutableListOf<Long>())
+        val dao = fake<MessageDeliveryDao> { name, args ->
+            when (name) {
+                "getPending" -> listOf(row)
+                "getById" -> row
+                "claimForSend" -> { claims.add(args[0] as Long); 0 }
+                else -> NONE
+            }
+        }
+        val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+        val sends = Collections.synchronizedList(mutableListOf<String>())
+        val dispatcher = Dispatcher(
+            deliveryDao = dao,
+            accessEvaluator = AccessEvaluator(fake<AccessRuleDao>(), fake<ObjectGroupDao>(), scope),
+            failoverResolver = null,
+            registry = ChannelRegistry(),
+            deliveryCallback = { _, _, text, _, _, _ -> sends.add(text); null },
+            scope = scope,
+        )
+        try {
+            dispatcher.startWorker("sms_0")
+            withTimeout(10_000) { while (claims.size < 2) delay(10) }
+            assertEquals(emptyList<String>(), sends.toList())
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun `no worker sends before the start-up repair is done`() = runBlocking {
+        // A recovery that ran after a worker's claim would set that live send back to retry (FE-R4).
+        val repairing = java.util.concurrent.CountDownLatch(1)
+        val calls = Collections.synchronizedList(mutableListOf<String>())
+        val dao = fake<MessageDeliveryDao> { name, _ ->
+            when (name) {
+                "recoverStale" -> { calls.add("recover"); repairing.await(); 0 }
+                "getPending" -> { calls.add("pending"); emptyList<MessageDeliveryEntity>() }
+                else -> NONE
+            }
+        }
+        val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+        val dispatcher = Dispatcher(
+            deliveryDao = dao,
+            accessEvaluator = AccessEvaluator(fake<AccessRuleDao>(), fake<ObjectGroupDao>(), scope),
+            failoverResolver = null,
+            registry = ChannelRegistry(),
+            deliveryCallback = { _, _, _, _, _, _ -> null },
+            scope = scope,
+        )
+        try {
+            dispatcher.start(mapOf("sms_0" to "sms"))
+            delay(3_500) // past the worker's first poll
+            assertEquals(listOf("recover"), calls.toList())
+            repairing.countDown()
+            withTimeout(10_000) { while ("pending" !in calls) delay(10) }
+            assertEquals("recover", calls.first())
+        } finally {
+            repairing.countDown()
             scope.cancel()
         }
     }
