@@ -170,13 +170,22 @@ interface MessageDeliveryDao {
     """)
     suspend fun getPendingAcks(channel: String, cutoff: Long): List<MessageDeliveryEntity>
 
-    /** Mark timed-out pending ACKs as 'timeout'. */
+    /**
+     * Mark one channel's timed-out pending ACKs as 'timeout'. Per channel: the sweep used to have no
+     * channel filter, so the first channel's 30 s timed out every pending ACK, the satellite's too,
+     * and its 2-minute timeout never applied (MESHSAT-1584).
+     */
     @Query("""
         UPDATE message_deliveries
         SET ack_status = 'timeout', updated_at = :now
         WHERE ack_status = 'pending' AND ack_timestamp IS NOT NULL AND ack_timestamp <= :cutoff
+          AND channel = :channel
     """)
-    suspend fun timeoutPendingAcks(cutoff: Long, now: Long = System.currentTimeMillis()): Int
+    suspend fun timeoutPendingAcksOn(channel: String, cutoff: Long, now: Long = System.currentTimeMillis()): Int
+
+    /** The channels with a delivery waiting for its ACK. */
+    @Query("SELECT DISTINCT channel FROM message_deliveries WHERE ack_status = 'pending'")
+    suspend fun pendingAckChannels(): List<String>
 
     /** Get delivery by channel and sequence number (for ACK correlation). */
     @Query("SELECT * FROM message_deliveries WHERE channel = :channel AND seq_num = :seqNum AND seq_num > 0 LIMIT 1")

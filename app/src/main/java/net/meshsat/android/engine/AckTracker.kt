@@ -67,7 +67,9 @@ class AckTracker(
             return false
         }
 
-        if (delivery.ackStatus != "pending") {
+        // A late ACK after the timeout is still the far end's answer: recorded, not lost
+        // (MESHSAT-1584). An answer already recorded stays.
+        if (delivery.ackStatus != "pending" && delivery.ackStatus != "timeout") {
             Log.d(TAG, "Delivery ${delivery.id} ack_status=${delivery.ackStatus}, ignoring ACK")
             return false
         }
@@ -83,15 +85,12 @@ class AckTracker(
     }
 
     /**
-     * Check all channels for timed-out pending ACKs.
+     * Check each channel that has a pending ACK on that channel's own timeout (MESHSAT-1584).
      */
-    private suspend fun checkTimeouts() {
-        // Check each known channel type
-        val channels = listOf("mesh_0", "iridium_0", "sms_0")
-        for (channel in channels) {
+    internal suspend fun checkTimeouts(now: Long = System.currentTimeMillis()) {
+        for (channel in deliveryDao.pendingAckChannels()) {
             val timeout = getTimeout(channel)
-            val cutoff = System.currentTimeMillis() - timeout.inWholeMilliseconds
-            val timedOut = deliveryDao.timeoutPendingAcks(cutoff)
+            val timedOut = deliveryDao.timeoutPendingAcksOn(channel, now - timeout.inWholeMilliseconds, now)
             if (timedOut > 0) {
                 Log.w(TAG, "$channel: $timedOut ACKs timed out (timeout=${timeout.inWholeSeconds}s)")
             }

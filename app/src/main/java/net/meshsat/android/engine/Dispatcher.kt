@@ -500,8 +500,11 @@ class Dispatcher(
         val woke = deliveryDao.retryNowForChannel(channelId)
         if (woke > 0) Log.i(TAG, "$woke more deliveries for $channelId are due now: a send just worked")
 
-        // For QoS >= 1, mark ACK as pending (at-least-once semantics)
-        if (del.qosLevel >= 1) {
+        // For QoS >= 1, mark ACK as pending (at-least-once semantics). Not on the mesh: the
+        // ledger's mesh sends are broadcasts, which never ask for an ACK (MESHSAT-1112), so none can
+        // come; waiting for one made every mesh send "No confirmation came back" after 30 s. It
+        // stays sent: accepted by the radio, not confirmed (MESHSAT-1584).
+        if (del.qosLevel >= 1 && !channelId.startsWith("mesh")) {
             deliveryDao.setAckPending(del.id)
             Log.i(TAG, "Delivery ${del.id} sent to $channelId (seq=$seqNum, ack=pending)")
         } else {

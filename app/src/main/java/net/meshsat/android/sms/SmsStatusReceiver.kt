@@ -39,7 +39,9 @@ class SmsStatusReceiver : BroadcastReceiver() {
                     ACTION_DELIVERED -> when (report) {
                         SmsReport.Delivered -> {
                             if (messageId > 0) db.messageDao().setForwardedTo(messageId, DELIVERED)
-                            if (deliveryId > 0) db.messageDeliveryDao().markAcked(deliveryId)
+                            // Delivered to the handset: the record says delivered, not only acked
+                            // with its status left at sent (MESHSAT-1584).
+                            if (deliveryId > 0) db.messageDeliveryDao().setAcked(deliveryId)
                         }
                         SmsReport.Failed -> if (messageId > 0) db.messageDao().setForwardedTo(messageId, FAILED)
                         else -> Unit // still pending at the carrier, or unreadable: keep what it says
@@ -103,16 +105,19 @@ class SmsStatusReceiver : BroadcastReceiver() {
 
 /**
  * A delivery report's status (TP-Status, 3GPP TS 23.040 9.2.3.15, as SmsMessage.getStatus gives
- * it): 0x00-0x1F the message reached the other phone, 0x20-0x3F the carrier is still trying,
- * 0x40 and up it gave up.
+ * it): 0x00 the other phone received it; 0x01-0x1F the carrier completed it without confirming
+ * that (0x01 forwarded but delivery unconfirmed, 0x02 replaced, the rest reserved or carrier
+ * specific); 0x20-0x3F the carrier is still trying; 0x40 and up it gave up. Only 0x00 is the
+ * handset's receipt (MESHSAT-1584).
  */
 enum class SmsReport {
-    Delivered, Pending, Failed;
+    Delivered, CompletedUnconfirmed, Pending, Failed;
 
     companion object {
         fun fromStatus(status: Int): SmsReport = when {
             status < 0 -> Pending
-            status < 0x20 -> Delivered
+            status == 0 -> Delivered
+            status < 0x20 -> CompletedUnconfirmed
             status < 0x40 -> Pending
             else -> Failed
         }
