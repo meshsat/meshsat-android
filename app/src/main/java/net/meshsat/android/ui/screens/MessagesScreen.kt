@@ -1282,6 +1282,8 @@ private fun NewMessageDialog(onPick: (String) -> Unit, onDismiss: () -> Unit) {
                         onValueChange = { hubId = it },
                         label = { Text("Or a MeshSat app's Hub bridge id") },
                         singleLine = true,
+                        // An id, not words: no autocorrect, no capital first letter.
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii, autoCorrectEnabled = false),
                         isError = hubId.isNotBlank() && !hubOk,
                         modifier = Modifier.fillMaxWidth(),
                     )
