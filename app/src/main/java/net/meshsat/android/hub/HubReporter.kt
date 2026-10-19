@@ -48,6 +48,8 @@ class HubReporter(
     private val context: Context,
     private val scope: CoroutineScope,
     private val config: HubReporterConfig,
+    /** Makes the Paho client of each connect attempt; a test hands in its own (r14 review). */
+    private val newClient: (serverUri: String, clientId: String) -> MqttClient = { uri, id -> MqttClient(uri, id, MemoryPersistence()) },
 ) {
     /** The name this phone reports to the Hub as, for status lines in the app. */
     val bridgeId: String get() = config.bridgeId
@@ -235,7 +237,7 @@ class HubReporter(
             try {
                 val clientId = "meshsat-android-${config.bridgeId.takeLast(12)}"
                 Log.i(TAG, "Connecting to ${config.hubUrl} as $clientId (cert=${config.clientCertPem.length > 0})")
-                val mqttClient = MqttClient(config.hubUrl, clientId, MemoryPersistence())
+                val mqttClient = newClient(config.hubUrl, clientId)
                 attempt = mqttClient
 
                 val opts = MqttConnectOptions().apply {

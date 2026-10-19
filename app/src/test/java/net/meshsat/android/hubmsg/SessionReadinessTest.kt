@@ -6,7 +6,9 @@ import net.meshsat.android.hub.SessionReadiness
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.Timeout
 
 /**
  * The Hub app route starts its walk only once a session's subscriptions hold (r13 review, PH-R2),
@@ -15,6 +17,10 @@ import org.junit.Test
  * refused subscribe is tried again on the same session, without a reconnect. [MESHSAT-1584]
  */
 class SessionReadinessTest {
+
+    /** A retry loop that never ends fails the test instead of hanging the run (r14 review). */
+    @get:Rule
+    val timeout: Timeout = Timeout.seconds(10)
 
     private class World {
         var t = 1_792_400_000_000L
