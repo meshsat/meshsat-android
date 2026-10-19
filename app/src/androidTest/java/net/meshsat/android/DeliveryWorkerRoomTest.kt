@@ -271,13 +271,14 @@ class DeliveryWorkerRoomTest {
         val d = queued(status = "sent")
         val path = context.getDatabasePath(name).path
         db.close()
-        // The version-19 schema is version 20 without sms_sends (MIGRATION_19_20 adds only that table).
+        // The version-19 schema is today's without sms_sends (MIGRATION_19_20) and the hub_msg
+        // tables (MIGRATION_20_21); it upgrades through 20 to the current version.
         SQLiteDatabase.openDatabase(path, null, SQLiteDatabase.OPEN_READWRITE).use {
-            it.execSQL("DROP TABLE sms_sends")
+            for (t in listOf("sms_sends", "hub_ops", "hub_op_events", "hub_op_missing", "hub_inbox")) it.execSQL("DROP TABLE $t")
             it.version = 19
         }
         db = AppDatabase.build(context, name)
-        assertEquals(20, db.openHelper.readableDatabase.version)
+        assertEquals(21, db.openHelper.readableDatabase.version)
         assertEquals("sent" to null, row(d))
 
         register("a", 1, d)
