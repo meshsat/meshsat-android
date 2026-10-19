@@ -2349,7 +2349,7 @@ class GatewayService : Service() {
             store = net.meshsat.android.data.RoomHubMsgStore(db),
             pub = object : net.meshsat.android.hubmsg.HubMsgRoute.Publisher {
                 override val principal: String get() = reporter.principal
-                override fun isConnected() = reporter.isConnected
+                override fun isConnected() = reporter.isMsgReady
                 override fun publishMsg(kind: String, payload: String) = reporter.publishMsg(kind, payload)
             },
             onStored = { from, text, _ -> postMessageNotification("Hub: ${from.removePrefix("bridge:")}", text) },

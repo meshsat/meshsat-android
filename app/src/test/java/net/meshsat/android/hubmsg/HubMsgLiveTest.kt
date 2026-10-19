@@ -61,7 +61,7 @@ class HubMsgLiveTest {
                 store = store,
                 pub = object : HubMsgRoute.Publisher {
                     override val principal: String get() = r.principal
-                    override fun isConnected() = r.isConnected
+                    override fun isConnected() = r.isMsgReady
                     override fun publishMsg(kind: String, payload: String) = r.publishMsg(kind, payload)
                 },
                 onStored = { from, text, _ -> stored += "$from: $text" },
@@ -195,15 +195,5 @@ class HubMsgLiveTest {
             delay(1_000)
             scope.cancel()
         }
-    }
-
-    /** The JVM's android.jar has no device model; the birth needs one. */
-    private fun jvmBuildModel() {
-        val f = android.os.Build::class.java.getDeclaredField("MODEL")
-        if (runCatching { f.get(null) }.getOrNull() != null) return
-        val u = Class.forName("sun.misc.Unsafe").getDeclaredField("theUnsafe").apply { isAccessible = true }.get(null)
-        val base = u.javaClass.getMethod("staticFieldBase", java.lang.reflect.Field::class.java).invoke(u, f)
-        val off = u.javaClass.getMethod("staticFieldOffset", java.lang.reflect.Field::class.java).invoke(u, f) as Long
-        u.javaClass.getMethod("putObject", Any::class.java, Long::class.javaPrimitiveType, Any::class.java).invoke(u, base, off, "hubmsg-live")
     }
 }

@@ -28,6 +28,7 @@ import org.eclipse.paho.client.mqttv3.IMqttDeliveryToken
 import org.eclipse.paho.client.mqttv3.MqttCallbackExtended
 import org.eclipse.paho.client.mqttv3.MqttClient
 import org.eclipse.paho.client.mqttv3.MqttConnectOptions
+import org.eclipse.paho.client.mqttv3.MqttException
 import org.eclipse.paho.client.mqttv3.MqttMessage
 import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence
 import org.json.JSONObject
@@ -160,6 +161,15 @@ class HubReporter(
     /** This phone's principal on the Hub. */
     val principal: String get() = "bridge:${config.bridgeId}"
 
+    /** The msg subscriptions of the current session (r13 review PH-R2). */
+    private val readiness = SessionReadiness()
+
+    /**
+     * Connected AND every subscription of this session granted: what the Hub app route may use.
+     * A transport connect alone is not enough, since the route's answers come on msg/status.
+     */
+    val isMsgReady: Boolean get() = readiness.ready && isConnected
+
     /**
      * Publishes [payload] on this phone's msg/[kind] at QoS 1 and waits for the broker's PUBACK:
      * Ok once it took it; NotSent when nothing left the phone (not connected); Unknown when the
@@ -167,7 +177,8 @@ class HubReporter(
      */
     fun publishMsg(kind: String, payload: String): net.meshsat.android.hubmsg.HubMsgRoute.Published {
         val c = client
-        if (c == null || !c.isConnected) return net.meshsat.android.hubmsg.HubMsgRoute.Published.NotSent
+        // Nothing for the route goes out before this session's subscriptions hold (PH-R2).
+        if (c == null || !c.isConnected || !readiness.ready) return net.meshsat.android.hubmsg.HubMsgRoute.Published.NotSent
         return try {
             val msg = MqttMessage(payload.toByteArray(StandardCharsets.UTF_8)).apply { qos = QOS_AT_LEAST_ONCE }
             c.getTopic(topics.msg(config.bridgeId, kind)).publish(msg).waitForCompletion(MSG_PUBLISH_WAIT_MS)
@@ -304,20 +315,17 @@ class HubReporter(
                         // Automatic reconnect on a clean session: the broker has forgotten
                         // the subscriptions and the Hub has marked the bridge offline on the
                         // LWT, so do what the first connect did (MESHSAT-1235). Off the Paho
-                        // callback thread, where a blocking subscribe would deadlock.
+                        // callback thread, where a blocking subscribe would deadlock. Not ready
+                        // until every filter is granted again, tried until it is (PH-R2).
+                        val session = readiness.invalidate()
                         _state.value = State.Connected
                         Log.i(TAG, "Reconnected to Hub, re-subscribing and re-announcing")
-                        scope.launch {
-                            try {
-                                subscribeAndAnnounce(mqttClient)
-                            } catch (e: Exception) {
-                                Log.w(TAG, "Re-announce after reconnect failed: ${e.message}")
-                            }
-                        }
+                        scope.launch { establish(mqttClient, session, waitFirst = false) }
                     }
 
                     override fun connectionLost(cause: Throwable?) {
                         Log.w(TAG, "Hub connection lost: ${cause?.message}")
+                        readiness.invalidate()
                         _state.value = State.Disconnected
                     }
 
@@ -330,6 +338,7 @@ class HubReporter(
                     override fun deliveryComplete(token: IMqttDeliveryToken?) {}
                 })
 
+                val session = readiness.invalidate()
                 mqttClient.connect(opts)
                 if (stopped) {
                     // stop() came while this connect was in flight (MESHSAT-1305).
@@ -341,7 +350,11 @@ class HubReporter(
                 _lastError.value = ""
                 Log.i(TAG, "Connected to Hub at ${config.hubUrl}")
 
-                subscribeAndAnnounce(mqttClient)
+                // Not ready until every filter is granted: a refused one is tried again on this
+                // connection, backing off, and the route's walk waits for it (PH-R2).
+                if (!readiness.attempt(session, subscribe = { subscribeAll(mqttClient) }, onReady = { announce() })) {
+                    scope.launch { establish(mqttClient, session, waitFirst = true) }
+                }
 
                 // Start periodic health reporting
                 startHealthLoop()
@@ -534,16 +547,41 @@ class HubReporter(
 
     // --- Internal ---
 
-    /** Subscribe to the command topic and what the Hub delivers of TAK, then publish the birth. */
-    private fun subscribeAndAnnounce(c: MqttClient) {
+    /**
+     * Subscribes to the command topic, the MO receipts, what the Hub delivers of TAK and, when the
+     * Hub app route is on, its msg topics. Throws unless the SUBACK granted every filter (PH-R2).
+     */
+    private fun subscribeAll(c: MqttClient) {
         val msg = if (onMsgIn != null || onMsgStatus != null)
             arrayOf(topics.msg(config.bridgeId, "in"), topics.msg(config.bridgeId, "status")) else emptyArray()
         val filters = arrayOf(
             topics.bridgeCmd(config.bridgeId),
             topics.bridgeMOAck(config.bridgeId),
         ) + topics.takCotInFilters() + msg
-        c.subscribe(filters, IntArray(filters.size) { QOS_AT_LEAST_ONCE })
-        publishBirth()
+        val token = c.subscribeWithResponse(filters, IntArray(filters.size) { QOS_AT_LEAST_ONCE })
+        if (!SessionReadiness.allGranted(filters.size, token.grantedQos)) {
+            throw MqttException(MqttException.REASON_CODE_SUBSCRIBE_FAILED.toInt())
+        }
+    }
+
+    /** Subscribes on [c] for [session] until it holds, while [c] is this reporter's live client. */
+    private suspend fun establish(c: MqttClient, session: Int, waitFirst: Boolean) {
+        readiness.establish(
+            session,
+            alive = { !stopped && client === c && c.isConnected },
+            subscribe = { subscribeAll(c) },
+            onReady = { announce() },
+            waitFirst = waitFirst,
+        )
+    }
+
+    /** The birth, then the route's walk: only once the session's subscriptions hold. */
+    private fun announce() {
+        try {
+            publishBirth()
+        } catch (e: Exception) {
+            Log.w(TAG, "Birth after subscribe failed: ${e.message}")
+        }
         // The session is clean: what the Hub said while it was away is asked for again (hub_msg).
         onConnected?.invoke()
     }

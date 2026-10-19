@@ -1,6 +1,8 @@
 package net.meshsat.android.hubmsg
 
 import android.util.Log
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * The Hub app route on the phone (hub_msg, HeMB-NG stage 2, MESHSAT-1584): a text to a contact's
@@ -55,6 +57,8 @@ class HubMsgRoute(
     private var walkDone = false
     private var connect = 0
     private var owedAt = HubOpCursor()
+    /** One pass at a time: the connect's and the periodic one wait for each other (PH-R1). */
+    private val passLock = Mutex()
     private var lastPrune = 0L
 
     // ---- send ----
@@ -90,11 +94,14 @@ class HubMsgRoute(
     suspend fun publishPending() {
         if (!pub.isConnected()) return
         for (op in store.unpublished(BATCH)) {
+            // The connection the publish goes out on, taken before it: a reconnect while it is in
+            // flight must not make it count for the new connection (PH-R1).
+            val gen = generation()
             when (pub.publishMsg("out", op.submission)) {
                 Published.Ok -> {
                     val t = now()
                     // A first publish in this connect is as good as its repeat: the walk skips it.
-                    synchronized(lock) { asks.getOrPut(op.opId) { Ask() }.apply { at = t; connect = this@HubMsgRoute.connect } }
+                    synchronized(lock) { asks.getOrPut(op.opId) { Ask() }.apply { at = t; connect = gen } }
                     store.markPublished(op.opId, t)
                 }
                 Published.NotSent, Published.Unknown -> return
@@ -174,7 +181,10 @@ class HubMsgRoute(
         synchronized(lock) { walk = HubOpCursor(); walkDone = false; connect++ }
     }
 
-    private fun askedThisConnect(opId: String): Boolean = synchronized(lock) { asks[opId]?.connect == connect }
+    private fun generation(): Int = synchronized(lock) { connect }
+
+    /** Whether [opId] was asked on connection [gen] already. */
+    private fun askedOn(opId: String, gen: Int): Boolean = synchronized(lock) { asks[opId]?.connect == gen }
 
     private fun due(opId: String, t: Long): Boolean = synchronized(lock) {
         val a = asks[opId] ?: return true
@@ -187,7 +197,8 @@ class HubMsgRoute(
         t - a.at >= minOf(wait, 30 * 60_000L)
     }
 
-    private suspend fun repeat(op: HubOp, t: Long): Boolean {
+    /** Repeats [op]'s submission, counted for connection [gen], the one the pass began on. */
+    private suspend fun repeat(op: HubOp, t: Long, gen: Int): Boolean {
         // From here a failure to keep an answer counts against this repeat, one that comes before
         // the publish returns included.
         val a = synchronized(lock) { asks.getOrPut(op.opId) { Ask() }.also { it.failed = false } }
@@ -195,7 +206,7 @@ class HubMsgRoute(
             synchronized(lock) { a.failed = true } // nothing went out: not a reason to wait
             return false
         }
-        synchronized(lock) { a.n++; a.at = t; a.connect = connect }
+        synchronized(lock) { a.n++; a.at = t; a.connect = gen }
         if (op.publishedAt == 0L) runCatching { store.markPublished(op.opId, t) }
         return true
     }
@@ -209,17 +220,24 @@ class HubMsgRoute(
      */
     suspend fun requestReplays() {
         val t = now()
+        // Everything this pass does counts for the connection it began on (PH-R1).
+        val gen = generation()
         runCatching { store.resolveKeptMissing() }
         giveUpPastBound(t)
         if (!pub.isConnected()) return
-        val asked = HashSet<String>()
+        val asked = HashSet<String>() // repeated in this pass; one not due is not among them
         // An owed operation is asked as its wait allows; the walk asks each operation once per
-        // connect, since what the Hub said while the phone was away is gone.
+        // connect, since what the Hub said while the phone was away is gone, whatever its wait.
         suspend fun ask(op: HubOp, walking: Boolean = false): Boolean {
-            if (!asked.add(op.opId)) return true
-            if (walking) return askedThisConnect(op.opId) || repeat(op, t)
-            if (!due(op.opId, t)) return true
-            return repeat(op, t)
+            if (op.opId in asked) return true
+            if (walking) {
+                if (askedOn(op.opId, gen)) return true
+            } else if (!due(op.opId, t)) {
+                return true
+            }
+            val ok = repeat(op, t, gen)
+            if (ok) asked.add(op.opId)
+            return ok
         }
 
         val cur = synchronized(lock) { owedAt }
@@ -242,14 +260,17 @@ class HubMsgRoute(
             if (stillMissing(id)) ask(op)
         }
 
-        val (done, wcur) = synchronized(lock) { walkDone to walk }
+        // The walk belongs to one connection: a pass that began before a reconnect leaves the new
+        // connection's walk alone, its position and its end included (PH-R1).
+        val (done, wcur) = synchronized(lock) { if (connect != gen) return else walkDone to walk }
         if (done) return
         val ops = try { store.toReconcile(t, REPLAY_WITHIN_MS, wcur, WALK_BATCH) } catch (e: Exception) { return }
         for (op in ops) {
+            if (generation() != gen) return
             if (!ask(op, walking = true)) return // the walk stays here and goes on from it at the next pass
-            synchronized(lock) { walk = HubOpCursor(op.createdAt, op.opId) }
+            synchronized(lock) { if (connect == gen) walk = HubOpCursor(op.createdAt, op.opId) else return }
         }
-        if (ops.size < WALK_BATCH) synchronized(lock) { walkDone = true }
+        if (ops.size < WALK_BATCH) synchronized(lock) { if (connect == gen) walkDone = true }
     }
 
     /** Strikes from an operation's in-memory missing events those kept by now; whether any is left. */
@@ -313,13 +334,15 @@ class HubMsgRoute(
 
     /** What the service runs at each connect and every [PASS_MS]: the queue, the repeats, and the hourly prune. */
     suspend fun pass() {
-        publishPending()
-        requestReplays()
-        val t = now()
-        if (t - lastPrune >= 60 * 60_000L) {
-            runCatching { store.pruneInbox(t) }
-            runCatching { store.pruneOps(t) }
-            lastPrune = t
+        passLock.withLock {
+            publishPending()
+            requestReplays()
+            val t = now()
+            if (t - lastPrune >= 60 * 60_000L) {
+                runCatching { store.pruneInbox(t) }
+                runCatching { store.pruneOps(t) }
+                lastPrune = t
+            }
         }
     }
 
