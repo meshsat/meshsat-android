@@ -37,12 +37,23 @@ class HubReporterStubBrokerTest {
         val readyAtHook = CopyOnWriteArrayList<Boolean>()
         /** The reporter's states in order. */
         val states = CopyOnWriteArrayList<HubReporter.State>()
+        /** When each walk began, and when each connect was seen. */
+        val hookAt = CopyOnWriteArrayList<Long>()
+        val connectedAt = CopyOnWriteArrayList<Long>()
 
         init {
             r.onMsgIn = {}
             r.onMsgStatus = {}
-            r.onConnected = { readyAtHook += r.isMsgReady }
-            scope.launch { r.state.collect { states += it } }
+            r.onConnected = {
+                hookAt += System.currentTimeMillis()
+                readyAtHook += r.isMsgReady
+            }
+            scope.launch {
+                r.state.collect {
+                    if (it == HubReporter.State.Connected) connectedAt += System.currentTimeMillis()
+                    states += it
+                }
+            }
         }
 
         fun connects() = states.count { it == HubReporter.State.Connected }
@@ -99,6 +110,8 @@ class HubReporterStubBrokerTest {
         assertEquals("no walk on the refused resubscribe", 1, p.readyAtHook.size)
         assertTrue("tried again on the same connection", until(15_000) { p.readyAtHook.size == 2 })
         assertEquals(listOf(true, true), p.readyAtHook.toList())
+        val waited = p.hookAt[1] - p.connectedAt[1]
+        assertTrue("the second walk waited for the retry, not for the refused SUBACK: $waited ms", waited >= 1_000)
     }
 
     @Test
