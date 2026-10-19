@@ -30,6 +30,23 @@ data class SosRun(
     val cancelHubSentAt: Long? = null,
     /** A test that has run its course or was stopped. */
     val finishedAt: Long? = null,
+    /**
+     * Its own identity (HeMB-NG C10, MESHSAT-1584): a UUIDv7 of its start; a run kept from before
+     * C10 takes the old-format v5. Empty for a test. The rest is C10's state ([SosV2]): the bridge
+     * id its frames name, whether the satellite carried the 0x07, the hub leg's v2 publish and the
+     * Hub's state in its ack, and the cancel owed under the run's id.
+     */
+    val sosId: String = "",
+    val bridgeId: String = "",
+    val satV2: Boolean = false,
+    val hubV2: Boolean = false,
+    val hubPublishedAt: Long? = null,
+    val hubState: String = "",
+    val cancelV2Owed: Boolean = false,
+    val cancelHubPublishedAt: Long? = null,
+    val cancelHubAckedAt: Long? = null,
+    val cancelFrameDone: Boolean = false,
+    val cancelGaveUp: Boolean = false,
 ) {
     data class Route(val key: String, val label: String)
 
@@ -54,6 +71,17 @@ data class SosRun(
         cancelledAt?.let { put("cancelled_at", it) }
         cancelHubSentAt?.let { put("cancel_hub_sent_at", it) }
         finishedAt?.let { put("finished_at", it) }
+        if (sosId.isNotEmpty()) put("sos_id", sosId)
+        if (bridgeId.isNotEmpty()) put("bridge_id", bridgeId)
+        if (satV2) put("sat_v2", true)
+        if (hubV2) put("hub_v2", true)
+        hubPublishedAt?.let { put("hub_published_at", it) }
+        if (hubState.isNotEmpty()) put("hub_state", hubState)
+        if (cancelV2Owed) put("cancel_v2_owed", true)
+        cancelHubPublishedAt?.let { put("cancel_hub_published_at", it) }
+        cancelHubAckedAt?.let { put("cancel_hub_acked_at", it) }
+        if (cancelFrameDone) put("cancel_frame_done", true)
+        if (cancelGaveUp) put("cancel_gave_up", true)
     }.toString()
 
     companion object {
@@ -91,6 +119,17 @@ data class SosRun(
                     cancelledAt = if (o.has("cancelled_at")) o.getLong("cancelled_at") else null,
                     cancelHubSentAt = if (o.has("cancel_hub_sent_at")) o.getLong("cancel_hub_sent_at") else null,
                     finishedAt = if (o.has("finished_at")) o.getLong("finished_at") else null,
+                    sosId = o.optString("sos_id"),
+                    bridgeId = o.optString("bridge_id"),
+                    satV2 = o.optBoolean("sat_v2"),
+                    hubV2 = o.optBoolean("hub_v2"),
+                    hubPublishedAt = if (o.has("hub_published_at")) o.getLong("hub_published_at") else null,
+                    hubState = o.optString("hub_state"),
+                    cancelV2Owed = o.optBoolean("cancel_v2_owed"),
+                    cancelHubPublishedAt = if (o.has("cancel_hub_published_at")) o.getLong("cancel_hub_published_at") else null,
+                    cancelHubAckedAt = if (o.has("cancel_hub_acked_at")) o.getLong("cancel_hub_acked_at") else null,
+                    cancelFrameDone = o.optBoolean("cancel_frame_done"),
+                    cancelGaveUp = o.optBoolean("cancel_gave_up"),
                 )
             }
         } catch (_: Exception) {
@@ -135,12 +174,21 @@ object SosProgress {
             else SosRouteStatus(route.label, stateOf(del), detailOf(del), cancel, short)
         }.toMutableList()
         if (run.hubWanted) {
+            // The cancel's state on the Hub's link: the old way at the broker, under C10 at the Hub's ack.
+            val hubCancel = when {
+                run.cancelledAt == null || run.test -> null
+                run.cancelHubSentAt != null || run.cancelHubAckedAt != null -> SosRouteStatus.State.Sent
+                run.cancelHubPublishedAt != null -> SosRouteStatus.State.Sending
+                else -> SosRouteStatus.State.Waiting
+            }
             out += when {
                 run.hubSentAt != null -> SosRouteStatus(
-                    HUB_LABEL, SosRouteStatus.State.Sent, "Sent",
-                    if (run.cancelledAt == null || run.test) null
-                    else if (run.cancelHubSentAt != null) SosRouteStatus.State.Sent else SosRouteStatus.State.Waiting,
+                    HUB_LABEL, SosRouteStatus.State.Sent, if (run.hubV2) "The Hub has it" else "Sent",
+                    hubCancel,
                     HUB_SHORT,
+                )
+                run.hubPublishedAt != null -> SosRouteStatus(
+                    HUB_LABEL, SosRouteStatus.State.Sending, "Sent to the Hub, waiting for it to confirm", hubCancel, HUB_SHORT,
                 )
                 !run.active -> SosRouteStatus(HUB_LABEL, SosRouteStatus.State.Stopped, "Stopped before the Hub could be reached", short = HUB_SHORT)
                 else -> SosRouteStatus(HUB_LABEL, SosRouteStatus.State.Waiting, "Waiting for the Hub connection", short = HUB_SHORT)

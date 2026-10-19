@@ -34,6 +34,7 @@ import net.meshsat.android.data.MessageDeliveryEntity
 import net.meshsat.android.data.SettingsRepository
 import net.meshsat.android.engine.Dispatcher
 import net.meshsat.android.hub.HubReporter
+import net.meshsat.android.hubmsg.HubMsgIds
 import net.meshsat.android.service.GatewayService
 
 /**
@@ -90,9 +91,43 @@ class SosController(
     /** Pick up an SOS that was in progress when the app stopped. */
     fun restore() {
         scope.launch {
-            val saved = SosRun.fromJson(settings.sosRun.first())
+            var saved = SosRun.fromJson(settings.sosRun.first())
+            // A run kept from before C10 takes the old-format id, the same on every route (MESHSAT-1584).
+            val bridge = env.hubReporter?.bridgeId.orEmpty()
+            if (saved != null && !saved.test && saved.sosId.isEmpty() && bridge.isNotEmpty()) {
+                saved = saved.copy(sosId = HubMsgIds.legacySosId(bridge, saved.id), bridgeId = saved.bridgeId.ifEmpty { bridge })
+                settings.setSosRun(saved.toJson())
+            }
             _run.value = saved
-            if (saved != null && (saved.active || needsCancelPublish(saved))) follow(saved)
+            if (saved != null && (saved.active || needsCancelPublish(saved) || SosV2.cancelPending(saved))) follow(saved)
+        }
+    }
+
+    /** The Hub's caps say sos_v2 (the last ones it sent, kept). */
+    private suspend fun capsV2(): Boolean = SosV2.capsSayV2(settings.hubCaps.first())
+
+    /**
+     * The Hub's ack of this phone's SOS start or cancel (sos/ack, C10): it has it. A start's ends
+     * the hub leg's repeats; a cancel's ends the cancel's and stops the satellite's 0x08 if it has
+     * not gone. An ack for another run changes nothing.
+     */
+    suspend fun onAck(payload: String) {
+        val a = SosV2.parseAck(payload) ?: return
+        mutex.withLock {
+            val r = _run.value ?: return
+            if (r.sosId.isEmpty() || r.sosId != a.sosId) {
+                Log.i(TAG, "An ack for an SOS that is not this phone's last, ignored")
+                return
+            }
+            val now = System.currentTimeMillis()
+            when (a.kind) {
+                "start" -> save(r.copy(hubSentAt = r.hubSentAt ?: now, hubV2 = true, hubState = a.state))
+                "cancel" -> if (r.cancelledAt != null && r.cancelHubAckedAt == null) {
+                    save(r.copy(cancelHubAckedAt = now))
+                    db.messageDeliveryDao().cancelWaitingByRefPrefix(r.refPrefix + "cancel:sat")
+                    Log.w(TAG, "SOS ${r.id} cancelled: the Hub has the cancellation")
+                }
+            }
         }
     }
 
@@ -121,9 +156,18 @@ class SosController(
         mutex.withLock {
             val r = _run.value ?: return
             if (r.id != runId || r.test || r.cancelledAt == null) return
+            if (isSatV2(r, del)) {
+                // The 0x07 went after the cancel: the Hub is owed the cancel under the run's id.
+                if (!r.cancelV2Owed) { val owed = r.copy(cancelV2Owed = true); save(owed); follow(owed) }
+                return
+            }
             enqueueCancel(r, del)
         }
     }
+
+    /** [del] is the satellite leg of [r] and carried the 0x07: its cancel is the 0x08 (C10). */
+    private fun isSatV2(r: SosRun, del: MessageDeliveryEntity) =
+        r.satV2 && r.sosId.isNotEmpty() && del.msgRef == r.refPrefix + "sat"
 
     /** Start an SOS, or a test of the alarm. A real SOS replaces a test that is still running. */
     suspend fun start(test: Boolean, trigger: String) {
@@ -152,6 +196,11 @@ class SosController(
             val disp = env.dispatcher
 
             val meshText = if (test) SosMessages.testText(name) else SosMessages.meshText(name, fix, now)
+            // Its own identity (C10): the same on every route and after a restart; the frames and
+            // the Hub's event go under it while the Hub says sos_v2 (MESHSAT-1584).
+            val sosId = if (test) "" else HubMsgIds.newSosId(now)
+            val v2 = !test && hub != null && capsV2()
+            var satV2 = false
             // The Hub files the satellite frame's alert as "sos-<bearer>-<bridge>-<time>"
             // (meshsat-hub internal/bridge/uplink.go); the internet leg uses the same id, so the
             // Hub pages once for this SOS whichever way it arrives first.
@@ -171,6 +220,9 @@ class SosController(
                     } else if (test) {
                         val t = SosMessages.testText(name)
                         disp.enqueueDirect("iridium_0", t.toByteArray(Charsets.UTF_8), t, prefix + "sat", priority = 0)
+                    } else if (v2) {
+                        val frame = SosMessages.satFrameStart(bridgeId, imei, fix, SosMessages.frameMessage(name, fix), now / 1000, sosId, now)
+                        disp.enqueueDirect("iridium_0", frame, meshText, prefix + "sat", priority = 0).also { satV2 = it != null }
                     } else {
                         val frame = SosMessages.satFrame(bridgeId, imei, fix, SosMessages.frameMessage(name, fix), now / 1000)
                         disp.enqueueDirect("iridium_0", frame, meshText, prefix + "sat", priority = 0)
@@ -220,6 +272,7 @@ class SosController(
                 id = now, test = test, trigger = trigger, name = name, fix = fix,
                 routes = routes, skipped = skipped, hubWanted = hub != null,
                 deviceId = deviceId, hubAlertId = hubAlertId,
+                sosId = sosId, bridgeId = bridgeId, satV2 = satV2,
             )
             // Route kinds only: the audit log is no place for the contacts' phone numbers.
             val kinds = routes.groupingBy { it.key.substringBefore(':') }.eachCount().entries
@@ -244,13 +297,19 @@ class SosController(
             }
             val cancelled = r.copy(cancelledAt = System.currentTimeMillis())
             save(cancelled)
-            // A route that carried the SOS, or may be carrying it right now, is told it is over.
+            // A route that carried the SOS, or may be carrying it right now, is told it is over. Under
+            // C10 the satellite's is the 0x08 (the follow loop queues it, after the grace) and the
+            // Hub's the v2 event, both under the run's id.
+            var owed = r.hubV2 && r.hubPublishedAt != null
             for (del in dao.getByRefPrefix(r.refPrefix)) {
-                if (del.status in listOf("sent", "delivered", "sending")) enqueueCancel(cancelled, del)
+                if (!satStartWent(del)) continue
+                if (isSatV2(cancelled, del)) owed = true else enqueueCancel(cancelled, del)
             }
+            val next = if (owed) cancelled.copy(cancelV2Owed = true) else cancelled
+            if (owed) save(next)
             Log.w(TAG, "SOS ${r.id} cancelled")
             env.audit("sos_cancelled", "sos=${r.id}")
-            follow(cancelled)
+            follow(next)
         }
     }
 
@@ -274,19 +333,36 @@ class SosController(
         settings.setSosRun(r.toJson())
     }
 
+    /** The cancel goes the old way: the Hub had the start the old way and not its cancel yet. */
     private fun needsCancelPublish(r: SosRun) =
-        !r.test && r.cancelledAt != null && r.hubSentAt != null && r.cancelHubSentAt == null
+        !r.test && r.cancelledAt != null && r.hubSentAt != null && !r.hubV2 && r.cancelHubSentAt == null
+
+    /** A start's delivery went out, or may have: sent, delivered, being sent. */
+    private fun satStartWent(del: MessageDeliveryEntity) = del.status in listOf("sent", "delivered", "sending")
 
     /** Keep the Hub informed and the notification current while this run needs it. */
     @OptIn(ExperimentalCoroutinesApi::class)
     private fun follow(run: SosRun) {
         hubJob?.cancel()
         hubJob = scope.launch(Dispatchers.IO) {
+            var startPublished = 0
+            var nextStart = 0L
+            var cancelPublished = 0
+            var nextCancel = 0L
             while (isActive) {
                 val r = _run.value ?: break
                 if (r.id != run.id) break
                 val hub = env.hubReporter
-                if (r.hubWanted && r.hubSentAt == null && r.active && hub != null) {
+                val now = System.currentTimeMillis()
+                if (r.hubWanted && r.hubSentAt == null && r.active && hub != null && SosV2.hubLegV2(r, capsV2())) {
+                    // C10: the v2 start, again and again until the Hub's ack (onAck).
+                    if (now >= nextStart && hub.publishSosEvent(SosV2.startEvent(r, SosMessages.meshText(r.name, r.fix, r.id)))) {
+                        nextStart = now + SosV2.repeatAfter(++startPublished)
+                        if (r.hubPublishedAt == null) mutex.withLock {
+                            _run.value?.takeIf { it.id == r.id }?.let { save(it.copy(hubPublishedAt = now, hubV2 = true)) }
+                        }
+                    }
+                } else if (r.hubWanted && r.hubSentAt == null && r.active && hub != null) {
                     val text = if (r.test) SosMessages.testText(r.name) else SosMessages.meshText(r.name, r.fix, r.id)
                     val sent = hub.publishSos(
                         r.deviceId, r.hubAlertId, text, sos = !r.test,
@@ -302,15 +378,18 @@ class SosController(
                     )
                     if (sent) mutex.withLock { _run.value?.takeIf { it.id == r.id }?.let { save(it.copy(cancelHubSentAt = System.currentTimeMillis())) } }
                 }
+                if (SosV2.cancelPending(r)) followCancelV2(r, now, hub, cancelPublished, nextCancel)?.let { (n, at) ->
+                    cancelPublished = n; nextCancel = at
+                }
                 if (r.test && r.active) {
                     val statuses = SosProgress.routes(r, db.messageDeliveryDao().getByRefPrefix(r.refPrefix))
                     if (SosProgress.allSettled(r, statuses) || System.currentTimeMillis() - r.id > TEST_LIMIT_MS) {
                         mutex.withLock { _run.value?.takeIf { it.id == r.id && it.active }?.let { finishLocked(it) } }
                     }
                 }
-                val now = _run.value ?: break
-                val hubDone = !now.hubWanted || now.hubSentAt != null || !now.active
-                if (!now.active && !needsCancelPublish(now) && hubDone) break
+                val latest = _run.value ?: break
+                val hubDone = !latest.hubWanted || latest.hubSentAt != null || !latest.active
+                if (!latest.active && !needsCancelPublish(latest) && !SosV2.cancelPending(latest) && hubDone) break
                 delay(HUB_RETRY_MS)
             }
         }
@@ -324,6 +403,44 @@ class SosController(
                 notify(r, SosProgress.routes(r, dels))
             }
         }
+    }
+
+    /**
+     * One round of the cancel under the run's identity (C10): after a day it is given up and the
+     * 0x08 still waiting stops; else the v2 cancel is published when its repeat is due, and the 0x08
+     * is queued on the satellite that carried the 0x07 once the grace is over (at once with no Hub
+     * session). Answers the publish count and the next publish time when it published.
+     */
+    private suspend fun followCancelV2(r: SosRun, now: Long, hub: HubReporter?, published: Int, next: Long): Pair<Int, Long>? {
+        val dao = db.messageDeliveryDao()
+        if (SosV2.cancelOver(r, now)) {
+            mutex.withLock {
+                _run.value?.takeIf { it.id == r.id }?.let { save(it.copy(cancelGaveUp = true)) }
+                dao.cancelWaitingByRefPrefix(r.refPrefix + "cancel:sat")
+            }
+            Log.w(TAG, "SOS ${r.id} cancelled: no ack from the Hub in a day; the cancel is no longer repeated")
+            return null
+        }
+        val up = hub != null && hub.isConnected
+        var result: Pair<Int, Long>? = null
+        if (up && now >= next && hub!!.publishSosEvent(SosV2.cancelEvent(r))) {
+            result = (published + 1) to now + SosV2.repeatAfter(published + 1)
+            if (r.cancelHubPublishedAt == null) mutex.withLock {
+                _run.value?.takeIf { it.id == r.id }?.let { save(it.copy(cancelHubPublishedAt = now)) }
+            }
+        }
+        val sat = dao.getByRefPrefix(r.refPrefix + "sat").firstOrNull { it.msgRef == r.refPrefix + "sat" }
+        if (SosV2.cancelFrameDue(r, now, up, sat != null && satStartWent(sat))) {
+            mutex.withLock {
+                val cur = _run.value?.takeIf { it.id == r.id && !it.cancelFrameDone } ?: return@withLock
+                val bridge = cur.bridgeId.ifEmpty { hub?.bridgeId.orEmpty() }
+                val frame = SosMessages.cancelFrame(bridge, cur.sosId, cur.id, (cur.cancelledAt ?: now) / 1000)
+                env.dispatcher?.enqueueDirect("iridium_0", frame, SosMessages.cancelText(cur.name), cur.refPrefix + "cancel:sat", priority = 0)
+                save(cur.copy(cancelFrameDone = true))
+                Log.w(TAG, "SOS ${cur.id} cancelled: the cancel frame is queued on the satellite")
+            }
+        }
+        return result
     }
 
     private fun notify(r: SosRun, statuses: List<SosRouteStatus>) {

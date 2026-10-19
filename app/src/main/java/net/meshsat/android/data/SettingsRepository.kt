@@ -869,6 +869,18 @@ class SettingsRepository(private val context: Context) {
     suspend fun setSosRun(json: String) {
         context.dataStore.edit { it[stringPreferencesKey("sos_run")] = json }
     }
+
+    /**
+     * The last hub/caps the Hub sent, as it came (C10, MESHSAT-1584): kept, because an SOS may have
+     * to go by satellite with no Hub session at all.
+     */
+    val hubCaps: Flow<String> = context.dataStore.data.map {
+        it[stringPreferencesKey("hub_caps")] ?: ""
+    }
+
+    suspend fun setHubCaps(payload: String) {
+        context.dataStore.edit { it[stringPreferencesKey("hub_caps")] = payload }
+    }
 }
 
 /** "frequency,bandwidth,txpower,sf,cr" to radio parameters, or null. */

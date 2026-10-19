@@ -160,6 +160,14 @@ class HubReporter(
     /** Each connect, the first and every automatic reconnect, once subscribed. */
     @Volatile var onConnected: (() -> Unit)? = null
 
+    /**
+     * An SOS under its own identity (HeMB-NG C10, MESHSAT-1584). Set before [start]: the session
+     * then subscribes to this phone's hub/caps (retained: what the Hub understands) and sos/ack
+     * (the Hub has a start or a cancel), and hands each payload over as it came.
+     */
+    @Volatile var onHubCaps: ((String) -> Unit)? = null
+    @Volatile var onSosAck: ((String) -> Unit)? = null
+
     /** This phone's principal on the Hub. */
     val principal: String get() = "bridge:${config.bridgeId}"
 
@@ -537,6 +545,24 @@ class HubReporter(
         }
     }
 
+    /**
+     * A start or a cancel of an SOS under its own identity (C10), on this phone's sos/event: QoS 1,
+     * not retained, never queued (the SOS repeats it until the Hub's sos/ack, which is when the Hub
+     * has it, not the broker's PUBACK). Blocks until the broker has it; false when the Hub is not
+     * connected or the publish failed.
+     */
+    fun publishSosEvent(event: JSONObject): Boolean {
+        val c = client
+        if (c == null || !c.isConnected) return false
+        return try {
+            c.publish(topics.sos(config.bridgeId, "event"), MqttMessage(event.toString().toByteArray(StandardCharsets.UTF_8)).apply { qos = QOS_AT_LEAST_ONCE })
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "SOS event publish to the Hub failed: ${e.message}")
+            false
+        }
+    }
+
     /** Respond to a Hub command. */
     fun publishCommandResponse(response: CommandResponse) {
         publish(
@@ -556,10 +582,12 @@ class HubReporter(
     private fun subscribeAll(c: MqttClient) {
         val msg = if (onMsgIn != null || onMsgStatus != null)
             arrayOf(topics.msg(config.bridgeId, "in"), topics.msg(config.bridgeId, "status")) else emptyArray()
+        val sos = (if (onHubCaps != null) arrayOf(topics.hubCaps(config.bridgeId)) else emptyArray()) +
+            (if (onSosAck != null) arrayOf(topics.sos(config.bridgeId, "ack")) else emptyArray())
         val filters = arrayOf(
             topics.bridgeCmd(config.bridgeId),
             topics.bridgeMOAck(config.bridgeId),
-        ) + topics.takCotInFilters() + msg
+        ) + topics.takCotInFilters() + msg + sos
         val token = c.subscribeWithResponse(filters, IntArray(filters.size) { QOS_AT_LEAST_ONCE })
         if (!SessionReadiness.allGranted(filters.size, token.grantedQos)) {
             throw MqttException(MqttException.REASON_CODE_SUBSCRIBE_FAILED.toInt())
@@ -703,6 +731,14 @@ class HubReporter(
         }
         if (topic == topics.msg(config.bridgeId, "status")) {
             onMsgStatus?.invoke(payload)
+            return
+        }
+        if (topic == topics.hubCaps(config.bridgeId)) {
+            onHubCaps?.invoke(payload)
+            return
+        }
+        if (topic == topics.sos(config.bridgeId, "ack")) {
+            onSosAck?.invoke(payload)
             return
         }
         if (!topic.endsWith("/cmd")) return

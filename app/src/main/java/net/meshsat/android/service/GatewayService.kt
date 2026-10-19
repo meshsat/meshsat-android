@@ -1090,6 +1090,10 @@ class GatewayService : Service() {
                     }
                 }
                 reporter.onMoAck = { imei, momsn -> scope.launch { onHubReceipt(imei, momsn) } }
+                // An SOS under its own identity (C10): the Hub's caps are kept for a send with no
+                // Hub session; its acks end the SOS's repeats (MESHSAT-1584).
+                reporter.onHubCaps = { payload -> scope.launch { settings.setHubCaps(payload) } }
+                reporter.onSosAck = { payload -> scope.launch { sosController?.onAck(payload) } }
                 if (settings.hubMsgEnabled.first()) initHubMsg(reporter)
                 reporter.start()
                 hubReporter = reporter

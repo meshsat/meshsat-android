@@ -24,6 +24,14 @@ object SosMessages {
     /** Longest text inside the satellite frame (the Bridge's maxSOSMessageLen). */
     private const val MAX_FRAME_MESSAGE = 64
     private const val MAX_FRAME_ID = 16
+    /** The bridge id in a C10 frame: whole, up to the Bridge's maxBridgeIDLen (the Hub matches it). */
+    private const val MAX_FRAME_BRIDGE_V2 = 63
+
+    /** C10 frame types (MESHSAT-1584): an SOS start and its cancel under the run's own id. */
+    const val TYPE_SOS_START: Byte = 0x07
+    const val TYPE_SOS_CANCEL: Byte = 0x08
+    /** The 0x08's reason: the person cancelled it. */
+    const val CANCEL_OPERATOR: Byte = 0
 
     /** A position: where, how precise, and when the phone measured it. */
     data class Fix(val lat: Double, val lon: Double, val accuracyM: Float?, val timeMs: Long)
@@ -96,12 +104,40 @@ object SosMessages {
      * uint32 Unix seconds. Without a fix the position is 0, 0, as on the Bridge, and the message says
      * the position is unknown.
      */
-    fun satFrame(bridgeId: String, deviceId: String, fix: Fix?, message: String, nowSec: Long): ByteArray {
-        val bridge = truncateUtf8(bridgeId, MAX_FRAME_ID).toByteArray(Charsets.UTF_8)
+    fun satFrame(bridgeId: String, deviceId: String, fix: Fix?, message: String, nowSec: Long): ByteArray =
+        sosBody(truncateUtf8(bridgeId, MAX_FRAME_ID), deviceId, fix, message, nowSec, 0x02)
+
+    /**
+     * The C10 start (type 0x07, HeMB-NG stage 2): the 0x02 body, then the run's sos_id (16 bytes) and
+     * its start (8, big-endian), byte for byte the Bridge's EncodeSatSOSStart. The bridge id goes
+     * whole (the Hub takes the run only from the modem's own bridge).
+     */
+    fun satFrameStart(bridgeId: String, deviceId: String, fix: Fix?, message: String, nowSec: Long, sosId: String, runStartMs: Long): ByteArray {
+        val id = requireNotNull(net.meshsat.android.hubmsg.HubMsgIds.parseCanonical(sosId)) { "sos_id is not a canonical UUID" }
+        val body = sosBody(truncateUtf8(bridgeId, MAX_FRAME_BRIDGE_V2), deviceId, fix, message, nowSec, TYPE_SOS_START)
+        return ByteBuffer.allocate(body.size + 16 + 8).put(body).put(id).putLong(runStartMs.coerceAtLeast(0)).array()
+    }
+
+    /**
+     * The C10 cancel (type 0x08): bridge id, sos_id (16), run_start_ms (8), Unix seconds (4) and the
+     * reason (1), byte for byte the Bridge's EncodeSatSOSCancel.
+     */
+    fun cancelFrame(bridgeId: String, sosId: String, runStartMs: Long, nowSec: Long, reason: Byte = CANCEL_OPERATOR): ByteArray {
+        val id = requireNotNull(net.meshsat.android.hubmsg.HubMsgIds.parseCanonical(sosId)) { "sos_id is not a canonical UUID" }
+        val bridge = truncateUtf8(bridgeId, MAX_FRAME_BRIDGE_V2).toByteArray(Charsets.UTF_8)
+        val buf = ByteBuffer.allocate(4 + 1 + bridge.size + 16 + 8 + 4 + 1)
+        buf.put(0x4D).put(0x53).put(1).put(TYPE_SOS_CANCEL)
+        buf.put(bridge.size.toByte()).put(bridge)
+        buf.put(id).putLong(runStartMs.coerceAtLeast(0)).putInt(nowSec.toInt()).put(reason)
+        return buf.array()
+    }
+
+    private fun sosBody(bridgeId: String, deviceId: String, fix: Fix?, message: String, nowSec: Long, type: Byte): ByteArray {
+        val bridge = bridgeId.toByteArray(Charsets.UTF_8)
         val device = truncateUtf8(deviceId, MAX_FRAME_ID).toByteArray(Charsets.UTF_8)
         val msg = truncateUtf8(message, MAX_FRAME_MESSAGE).toByteArray(Charsets.UTF_8)
         val buf = ByteBuffer.allocate(4 + 1 + bridge.size + 1 + device.size + 4 + 4 + 1 + msg.size + 4)
-        buf.put(0x4D).put(0x53).put(1).put(0x02)
+        buf.put(0x4D).put(0x53).put(1).put(type)
         buf.put(bridge.size.toByte()).put(bridge)
         buf.put(device.size.toByte()).put(device)
         buf.putFloat((fix?.lat ?: 0.0).toFloat())

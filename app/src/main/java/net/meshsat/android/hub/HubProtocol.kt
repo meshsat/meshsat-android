@@ -86,6 +86,13 @@ class HubTopics private constructor(val root: String) {
     fun msg(bridgeID: String, kind: String) = "$root/bridge/${segment(bridgeID)}/msg/$kind"
 
     /**
+     * An SOS under its own identity (HeMB-NG C10, MESHSAT-1584): this phone publishes sos/event;
+     * only the Hub publishes sos/ack and, retained, hub/caps (what it understands).
+     */
+    fun sos(bridgeID: String, kind: String) = "$root/bridge/${segment(bridgeID)}/sos/$kind"
+    fun hubCaps(bridgeID: String) = "$root/bridge/${segment(bridgeID)}/hub/caps"
+
+    /**
      * What the Hub delivers back (meshsat-hub MESHSAT-1461): an event from one of the tenant's TAK
      * servers on this topic, and an event another bridge of the tenant exported one level below it,
      * with that bridge's id as the last segment.

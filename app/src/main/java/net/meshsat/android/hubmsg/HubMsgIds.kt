@@ -50,7 +50,9 @@ object HubMsgIds {
         val b = parseCanonical(s) ?: return false
         if (!rfcVariant(b)) return false
         return when (version(b)) {
-            7 -> true
+            // An SOS id names its run: its time is the run's start (C10, r4), so the same run has
+            // the same id on every bearer and after a restart.
+            7 -> field != "sos_id" || (c.runStartMs >= 0 && timeOfV7(b) == c.runStartMs)
             5 -> when {
                 field == "mid" && c.sender == "hub" && c.name.isNotEmpty() -> uuidV5(c.name) == s
                 field == "sos_id" && c.bridgeId.isNotEmpty() && c.runStartMs >= 0 -> uuidV5("${c.bridgeId}:${c.runStartMs}") == s
@@ -58,6 +60,26 @@ object HubMsgIds {
             }
             else -> false
         }
+    }
+
+    /**
+     * C10's rule for an sos_id carried with its run's start: a v7 whose first 48 bits are
+     * [runStartMs], or the old-format run's v5 under the bridge id the ingress authenticated.
+     */
+    fun sosIdValid(sosId: String, bridgeId: String, runStartMs: Long): Boolean =
+        idValid(sosId, "sos_id", Context(bridgeId = bridgeId, runStartMs = runStartMs))
+
+    /** The sos_id of a run that starts at [runStartMs] (C10): a UUIDv7 of that start. */
+    fun newSosId(runStartMs: Long): String = newV7(runStartMs)
+
+    /** The sos_id of a run kept from before C10: UUIDv5 of "<bridge id>:<run_start_ms>". */
+    fun legacySosId(bridgeId: String, runStartMs: Long): String = uuidV5("$bridgeId:$runStartMs")
+
+    /** The Unix millisecond time in a UUIDv7's first 48 bits. */
+    fun timeOfV7(b: ByteArray): Long {
+        var ms = 0L
+        for (i in 0 until 6) ms = (ms shl 8) or (b[i].toLong() and 0xFF)
+        return ms
     }
 
     /** The UUIDv5 of [name] under [NAMESPACE] (RFC 9562 5.5: SHA-1, not a security use). */
