@@ -31,10 +31,12 @@ import androidx.compose.material.icons.outlined.Sms
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -67,6 +69,12 @@ import net.meshsat.android.ui.theme.OffWhite
  */
 @Composable
 fun WelcomeScreen(onContinue: () -> Unit) {
+    // Outside the app's Scaffold nothing sets the text colour: the headings were black on black.
+    CompositionLocalProvider(LocalContentColor provides OffWhite) { WelcomeContent(onContinue) }
+}
+
+@Composable
+private fun WelcomeContent(onContinue: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxSize()
