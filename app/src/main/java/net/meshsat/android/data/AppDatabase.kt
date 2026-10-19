@@ -30,8 +30,12 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         ContactEntity::class,
         SmsPartReport::class,
         SmsSend::class,
+        HubOpEntity::class,
+        HubOpEventEntity::class,
+        HubOpMissingEntity::class,
+        HubInboxEntity::class,
     ],
-    version = 20,
+    version = 21,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -55,6 +59,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun bridgeTrustDao(): BridgeTrustDao
     abstract fun telemetryDao(): TelemetryDao
     abstract fun smsPartReportDao(): SmsPartReportDao
+    abstract fun hubMsgDao(): HubMsgDao
 
     companion object {
         @Volatile
@@ -261,6 +266,44 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * The Hub app route hub_msg (MESHSAT-1584): its operations, their events, the events found
+         * missing, the receiver's inbox. Room's own CREATE statements (AppDatabase_Impl), as for
+         * contacts below: a mismatch would fall back to a destructive migration.
+         */
+        val MIGRATION_20_21 = object : Migration(20, 21) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `hub_ops` (`op_id` TEXT NOT NULL, `mid` TEXT NOT NULL, `recipient` TEXT NOT NULL, " +
+                        "`message_id` INTEGER NOT NULL, `expires_at` INTEGER NOT NULL, `created_at` INTEGER NOT NULL, " +
+                        "`submission` TEXT NOT NULL, `published_at` INTEGER NOT NULL, `replay_at` INTEGER NOT NULL, " +
+                        "`replay_given_up_at` INTEGER NOT NULL, PRIMARY KEY(`op_id`))"
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_hub_ops_expires_at` ON `hub_ops` (`expires_at`)")
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `hub_op_events` (`event_id` TEXT NOT NULL, `op_id` TEXT NOT NULL, `mid` TEXT NOT NULL, " +
+                        "`recipient` TEXT NOT NULL, `rev` INTEGER NOT NULL, `class` TEXT NOT NULL, `kind` TEXT NOT NULL, " +
+                        "`reason` TEXT NOT NULL, `authority` TEXT NOT NULL, `scope` TEXT NOT NULL, `detail` TEXT NOT NULL, " +
+                        "`at` TEXT NOT NULL, `source` TEXT NOT NULL, `valid` INTEGER NOT NULL, `received_at` INTEGER NOT NULL, " +
+                        "PRIMARY KEY(`event_id`))"
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_hub_op_events_op_id` ON `hub_op_events` (`op_id`)")
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `hub_op_missing` (`op_id` TEXT NOT NULL, `event_id` TEXT NOT NULL, " +
+                        "`since` INTEGER NOT NULL, PRIMARY KEY(`op_id`, `event_id`))"
+                )
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `hub_inbox` (`origin` TEXT NOT NULL, `op_id` TEXT NOT NULL, `mid` TEXT NOT NULL, " +
+                        "`recipient` TEXT NOT NULL, `content_type` TEXT NOT NULL, `mid_expires_at` INTEGER NOT NULL, " +
+                        "`expires_at` INTEGER NOT NULL, `content_sha256` TEXT NOT NULL, `message_id` INTEGER NOT NULL, " +
+                        "`committed_at` INTEGER NOT NULL, `within_skew` INTEGER NOT NULL, `unjudged` INTEGER NOT NULL, " +
+                        "PRIMARY KEY(`origin`, `op_id`))"
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_hub_inbox_origin_mid` ON `hub_inbox` (`origin`, `mid`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_hub_inbox_expires_at` ON `hub_inbox` (`expires_at`)")
+            }
+        }
+
         /** Cards handed over by QR code (MESHSAT-566, 575); nothing else changes. */
         val MIGRATION_16_17 = object : Migration(16, 17) {
             override fun migrate(db: SupportSQLiteDatabase) {
@@ -293,6 +336,7 @@ abstract class AppDatabase : RoomDatabase() {
                     MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13,
                     MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16,
                     MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20,
+                    MIGRATION_20_21,
                 )
                 .fallbackToDestructiveMigration()
                 .build()

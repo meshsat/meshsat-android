@@ -106,6 +106,9 @@ class SettingsRepository(private val context: Context) {
 
         // Hub relay client (MESHSAT-1157)
         val KEY_HUB_RELAY_ENABLED = booleanPreferencesKey("hub_relay_enabled")
+
+        // hub_msg, texts through the Hub to a MeshSat app (MESHSAT-1584); off until switched on
+        val KEY_HUB_MSG_ENABLED = booleanPreferencesKey("hub_msg_enabled")
         val KEY_HUB_RELAY_TARGET = stringPreferencesKey("hub_relay_target")
         val KEY_HUB_RELAY_URL = stringPreferencesKey("hub_relay_url")
 
@@ -736,6 +739,14 @@ class SettingsRepository(private val context: Context) {
     val hubRelayUrl: Flow<String> = context.dataStore.data.map { it[KEY_HUB_RELAY_URL] ?: "" }
 
     suspend fun setHubRelayEnabled(enabled: Boolean) { context.dataStore.edit { it[KEY_HUB_RELAY_ENABLED] = enabled } }
+
+    /**
+     * Texts through the Hub to a contact's MeshSat app (hub_msg). Off by default, as on the kits
+     * (MESHSAT_HUB_MSG_ROUTE): with it off nothing subscribes and no Hub conversation is offered.
+     * Read at the service's start.
+     */
+    val hubMsgEnabled: Flow<Boolean> = context.dataStore.data.map { it[KEY_HUB_MSG_ENABLED] ?: false }
+    suspend fun setHubMsgEnabled(enabled: Boolean) { context.dataStore.edit { it[KEY_HUB_MSG_ENABLED] = enabled } }
     suspend fun setHubRelayTarget(bridgeId: String) { context.dataStore.edit { it[KEY_HUB_RELAY_TARGET] = bridgeId.trim() } }
     suspend fun setHubRelayUrl(url: String) { context.dataStore.edit { it[KEY_HUB_RELAY_URL] = url.trim() } }
 

@@ -30,11 +30,20 @@ object Peers {
     fun isLxmf(peer: String): Boolean =
         peer.length == 32 && peer.all { it.isDigit() || it.lowercaseChar() in 'a'..'f' }
 
+    /** Another MeshSat app or kit through the Hub: "bridge:<its bridge id>", the Hub's principal (MESHSAT-1584). */
+    fun isHub(peer: String): Boolean = net.meshsat.android.hubmsg.HubMsgWire.bridgeOf(peer).isNotEmpty()
+
+    /** The principal of a bridge id, as a conversation key. */
+    fun hubPeer(bridgeId: String): String = HUB_PREFIX + bridgeId.trim()
+
+    const val HUB_PREFIX = "bridge:"
+
     /** The node number of a mesh peer, or null. */
     fun nodeNum(peer: String): Long? = if (isMeshNode(peer)) peer.drop(1).toLongOrNull(16) else null
 
     /** How a reply goes by default: the way this kind of peer is reached. */
     fun defaultTransport(peer: String): String = when {
+        isHub(peer) -> "hub"
         isLxmf(peer) -> "lxmf"
         isMesh(peer) -> "mesh"
         isSatellite(peer) || peer == LEGACY_SELF -> "iridium"
@@ -43,6 +52,7 @@ object Peers {
 
     /** The ways a message to this peer can go. */
     fun transportsFor(peer: String): List<String> = when {
+        isHub(peer) -> listOf("hub")
         isLxmf(peer) -> listOf("lxmf")
         isMesh(peer) -> listOf("mesh")
         isSatellite(peer) || peer == LEGACY_SELF -> listOf("iridium")
@@ -57,6 +67,7 @@ object Peers {
         isSatellite(peer) -> "Satellite"
         peer == LEGACY_SELF -> "Sent from this phone"
         isLxmf(peer) -> lxmfName(peer) ?: "Reticulum ${peer.take(8)}"
+        isHub(peer) -> peer.removePrefix(HUB_PREFIX)
         else -> peer
     }
 
@@ -71,6 +82,7 @@ object Peers {
     fun detail(peer: String): String? = when {
         isMeshNode(peer) -> peer
         isLxmf(peer) -> "By Reticulum (LXMF), $peer"
+        isHub(peer) -> "Through the Hub to its MeshSat app"
         isSatellite(peer) -> "By satellite, through Rock7 to the Hub"
         peer == MESH_ALL -> "The mesh channel"
         else -> null

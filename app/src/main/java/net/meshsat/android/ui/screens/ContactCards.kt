@@ -53,7 +53,7 @@ import java.util.Base64
  * arrived any other way is kept as IMPORTED, because nothing says who passed it on.
  */
 @Composable
-fun ContactCardsSection() {
+fun ContactCardsSection(onMessage: (String) -> Unit = {}) {
     val context = LocalContext.current
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     val db = remember { AppDatabase.getInstance(context) }
@@ -143,8 +143,16 @@ fun ContactCardsSection() {
                             style = MaterialTheme.typography.bodySmall,
                             color = MeshSatTextMuted,
                         )
-                        TextButton(onClick = { scope.launch { db.contactDao().delete(c.fingerprint) } }) {
-                            Text("Forget")
+                        Row {
+                            // A card that carries a Hub bridge id can be messaged through the Hub (MESHSAT-1584).
+                            if (c.bridgeId.isNotBlank() && GatewayService.hubMsgRoute != null) {
+                                TextButton(onClick = { onMessage(net.meshsat.android.ui.Peers.hubPeer(c.bridgeId)) }) {
+                                    Text("Message")
+                                }
+                            }
+                            TextButton(onClick = { scope.launch { db.contactDao().delete(c.fingerprint) } }) {
+                                Text("Forget")
+                            }
                         }
                     }
                 }
@@ -257,7 +265,7 @@ private fun MyCardDialog(onDismiss: () -> Unit) {
             name = name,
             signingPubRaw = identity.signingPubRaw,
             meshNodeId = if (myNum != 0L) "!%08x".format(myNum) else "",
-            bridgeId = "",
+            bridgeId = if (GatewayService.hubMsgRoute != null) GatewayService.hubReporter?.bridgeId.orEmpty() else "",
             issuedAtSec = System.currentTimeMillis() / 1000,
         )
         text = ContactQR.encode(card, identity)

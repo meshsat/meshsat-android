@@ -137,7 +137,7 @@ fun PeersScreen(
 
         // Cards handed over face to face, above the nodes: a person you swapped cards with is
         // someone you know, a node you heard is not (MESHSAT-566, 575).
-        ContactCardsSection()
+        ContactCardsSection(onMessage = onMessage)
 
         if (nodes.isEmpty()) {
             Box(

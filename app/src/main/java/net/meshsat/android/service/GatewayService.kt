@@ -103,6 +103,8 @@ class GatewayService : Service() {
         const val ACTION_SEND_IRIDIUM = "net.meshsat.android.SEND_IRIDIUM"
         const val ACTION_SEND_SMS = "net.meshsat.android.SEND_SMS"
         const val ACTION_SEND_LXMF = "net.meshsat.android.SEND_LXMF"
+        /** A text through the Hub to a MeshSat app, EXTRA_RECIPIENT "bridge:<id>" (hub_msg, MESHSAT-1584). */
+        const val ACTION_SEND_HUB = "net.meshsat.android.SEND_HUB"
         /** "direct", "opportunistic" or absent for auto (MESHSAT-1553). */
         const val EXTRA_LXMF_METHOD = "lxmf_method"
         const val EXTRA_ADDRESS = "address"
@@ -296,6 +298,11 @@ class GatewayService : Service() {
                 _hubReporterNow.value = value
             }
 
+        /** The Hub app route, when "Messages through the Hub" is on (hub_msg, MESHSAT-1584). */
+        @Volatile
+        var hubMsgRoute: net.meshsat.android.hubmsg.HubMsgRoute? = null
+            private set
+
         /** The battery of the node this phone is connected to, as it last reported it (MESHSAT-1315). */
         data class NodeBatteryNow(
             val nodeNum: Long,
@@ -487,6 +494,11 @@ class GatewayService : Service() {
                 scope.launch { sendSmsMessage(text, recipient) }
             }
             ACTION_RESTART_RNODE -> scope.launch { restartRnode() }
+            ACTION_SEND_HUB -> {
+                val text = intent.getStringExtra(EXTRA_TEXT) ?: return START_STICKY
+                val recipient = intent.getStringExtra(EXTRA_RECIPIENT) ?: return START_STICKY
+                scope.launch { sendHub(recipient, text) }
+            }
             ACTION_SEND_LXMF -> {
                 val text = intent.getStringExtra(EXTRA_TEXT) ?: return START_STICKY
                 val recipient = intent.getStringExtra(EXTRA_RECIPIENT) ?: return START_STICKY
@@ -540,6 +552,7 @@ class GatewayService : Service() {
         passScheduler = null
         hubReporter?.stop()
         hubReporter = null
+        hubMsgRoute = null
         // It lives in the companion, so a restarted service would otherwise run a second
         // client beside it under the same client id (MESHSAT-1305).
         mqttTransport?.disconnect()
@@ -1077,6 +1090,7 @@ class GatewayService : Service() {
                     }
                 }
                 reporter.onMoAck = { imei, momsn -> scope.launch { onHubReceipt(imei, momsn) } }
+                if (settings.hubMsgEnabled.first()) initHubMsg(reporter)
                 reporter.start()
                 hubReporter = reporter
                 Log.i("MeshSat", "Hub Reporter initialized: bridge=$bridgeId")
@@ -2324,6 +2338,51 @@ class GatewayService : Service() {
             }
         }
         return o.hashHex
+    }
+
+    /**
+     * The Hub app route (hub_msg, MESHSAT-1584): texts to and from a contact's MeshSat app through
+     * the Hub, on this phone's own msg topics. Its pass runs at each connect and every 30 s.
+     */
+    private fun initHubMsg(reporter: net.meshsat.android.hub.HubReporter) {
+        val route = net.meshsat.android.hubmsg.HubMsgRoute(
+            store = net.meshsat.android.data.RoomHubMsgStore(db),
+            pub = object : net.meshsat.android.hubmsg.HubMsgRoute.Publisher {
+                override val principal: String get() = reporter.principal
+                override fun isConnected() = reporter.isConnected
+                override fun publishMsg(kind: String, payload: String) = reporter.publishMsg(kind, payload)
+            },
+            onStored = { from, text, _ -> postMessageNotification("Hub: ${from.removePrefix("bridge:")}", text) },
+        )
+        reporter.onMsgIn = { payload -> scope.launch { route.handleIn(payload) } }
+        reporter.onMsgStatus = { payload -> scope.launch { route.handleStatus(payload) } }
+        reporter.onConnected = {
+            route.onConnected()
+            scope.launch { runCatching { route.pass() } }
+        }
+        scope.launch {
+            while (isActive) {
+                delay(net.meshsat.android.hubmsg.HubMsgRoute.PASS_MS)
+                runCatching { route.pass() }.onFailure { Log.w("MeshSat", "hub_msg pass: ${it.message}") }
+            }
+        }
+        hubMsgRoute = route
+        Log.i("MeshSat", "hub_msg: route on as ${reporter.principal}")
+    }
+
+    /** A text through the Hub; a refused one is still shown in the chat, marked not sent. */
+    private suspend fun sendHub(recipient: String, text: String) {
+        val route = hubMsgRoute
+        val why = when {
+            route == null -> "Messages through the Hub are off"
+            else -> (route.send(recipient, text) as? net.meshsat.android.hubmsg.HubMsgRoute.SendResult.Refused)?.why
+        } ?: return
+        Log.w("MeshSat", "hub_msg send refused: $why")
+        db.messageDao().insert(
+            Message(transport = "hub", direction = "tx", sender = hubReporter?.principal.orEmpty(), recipient = recipient,
+                text = text, encrypted = false, timestamp = System.currentTimeMillis(), forwarded = true,
+                forwardedTo = net.meshsat.android.hubmsg.HubMsgStatus.REFUSED_PREFIX + "not_sent")
+        )
     }
 
     private fun loadRulesFromDb() {

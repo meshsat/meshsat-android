@@ -245,6 +245,9 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
+    // The real org.json for JVM tests: android.jar's is a stub that returns null and 0, and the
+    // hub_msg wire code reads and writes JSON with it (MESHSAT-1584)
+    testImplementation("org.json:json:20240303")
     // Room against a real SQLite database on a device or emulator (MESHSAT-1584)
     androidTestImplementation("androidx.test:core-ktx:1.6.1")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")

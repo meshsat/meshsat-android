@@ -202,6 +202,8 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
     val hubUsername by settings.hubUsername.collectAsState(initial = "")
     val hubPassword by settings.hubPassword.collectAsState(initial = "")
     val hubHealthInterval by settings.hubHealthInterval.collectAsState(initial = "30")
+    // Texts to other MeshSat apps through the Hub (hub_msg, MESHSAT-1584)
+    val hubMsgEnabled by settings.hubMsgEnabled.collectAsState(initial = false)
     // Hub relay client (MESHSAT-1157)
     val hubRelayEnabled by settings.hubRelayEnabled.collectAsState(initial = true)
     val hubRelayTarget by settings.hubRelayTarget.collectAsState(initial = "")
@@ -2285,6 +2287,27 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
                         modifier = Modifier.fillMaxWidth(),
                         textStyle = MaterialTheme.typography.bodyMedium,
                         colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = MeshSatTeal, unfocusedBorderColor = MeshSatBorder),
+                    )
+
+                    // --- Texts to other MeshSat apps and kits through the Hub (hub_msg, MESHSAT-1584) ---
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("Messages through the Hub", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                        Switch(
+                            checked = hubMsgEnabled,
+                            onCheckedChange = { scope.launch { settings.setHubMsgEnabled(it) } },
+                            colors = SwitchDefaults.colors(checkedTrackColor = MeshSatTeal),
+                            modifier = Modifier.semantics { contentDescription = "Messages through the Hub" },
+                        )
+                    }
+                    Text(
+                        text = (if (hubMsgEnabled == (GatewayService.hubMsgRoute != null)) "" else "Takes effect when the gateway restarts. ") +
+                            "Texts to another MeshSat app or kit in your Hub account, by its bridge id. Both ends need the internet.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MeshSatTextMuted,
                     )
 
                     // --- Hub relay client (MESHSAT-1157): fallback tunnel to one kit through the Hub ---

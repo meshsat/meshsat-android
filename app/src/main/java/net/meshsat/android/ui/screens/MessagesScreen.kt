@@ -91,7 +91,9 @@ import net.meshsat.android.data.Message
 import net.meshsat.android.data.SettingsRepository
 import net.meshsat.android.engine.SatelliteLimits
 import net.meshsat.android.service.GatewayService
+import net.meshsat.android.hubmsg.HubMsgStatus
 import net.meshsat.android.ui.theme.ColorCellular
+import net.meshsat.android.ui.theme.ColorHub
 import net.meshsat.android.ui.theme.ColorIridium
 import net.meshsat.android.ui.theme.ColorMesh
 import net.meshsat.android.ui.theme.MeshSatAmber
@@ -151,6 +153,7 @@ fun MessagesScreen(openChat: (String) -> Unit = {}) {
             "iridium" -> allMessages.filter { it.transport == "iridium" }
             "sms" -> allMessages.filter { it.transport == "sms" }
             "lxmf" -> allMessages.filter { it.transport == "lxmf" }
+            "hub" -> allMessages.filter { it.transport == "hub" }
             else -> allMessages
         }
     }
@@ -218,13 +221,16 @@ fun MessagesScreen(openChat: (String) -> Unit = {}) {
             }
         }
 
-        // Transport tab bar
+        // Transport tab bar; it scrolls, since six do not fit a phone's width
         Row(
-            modifier = Modifier.padding(bottom = 4.dp),
+            modifier = Modifier.padding(bottom = 4.dp).horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            listOf("all" to "All", "mesh" to "Mesh", "iridium" to "Satellite", "lxmf" to "Reticulum", "sms" to "SMS")
+            // The Hub tab shows once the Hub route is on or a Hub message is stored (MESHSAT-1584).
+            val hubShown = GatewayService.hubMsgRoute != null || allConversations.any { it.transport == "hub" }
+            listOf("all" to "All", "mesh" to "Mesh", "iridium" to "Satellite", "lxmf" to "Reticulum", "hub" to "Hub", "sms" to "SMS")
                 .filter { it.first != "sms" || net.meshsat.android.sms.SmsCapability.included }
+                .filter { it.first != "hub" || hubShown }
                 .forEach { (key, label) ->
                 FilterChip(
                     selected = selectedTab == key,
@@ -235,12 +241,14 @@ fun MessagesScreen(openChat: (String) -> Unit = {}) {
                             "mesh" -> ColorMesh.copy(alpha = 0.2f)
                             "iridium" -> ColorIridium.copy(alpha = 0.2f)
                             "sms" -> ColorCellular.copy(alpha = 0.2f)
+                            "hub" -> ColorHub.copy(alpha = 0.2f)
                             else -> MeshSatSurfaceLight
                         },
                         selectedLabelColor = when (key) {
                             "mesh" -> ColorMesh
                             "iridium" -> ColorIridium
                             "sms" -> ColorCellular
+                            "hub" -> ColorHub
                             else -> OffWhite
                         },
                     ),
@@ -385,6 +393,7 @@ private fun ConversationCard(conv: ConversationSummary, onClick: () -> Unit) {
         "iridium" -> ColorIridium
         "sms" -> ColorCellular
         "lxmf" -> MeshSatTeal
+        "hub" -> ColorHub
         else -> MeshSatTextMuted
     }
     val timeStr = SimpleDateFormat("MM/dd HH:mm", Locale.getDefault()).format(Date(conv.lastTimestamp))
@@ -525,7 +534,8 @@ fun ConversationChatView(
                     color = Words.transportColor(sendTransport),
                 )
             }
-            IconButton(onClick = { showKeySection = !showKeySection }) {
+            // A Hub chat has no conversation key: the text goes over TLS to the Hub and from it.
+            if (!Peers.isHub(peer)) IconButton(onClick = { showKeySection = !showKeySection }) {
                 Icon(
                     if (activeKey != null) Icons.Default.Lock else Icons.Default.LockOpen,
                     contentDescription = "Encryption key",
@@ -578,8 +588,12 @@ fun ConversationChatView(
         ) {
             // A satellite message that cannot fit one frame is stopped here, not after it has been
             // queued and billed for (MESHSAT-1280). The keyboard's Send key goes through this too.
-            val fitsTheLink = sendTransport != "iridium" ||
-                SatelliteLimits.fits(composeText.trim().toByteArray(Charsets.UTF_8).size)
+            val composeBytes = composeText.trim().toByteArray(Charsets.UTF_8).size
+            val fitsTheLink = when (sendTransport) {
+                "iridium" -> SatelliteLimits.fits(composeBytes)
+                "hub" -> composeBytes <= net.meshsat.android.hubmsg.HubMsgWire.MAX_BODY
+                else -> true
+            }
             val send = {
                 if (composeText.isNotBlank() && fitsTheLink) {
                     sendMessage(context, composeText.trim(), sendTransport, peer, meshConnected, iridiumConnected, lxmfMethod)
@@ -611,6 +625,7 @@ fun ConversationChatView(
                             when (sendTransport) {
                                 "iridium" -> "Message by satellite"
                                 "lxmf" -> "Message by Reticulum"
+                                "hub" -> "Message through the Hub"
                                 "mesh" -> if (peer == Peers.MESH_ALL) "Message everyone on the mesh" else "Message on the mesh"
                                 else -> "Text message"
                             },
@@ -670,6 +685,12 @@ private fun composeHint(transport: String, text: String, peer: String, meshUp: B
                 else -> "By Reticulum, once a path to this address is found."
             }
         }
+        "hub" -> when {
+            GatewayService.hubMsgRoute == null -> "Messages through the Hub are off. Turn them on in Settings, Hub."
+            bytes > net.meshsat.android.hubmsg.HubMsgWire.MAX_BODY -> "Too long for the Hub: $bytes bytes, the limit is ${net.meshsat.android.hubmsg.HubMsgWire.MAX_BODY}."
+            GatewayService.hubReporter?.isConnected != true -> "Through the Hub to its MeshSat app, once this phone is back on the Hub."
+            else -> "Through the Hub to its MeshSat app. Two checks once that app has it."
+        }
         "mesh" -> when {
             !meshUp -> "On the mesh, when your node is connected."
             peer == Peers.MESH_ALL -> "To everyone on the mesh channel."
@@ -689,6 +710,15 @@ private fun sendMessage(
     lxmfMethod: String = "direct",
 ) {
     when (transport) {
+        "hub" -> {
+            // Through the Hub to the contact's MeshSat app; the row shows what the Hub reports (MESHSAT-1584).
+            context.startService(
+                Intent(context, GatewayService::class.java)
+                    .setAction(GatewayService.ACTION_SEND_HUB)
+                    .putExtra(GatewayService.EXTRA_TEXT, text)
+                    .putExtra(GatewayService.EXTRA_RECIPIENT, peer)
+            )
+        }
         "lxmf" -> {
             // A Reticulum message to an LXMF address; the row shows queued, sent, delivered or failed.
             context.startService(
@@ -736,7 +766,27 @@ private fun sendMessage(
 }
 
 /** The delivery badge of a forwarded message: an Iridium send shows where it is in the queue. */
-private fun deliveryLabel(forwardedTo: String): String = when (forwardedTo) {
+private fun deliveryLabel(forwardedTo: String): String = when {
+    forwardedTo.startsWith("hub:") -> hubLabel(forwardedTo)
+    else -> otherLabel(forwardedTo)
+}
+
+/** What is known about a message sent through the Hub, from the events it reported (MESHSAT-1584). */
+private fun hubLabel(s: String): String = when {
+    s == HubMsgStatus.QUEUED -> "Queued"
+    s == HubMsgStatus.ACCEPTED -> "Sent to the Hub"
+    s == HubMsgStatus.FORWARDED -> "The Hub passed it on"
+    s == HubMsgStatus.BUSY -> "Not stored yet, the other app was busy"
+    s == HubMsgStatus.DELIVERED -> "Delivered"
+    s == HubMsgStatus.EXPIRED -> "Expired before it arrived"
+    s == HubMsgStatus.UNKNOWN -> "Outcome unknown"
+    s == HubMsgStatus.REFUSED_PREFIX + "not_sent" -> "Not sent"
+    s.startsWith(HubMsgStatus.REFUSED_PREFIX) -> "Refused by the Hub: " + s.removePrefix(HubMsgStatus.REFUSED_PREFIX).replace('_', ' ')
+    s.startsWith(HubMsgStatus.FAILED_PREFIX) -> "Failed: " + s.removePrefix(HubMsgStatus.FAILED_PREFIX).replace('_', ' ')
+    else -> "Sent to the Hub"
+}
+
+private fun otherLabel(forwardedTo: String): String = when (forwardedTo) {
     GatewayService.IRIDIUM_QUEUED, GatewayService.LXMF_QUEUED -> "Queued"
     GatewayService.LXMF_SENT -> "Sent"
     GatewayService.LXMF_DELIVERED -> "Delivered"
@@ -760,7 +810,7 @@ private fun deliveryLabel(forwardedTo: String): String = when (forwardedTo) {
  */
 @Composable
 private fun DeliveryMark(forwardedTo: String) {
-    val (icon, tint, label) = when (forwardedTo) {
+    val (icon, tint, label) = if (forwardedTo.startsWith("hub:")) hubMark(forwardedTo) else when (forwardedTo) {
         GatewayService.IRIDIUM_QUEUED, GatewayService.LXMF_QUEUED, net.meshsat.android.sms.SmsStatusReceiver.SENDING ->
             Triple(Icons.Default.Schedule, MeshSatTextMuted, "Queued")
         GatewayService.LXMF_FAILED -> Triple(Icons.Default.ErrorOutline, MeshSatRed, "Failed")
@@ -781,6 +831,16 @@ private fun DeliveryMark(forwardedTo: String) {
     Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(14.dp))
 }
 
+/** A Hub message's mark: two checks only on the recipient app's own word that it stored it. */
+private fun hubMark(s: String) = when {
+    s == HubMsgStatus.QUEUED -> Triple(Icons.Default.Schedule, MeshSatTextMuted, "Queued")
+    s == HubMsgStatus.ACCEPTED -> Triple(Icons.Default.Done, MeshSatTextMuted, "Sent to the Hub")
+    s == HubMsgStatus.FORWARDED -> Triple(Icons.Default.Done, MeshSatTeal, "The Hub passed it on")
+    s == HubMsgStatus.DELIVERED -> Triple(Icons.Default.DoneAll, MeshSatTeal, "Delivered")
+    s == HubMsgStatus.BUSY || s == HubMsgStatus.UNKNOWN -> Triple(Icons.AutoMirrored.Filled.HelpOutline, MeshSatAmber, hubLabel(s))
+    else -> Triple(Icons.Default.ErrorOutline, MeshSatRed, hubLabel(s))
+}
+
 /**
  * Chat bubble — decrypts on-the-fly using the active key.
  * If key is deleted/missing, shows ciphertext for encrypted messages.
@@ -790,7 +850,7 @@ private fun ChatBubble(msg: Message, activeKey: String?) {
     val context = LocalContext.current
     val isSelf = msg.direction == "tx"
     val transportColor = when (msg.transport) {
-        "mesh" -> ColorMesh; "iridium" -> ColorIridium; "sms" -> ColorCellular; "lxmf" -> MeshSatTeal; else -> MeshSatTextMuted
+        "mesh" -> ColorMesh; "iridium" -> ColorIridium; "sms" -> ColorCellular; "lxmf" -> MeshSatTeal; "hub" -> ColorHub; else -> MeshSatTextMuted
     }
 
     // Show decrypted text if SmsReceiver already decrypted it (stored in msg.text).
@@ -1152,6 +1212,13 @@ private fun NewMessageDialog(onPick: (String) -> Unit, onDismiss: () -> Unit) {
     val lxmfClean = lxmfAddress.trim().lowercase().removePrefix("<").removeSuffix(">").replace(" ", "")
     val lxmfOk = Peers.isLxmf(lxmfClean)
     val lxmfPeers = remember { GatewayService.rnsStack?.lxmf?.peers().orEmpty().sortedByDescending { it.lastSeenMs } }
+    // Another MeshSat app through the Hub: a card that carries its bridge id, or the id typed in (MESHSAT-1584).
+    val hubOn = GatewayService.hubMsgRoute != null
+    val context = LocalContext.current
+    val cards by AppDatabase.getInstance(context).contactDao().observeAll().collectAsState(initial = emptyList())
+    var hubId by remember { mutableStateOf("") }
+    val hubPeer = Peers.hubPeer(hubId.trim().removePrefix(Peers.HUB_PREFIX))
+    val hubOk = hubOn && hubId.isNotBlank() && Peers.isHub(hubPeer) && hubId.none { it.isWhitespace() }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1183,6 +1250,14 @@ private fun NewMessageDialog(onPick: (String) -> Unit, onDismiss: () -> Unit) {
                         onClick = { onPick(id) },
                     )
                 }
+                if (hubOn) cards.filter { it.bridgeId.isNotBlank() }.forEach { c ->
+                    NewMessageRow(
+                        title = c.name,
+                        detail = "Through the Hub to their MeshSat app, ${c.bridgeId}",
+                        color = ColorHub,
+                        onClick = { onPick(Peers.hubPeer(c.bridgeId)) },
+                    )
+                }
                 lxmfPeers.take(20).forEach { p ->
                     NewMessageRow(
                         title = p.displayName?.ifBlank { null } ?: "Reticulum ${p.destHash.take(8)}",
@@ -1200,6 +1275,17 @@ private fun NewMessageDialog(onPick: (String) -> Unit, onDismiss: () -> Unit) {
                     isError = lxmfAddress.isNotBlank() && !lxmfOk,
                     modifier = Modifier.fillMaxWidth(),
                 )
+                if (hubOn) {
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = hubId,
+                        onValueChange = { hubId = it },
+                        label = { Text("Or a MeshSat app's Hub bridge id") },
+                        singleLine = true,
+                        isError = hubId.isNotBlank() && !hubOk,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
                 // A phone number is an SMS peer; the Google Play edition has no SMS (MESHSAT-1335).
                 if (net.meshsat.android.sms.SmsCapability.included) {
                     Spacer(Modifier.height(8.dp))
@@ -1217,6 +1303,8 @@ private fun NewMessageDialog(onPick: (String) -> Unit, onDismiss: () -> Unit) {
         confirmButton = {
             if (lxmfOk) {
                 TextButton(onClick = { onPick(lxmfClean) }) { Text("Message this address") }
+            } else if (hubOk) {
+                TextButton(onClick = { onPick(hubPeer) }) { Text("Message through the Hub") }
             } else if (net.meshsat.android.sms.SmsCapability.included) {
                 TextButton(onClick = { onPick(number.trim().replace(" ", "")) }, enabled = numberOk) {
                     Text("Text this number")

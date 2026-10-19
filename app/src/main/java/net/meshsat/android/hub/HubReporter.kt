@@ -148,6 +148,41 @@ class HubReporter(
         onCommand = cb
     }
 
+    // --- hub_msg, the Hub app route (MESHSAT-1584) ---
+
+    /** Set before [start]: with them set the session subscribes to this phone's msg/in and msg/status. */
+    @Volatile var onMsgIn: ((String) -> Unit)? = null
+    @Volatile var onMsgStatus: ((String) -> Unit)? = null
+
+    /** Each connect, the first and every automatic reconnect, once subscribed. */
+    @Volatile var onConnected: (() -> Unit)? = null
+
+    /** This phone's principal on the Hub. */
+    val principal: String get() = "bridge:${config.bridgeId}"
+
+    /**
+     * Publishes [payload] on this phone's msg/[kind] at QoS 1 and waits for the broker's PUBACK:
+     * Ok once it took it; NotSent when nothing left the phone (not connected); Unknown when the
+     * answer did not come in time, so it may have reached the Hub.
+     */
+    fun publishMsg(kind: String, payload: String): net.meshsat.android.hubmsg.HubMsgRoute.Published {
+        val c = client
+        if (c == null || !c.isConnected) return net.meshsat.android.hubmsg.HubMsgRoute.Published.NotSent
+        return try {
+            val msg = MqttMessage(payload.toByteArray(StandardCharsets.UTF_8)).apply { qos = QOS_AT_LEAST_ONCE }
+            c.getTopic(topics.msg(config.bridgeId, kind)).publish(msg).waitForCompletion(MSG_PUBLISH_WAIT_MS)
+            net.meshsat.android.hubmsg.HubMsgRoute.Published.Ok
+        } catch (e: org.eclipse.paho.client.mqttv3.MqttException) {
+            Log.w(TAG, "hub_msg publish on msg/$kind: ${e.reasonCode} ${e.message}")
+            if (e.reasonCode == org.eclipse.paho.client.mqttv3.MqttException.REASON_CODE_CLIENT_NOT_CONNECTED.toInt())
+                net.meshsat.android.hubmsg.HubMsgRoute.Published.NotSent
+            else net.meshsat.android.hubmsg.HubMsgRoute.Published.Unknown
+        } catch (e: Exception) {
+            Log.w(TAG, "hub_msg publish on msg/$kind: ${e.message}")
+            net.meshsat.android.hubmsg.HubMsgRoute.Published.Unknown
+        }
+    }
+
     /** Connect to Hub, publish birth, start health loop. */
     fun start() {
         if (config.hubUrl.isBlank() || config.bridgeId.isBlank()) {
@@ -501,12 +536,16 @@ class HubReporter(
 
     /** Subscribe to the command topic and what the Hub delivers of TAK, then publish the birth. */
     private fun subscribeAndAnnounce(c: MqttClient) {
+        val msg = if (onMsgIn != null || onMsgStatus != null)
+            arrayOf(topics.msg(config.bridgeId, "in"), topics.msg(config.bridgeId, "status")) else emptyArray()
         val filters = arrayOf(
             topics.bridgeCmd(config.bridgeId),
             topics.bridgeMOAck(config.bridgeId),
-        ) + topics.takCotInFilters()
+        ) + topics.takCotInFilters() + msg
         c.subscribe(filters, IntArray(filters.size) { QOS_AT_LEAST_ONCE })
         publishBirth()
+        // The session is clean: what the Hub said while it was away is asked for again (hub_msg).
+        onConnected?.invoke()
     }
 
     /**
@@ -616,6 +655,14 @@ class HubReporter(
         }
         if (topic.endsWith("/mo/ack")) {
             handleMoAck(payload)
+            return
+        }
+        if (topic == topics.msg(config.bridgeId, "in")) {
+            onMsgIn?.invoke(payload)
+            return
+        }
+        if (topic == topics.msg(config.bridgeId, "status")) {
+            onMsgStatus?.invoke(payload)
             return
         }
         if (!topic.endsWith("/cmd")) return
@@ -870,6 +917,9 @@ internal fun connectFailureText(e: Throwable): String {
     val inner = chain.last().let { it.message?.trim().orEmpty().ifBlank { it.javaClass.simpleName } }
     return if (chain.size > 1 && inner != outer && !outer.contains(inner)) "$outer: $inner" else outer
 }
+
+/** How long a hub_msg publish waits for the broker's PUBACK before its outcome is unknown. */
+internal const val MSG_PUBLISH_WAIT_MS = 10_000L
 
 /** The first retry after a failed Hub connect, and the longest wait between tries. */
 internal const val CONNECT_RETRY_MIN_MS = 5_000L

@@ -80,6 +80,12 @@ class HubTopics private constructor(val root: String) {
     fun takCotOut(bridgeID: String) = "$root/bridge/${segment(bridgeID)}/tak/cot/out"
 
     /**
+     * The Hub app route hub_msg (MESHSAT-1584): this phone publishes its own msg/out and msg/ack;
+     * the Hub publishes msg/in and msg/status to it. The phone is a bridge principal (C4.1).
+     */
+    fun msg(bridgeID: String, kind: String) = "$root/bridge/${segment(bridgeID)}/msg/$kind"
+
+    /**
      * What the Hub delivers back (meshsat-hub MESHSAT-1461): an event from one of the tenant's TAK
      * servers on this topic, and an event another bridge of the tenant exported one level below it,
      * with that bridge's id as the last segment.
