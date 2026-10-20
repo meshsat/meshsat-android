@@ -7,9 +7,10 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -28,6 +29,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -48,6 +50,10 @@ import java.util.concurrent.atomic.AtomicLong
  *   restart too.
  * - R5: a cancel made while the first start publish is under way owes the cancel, and so does
  *   a start's ack that comes after the local cancel.
+ *
+ * Then the review's acceptance cases (the Bridge's sos_r17_test.go is the same set): a start
+ * publish that timed out after the Hub took it, a restart inside the first start publish, and the
+ * last SOS's satellite start going out only after the next SOS began.
  */
 @RunWith(AndroidJUnit4::class)
 class SosControllerC10Test {
@@ -68,16 +74,22 @@ class SosControllerC10Test {
         val events = CopyOnWriteArrayList<JSONObject>()
         @Volatile var startGate: CountDownLatch? = null
         val startEntered = CountDownLatch(1)
+        /** A gated start, once released, reached no broker: the publish fails and nothing is recorded. */
+        @Volatile var gateDrops = false
+        /** The Hub takes every start and the PUBACK never comes: recorded, and the publish fails. */
+        @Volatile var startTimesOut = false
         override fun publishSos(deviceId: String, id: String, text: String, sos: Boolean, type: String, lat: Double?, lon: Double?, asMessage: Boolean) = up
         override fun publishSosEvent(event: JSONObject): Boolean {
             if (!up) return false
+            val start = event.optString("kind") == "start"
             val gate = startGate
-            if (event.optString("kind") == "start" && gate != null) {
+            if (start && gate != null) {
                 startEntered.countDown()
                 gate.await(20, TimeUnit.SECONDS)
+                if (gateDrops) return false
             }
             events.add(event)
-            return true
+            return !(start && startTimesOut)
         }
         fun count(kind: String, sosId: String? = null) = events.count { it.optString("kind") == kind && (sosId == null || it.optString("sos_id") == sosId) }
     }
@@ -97,7 +109,9 @@ class SosControllerC10Test {
     @After
     fun close() = runBlocking {
         controllers.forEach { it.stop() }
-        scope.cancel()
+        // Every loop and flow of the controllers ends before the database closes: a Room query
+        // still running on the closed, deleted file crashed the test process (SQLITE_IOERR_FSTAT).
+        withTimeout(10_000) { scope.coroutineContext.job.cancelAndJoin() }
         db.close()
         context.deleteDatabase(name)
         settings.setSosRun("")
@@ -257,5 +271,83 @@ class SosControllerC10Test {
         assertTrue("the late start ack made the cancel owed", current().cancelV2Owed)
         until("the cancel") { hub.count("cancel", r.sosId) > 0 }
         assertTrue(SosV2.cancelPending(current()))
+    }
+
+    /**
+     * R5: every start publish times out after the Hub took the start, so the phone never sees one
+     * reach the broker; a cancel then still owes the Hub the cancel.
+     */
+    @Test
+    fun aStartPublishThatTimedOutAfterTheHubTookItOwesTheCancel() = runBlocking {
+        hub.startTimesOut = true
+        val c = restored()
+        c.start(test = false, trigger = "button")
+        val r = current()
+        until("the Hub has the start") { hub.count("start", r.sosId) > 0 }
+        assertNull("the precondition: the phone saw the start reach the broker", current().hubPublishedAt)
+        c.cancel()
+        assertTrue("a start the Hub took, though its publish failed, owes the Hub no cancel", current().cancelV2Owed)
+        until("the cancel") { hub.count("cancel", r.sosId) > 0 }
+    }
+
+    /**
+     * R5: the app stops while the first start publish is under way. The next process finds the
+     * attempt kept, so a cancel made after the restart owes the Hub the cancel, with no start
+     * publish of its own before it.
+     */
+    @Test
+    fun aRestartInsideTheFirstStartPublishOwesTheCancel() = runBlocking {
+        val gate = CountDownLatch(1)
+        val stuck = hub
+        stuck.startGate = gate
+        stuck.gateDrops = true // released at the end: the old publish reached no broker
+        val c = restored()
+        scope.launch { c.start(test = false, trigger = "button") }
+        assertTrue("the start publish began", stuck.startEntered.await(10, TimeUnit.SECONDS))
+        val r = current()
+        c.stop() // the old process ends inside its publish
+        hub = FakeHub().apply { up = false } // no session yet: the new process publishes nothing
+        val after = restored()
+        after.cancel()
+        assertTrue("after a restart inside the start publish, the cancel owes the Hub nothing", current().cancelV2Owed)
+        assertEquals("the precondition: the new process published a start", 0, hub.count("start"))
+        hub.up = true
+        until("the cancel after the restart") { hub.count("cancel", r.sosId) > 0 }
+        gate.countDown()
+        delay(200)
+        assertEquals("the precondition: the old publish reached the broker", 0, stuck.count("start"))
+    }
+
+    /**
+     * R4: A is cancelled while its satellite start is with the modem, A's cancel gets no ack, B
+     * starts, and only then does A's start go out. A's 0x08 still goes on the satellite once the
+     * grace is over; B stays active and owes no cancel.
+     */
+    @Test
+    fun aSatelliteStartThatGoesAfterTheNextSosStillGetsItsCancelFrame() = runBlocking {
+        val c = restored()
+        c.start(test = false, trigger = "button")
+        val a = current()
+        assertTrue("the precondition: A's satellite leg is the 0x07", a.satV2)
+        val sat = rows(a.refPrefix + "sat").single()
+        db.messageDeliveryDao().setStatus(sat.id, "sending", "") // with the modem
+        until("A's start published") { hub.count("start", a.sosId) > 0 }
+        ack(c, a, "start", "active")
+        c.cancel()
+        until("A's cancel published") { hub.count("cancel", a.sosId) > 0 }
+        clock.addAndGet(1_000)
+        c.start(test = false, trigger = "button")
+        val b = current()
+        assertTrue("B is a new run", b.id != a.id && b.sosId != a.sosId)
+        db.messageDeliveryDao().setStatus(sat.id, "sent", "") // A's start goes out, after B began
+        c.onSent(rows(a.refPrefix + "sat").single())
+        clock.addAndGet(SosV2.CANCEL_ACK_GRACE_MS + 1_000)
+        until("A's 0x08 after the grace") { rows(a.refPrefix + "cancel:sat").size == 1 }
+        assertEquals("B has a cancel frame", 0, rows(b.refPrefix + "cancel:sat").size)
+        assertEquals(b.id, current().id)
+        assertTrue("B is not the active SOS", current().active)
+        assertEquals("a cancel was published for B", 0, hub.count("cancel", b.sosId))
+        delay(300)
+        assertEquals("one frame for A's one bearer", 1, rows(a.refPrefix + "cancel:sat").size)
     }
 }
