@@ -881,6 +881,18 @@ class SettingsRepository(private val context: Context) {
     suspend fun setHubCaps(payload: String) {
         context.dataStore.edit { it[stringPreferencesKey("hub_caps")] = payload }
     }
+
+    /**
+     * Earlier SOS runs whose cancellation is still owed (C10, r16 review R4), as a JSON array of
+     * [net.meshsat.android.sos.SosRun]: a new SOS does not end the last one's obligation.
+     */
+    val sosPrevRuns: Flow<String> = context.dataStore.data.map {
+        it[stringPreferencesKey("sos_prev_runs")] ?: ""
+    }
+
+    suspend fun setSosPrevRuns(json: String) {
+        context.dataStore.edit { it[stringPreferencesKey("sos_prev_runs")] = json }
+    }
 }
 
 /** "frequency,bandwidth,txpower,sf,cr" to radio parameters, or null. */

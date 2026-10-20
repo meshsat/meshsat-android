@@ -50,9 +50,9 @@ class HubReporter(
     private val config: HubReporterConfig,
     /** Makes the Paho client of each connect attempt; a test hands in its own (r14 review). */
     private val newClient: (serverUri: String, clientId: String) -> MqttClient = { uri, id -> MqttClient(uri, id, MemoryPersistence()) },
-) {
+) : net.meshsat.android.sos.SosHubLink {
     /** The name this phone reports to the Hub as, for status lines in the app. */
-    val bridgeId: String get() = config.bridgeId
+    override val bridgeId: String get() = config.bridgeId
 
     /**
      * Every Hub topic, under the tenant's root from the bundle (MESHSAT-1467). Null when the stored
@@ -416,7 +416,7 @@ class HubReporter(
         _state.value = State.Disconnected
     }
 
-    val isConnected: Boolean
+    override val isConnected: Boolean
         get() = client?.isConnected == true
 
     /** Publish a ping message and return delivery time in ms. Throws on failure. */
@@ -500,7 +500,7 @@ class HubReporter(
      * routes text real phones (Hub rule 14). Blocks until the broker has it; false
      * when the Hub is not connected or the publish failed.
      */
-    fun publishSos(
+    override fun publishSos(
         deviceId: String,
         id: String,
         text: String,
@@ -508,7 +508,7 @@ class HubReporter(
         type: String,
         lat: Double?,
         lon: Double?,
-        asMessage: Boolean = true,
+        asMessage: Boolean,
     ): Boolean {
         val c = client
         if (c == null || !c.isConnected) return false
@@ -551,7 +551,7 @@ class HubReporter(
      * has it, not the broker's PUBACK). Blocks until the broker has it; false when the Hub is not
      * connected or the publish failed.
      */
-    fun publishSosEvent(event: JSONObject): Boolean {
+    override fun publishSosEvent(event: JSONObject): Boolean {
         val c = client
         if (c == null || !c.isConnected) return false
         return try {
