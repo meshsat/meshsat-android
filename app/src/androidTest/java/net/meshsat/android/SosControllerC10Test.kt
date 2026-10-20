@@ -53,7 +53,8 @@ import java.util.concurrent.atomic.AtomicLong
  *
  * Then the review's acceptance cases (the Bridge's sos_r17_test.go is the same set): a start
  * publish that timed out after the Hub took it, a restart inside the first start publish, and the
- * last SOS's satellite start going out only after the next SOS began.
+ * last SOS's satellite start going out only after the next SOS began. And the r17 review's C10-R7
+ * case (the Bridge's sos_r18_test.go): nine owed cancels outlive the next SOS and a restart.
  */
 @RunWith(AndroidJUnit4::class)
 class SosControllerC10Test {
@@ -349,5 +350,40 @@ class SosControllerC10Test {
         assertEquals("a cancel was published for B", 0, hub.count("cancel", b.sosId))
         delay(300)
         assertEquals("one frame for A's one bearer", 1, rows(a.refPrefix + "cancel:sat").size)
+    }
+
+    /**
+     * R7 (the r17 review's acceptance case): more than eight earlier runs owe their cancel when
+     * the next SOS starts, the app restarts, then the Hub comes back. Every owed cancel is
+     * published and completes on its own ack, and the newest SOS stays on.
+     */
+    @Test
+    fun nineOwedCancelsOutliveARestartAndAllComplete() = runBlocking {
+        hub.up = false
+        val c = restored()
+        val owed = mutableListOf<SosRun>()
+        repeat(9) {
+            c.start(test = false, trigger = "button")
+            val r = current()
+            satWent(r) // its 0x07 went by satellite, so the cancel is owed
+            c.cancel()
+            assertTrue("run ${r.id} owes its cancel", current().cancelV2Owed)
+            owed += r
+            clock.addAndGet(1_000)
+        }
+        c.start(test = false, trigger = "button")
+        val newest = current()
+        val kept = settings.sosPrevRuns.first()
+        owed.forEach { assertTrue("run ${it.id} is not kept", kept.contains(it.sosId)) }
+        // A restart before the Hub is back.
+        c.stop()
+        val after = restored()
+        hub.up = true
+        until("every owed cancel published", 20_000) { owed.all { hub.count("cancel", it.sosId) > 0 } }
+        assertEquals("the newest SOS was cancelled", 0, hub.count("cancel", newest.sosId))
+        owed.forEach { ack(after, it, "cancel", "cancelled") }
+        until("every earlier run forgotten once acked") { settings.sosPrevRuns.first().let { s -> owed.none { s.contains(it.sosId) } } }
+        assertEquals(newest.id, current().id)
+        assertTrue("the newest SOS is not on", current().active)
     }
 }

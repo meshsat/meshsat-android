@@ -81,8 +81,6 @@ class SosController(
         private const val TAG = "Sos"
         const val NOTIFICATION_ID = 1249
         private const val HUB_RETRY_MS = 15_000L
-        /** The most earlier runs whose cancellation is still followed (r16 review C10-R4). */
-        private const val PREV_MAX = 8
         /** A test that has not finished by then stops what is still waiting. */
         const val TEST_LIMIT_MS = 30 * 60_000L
 
@@ -97,8 +95,9 @@ class SosController(
     private var prevJob: Job? = null
     /**
      * Earlier runs whose cancellation is still owed (r16 review C10-R4): a new SOS does not end
-     * the older one's obligation, which goes on until its own ack or its day. Kept in settings,
-     * guarded by [mutex].
+     * the older one's obligation, which goes on until its own ack or its day. All of them, however
+     * many SOS follow: a run leaves only by its ack or its day, never to make room (C10-R7). Kept in
+     * settings, guarded by [mutex].
      */
     private val prev = mutableListOf<SosRun>()
 
@@ -244,10 +243,9 @@ class SosController(
             // The run this one replaces keeps its owed cancellation (C10-R4).
             if (current != null && !current.test && !current.active && cancelOwed(current) && prev.none { it.id == current.id }) {
                 prev.add(current)
-                while (prev.size > PREV_MAX) prev.removeAt(0)
                 savePrev()
                 followPrev()
-                Log.w(TAG, "A new SOS starts; the last one's cancellation is still followed")
+                Log.w(TAG, "A new SOS starts; the last one's cancellation is still followed (${prev.size} owed)")
             }
             val now = clock().let { t -> maxOf(t, (prev.maxOfOrNull { it.id } ?: 0L) + 1, (current?.id ?: 0L) + 1) }
             val loc = env.location()
