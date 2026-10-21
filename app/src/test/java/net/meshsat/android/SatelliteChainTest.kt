@@ -5,6 +5,7 @@ import net.meshsat.android.engine.SatelliteChain
 import net.meshsat.android.engine.TransformException
 import net.meshsat.android.engine.TransformPipeline
 import net.meshsat.android.hub.InterfaceInfo
+import net.meshsat.android.hub.imtStatus
 import net.meshsat.android.hub.modemDeclarations
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -142,6 +143,15 @@ class SatelliteChainTest {
         assertEquals("plain", SatelliteChain.egressFormat(SatelliteChain.MODE_PLAIN))
         assertEquals(null, SatelliteChain.egressFormat(SatelliteChain.MODE_UNDECLARED))
         assertEquals(null, SatelliteChain.egressFormat(null))
+    }
+
+    @Test
+    fun `a ready 9704 reads online to the Hub`() {
+        assertEquals("online", imtStatus(Iridium9704Spp.State.Ready))
+        assertEquals("binding", imtStatus(Iridium9704Spp.State.Initializing))
+        assertEquals("binding", imtStatus(Iridium9704Spp.State.Connected))
+        assertEquals("binding", imtStatus(Iridium9704Spp.State.Connecting))
+        assertEquals("offline", imtStatus(Iridium9704Spp.State.Disconnected))
     }
 
     @Test

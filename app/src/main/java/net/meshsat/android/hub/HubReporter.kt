@@ -899,11 +899,7 @@ class HubReporter(
 
         // Iridium 9704 SPP
         GatewayService.iridium9704Spp?.let { spp ->
-            val status = when (spp.state.value) {
-                net.meshsat.android.bt.Iridium9704Spp.State.Connected -> "online"
-                net.meshsat.android.bt.Iridium9704Spp.State.Connecting -> "binding"
-                else -> "offline"
-            }
+            val status = imtStatus(spp.state.value)
             ifaces.add(InterfaceInfo(
                 name = "iridium_imt_0",
                 type = "iridium_imt",
@@ -962,7 +958,8 @@ class HubReporter(
         }
 
         GatewayService.iridium9704Spp?.let { spp ->
-            val status = if (spp.state.value == net.meshsat.android.bt.Iridium9704Spp.State.Connected) "online" else "offline"
+            // Health speaks only online and offline, as for the other links.
+            val status = if (imtStatus(spp.state.value) == "online") "online" else "offline"
             val bars = spp.signal.value
             health.add(InterfaceHealth(
                 name = "iridium_imt_0",
@@ -1023,6 +1020,16 @@ data class HubReporterConfig(
  * innermost cause, which is where Paho puts the real reason ("Unable to connect to server" over
  * a TLS or DNS error). Pure, so it has a test.
  */
+/**
+ * The 9704's state as the Hub reads it: Ready is the one state it sends and receives in. A ready
+ * modem used to read "offline", because only the link's Connected counted (MESHSAT-1623).
+ */
+internal fun imtStatus(state: net.meshsat.android.bt.Iridium9704Spp.State): String = when (state) {
+    net.meshsat.android.bt.Iridium9704Spp.State.Ready -> "online"
+    net.meshsat.android.bt.Iridium9704Spp.State.Disconnected -> "offline"
+    else -> "binding"
+}
+
 /**
  * Each modem a birth names with what it declares ("imei:format"), which the health loop compares to
  * re-announce: a modem paired late, or a chain switched between plain and sealed (MESHSAT-1623).
