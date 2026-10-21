@@ -1,0 +1,1 @@
+The satellite modem on the node can now send and read the kits' encrypted satellite chain: set it under Satellite modem on the node, Satellite chain, after importing the kit's key bundle. A compressed SMS with Greek or other non-English text now reads back as it was sent.
