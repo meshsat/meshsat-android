@@ -1,7 +1,10 @@
 package net.meshsat.android.engine
 
-import android.util.Base64
 import android.util.Log
+import net.meshsat.android.codec.Smaz2Bytes
+import net.meshsat.android.codec.Smaz2Dict
+import net.meshsat.android.codec.Smaz2Exception
+import net.meshsat.android.codec.Smaz2g
 import net.meshsat.android.crypto.AesGcmCrypto
 import net.meshsat.android.crypto.MsvqscCodebook
 import net.meshsat.android.crypto.MsvqscEncoder
@@ -12,8 +15,10 @@ import net.meshsat.android.crypto.MsvqscEncoder
  *
  * Supported transforms on Android:
  * - "base64": Base64 encode/decode (required for text-only channels like SMS)
- * - "encrypt": AES-256-GCM encrypt/decrypt (requires "key" param)
+ * - "encrypt": AES-256-GCM encrypt/decrypt ("key" param, or "key_ref" through [keyResolver])
  * - "msvqsc": MSVQ-SC lossy semantic compression (requires encoder for TX, codebook for RX)
+ * - "smaz2", "smaz2g": SMAZ2 with the "dict" param's table, byte for byte as the Bridge
+ *   (smaz2g adds its mode byte, HeMB-NG S3-1; [Smaz2Bytes], [Smaz2g])
  */
 class TransformPipeline {
 
@@ -21,15 +26,25 @@ class TransformPipeline {
     var msvqscCodebook: MsvqscCodebook? = null
 
     /**
+     * Resolves an encrypt step's "key_ref" ("channel:address", e.g. "iridium:shared") to its
+     * 64-hex AES key, null when there is none: the step then fails, it never runs without a key.
+     */
+    var keyResolver: ((String) -> String?)? = null
+
+    /** A fixed nonce for the encrypt step, set only by the shared test vectors. */
+    internal var fixedNonce: ByteArray? = null
+
+    /**
      * Apply egress transforms in order (compress -> encrypt -> base64).
      * @param data Raw payload bytes.
      * @param transformsJson JSON array of TransformSpec, e.g. [{"type":"encrypt","params":{"key":"..."}},{"type":"base64"}]
      * @return Transformed payload bytes.
      */
-    fun applyEgress(data: ByteArray, transformsJson: String?): ByteArray {
-        val transforms = TransformSpec.parseList(transformsJson)
-        if (transforms.isEmpty()) return data
+    fun applyEgress(data: ByteArray, transformsJson: String?): ByteArray =
+        applyEgress(data, TransformSpec.parseList(transformsJson))
 
+    /** [applyEgress] on a parsed chain. */
+    fun applyEgress(data: ByteArray, transforms: List<TransformSpec>): ByteArray {
         var result = data
         for (t in transforms) {
             result = applyTransform(t, result)
@@ -43,10 +58,11 @@ class TransformPipeline {
      * @param transformsJson JSON array of TransformSpec.
      * @return Original payload bytes.
      */
-    fun applyIngress(data: ByteArray, transformsJson: String?): ByteArray {
-        val transforms = TransformSpec.parseList(transformsJson)
-        if (transforms.isEmpty()) return data
+    fun applyIngress(data: ByteArray, transformsJson: String?): ByteArray =
+        applyIngress(data, TransformSpec.parseList(transformsJson))
 
+    /** [applyIngress] on a parsed chain. */
+    fun applyIngress(data: ByteArray, transforms: List<TransformSpec>): ByteArray {
         var result = data
         for (i in transforms.indices.reversed()) {
             result = reverseTransform(transforms[i], result)
@@ -54,16 +70,30 @@ class TransformPipeline {
         return result
     }
 
+    private fun encryptKey(t: TransformSpec): String {
+        t.params["key"]?.takeIf { it.isNotBlank() }?.let { return it }
+        val ref = t.params["key_ref"]
+            ?: throw TransformException("encrypt transform requires a 'key' or 'key_ref' param")
+        return keyResolver?.invoke(ref)?.takeIf { it.isNotBlank() }
+            ?: throw TransformException("encrypt transform: no key for '$ref'")
+    }
+
     private fun applyTransform(t: TransformSpec, data: ByteArray): ByteArray = when (t.type) {
-        "base64" -> {
-            Base64.encode(data, Base64.NO_WRAP)
-        }
+        // java.util.Base64, not android.util.Base64: the chains run in the JVM tests as well.
+        "base64" -> java.util.Base64.getEncoder().encode(data)
 
         "encrypt" -> {
-            val key = t.params["key"]
-                ?: throw TransformException("encrypt transform requires a 'key' param")
-            AesGcmCrypto.encrypt(data, key)
+            val key = encryptKey(t)
+            try {
+                AesGcmCrypto.encrypt(data, key, fixedNonce)
+            } catch (e: Exception) {
+                throw TransformException("encrypt: ${e.javaClass.simpleName}")
+            }
         }
+
+        "smaz2" -> Smaz2Bytes.compress(data, Smaz2Dict.of(t.params["dict"]))
+
+        "smaz2g" -> Smaz2g.encode(data, Smaz2Dict.of(t.params["dict"]))
 
         "msvqsc" -> {
             val encoder = msvqscEncoder
@@ -84,14 +114,28 @@ class TransformPipeline {
     }
 
     private fun reverseTransform(t: TransformSpec, data: ByteArray): ByteArray = when (t.type) {
-        "base64" -> {
-            Base64.decode(data, Base64.DEFAULT)
+        // Lenient as android.util.Base64.DEFAULT was: line breaks and other non-alphabet bytes are skipped.
+        "base64" -> java.util.Base64.getMimeDecoder().decode(data)
+
+        "encrypt" -> try {
+            AesGcmCrypto.decrypt(data, encryptKey(t))
+        } catch (e: TransformException) {
+            throw e
+        } catch (e: Exception) {
+            // A wrong key, a changed tag or ciphertext, a cut message: never a guess.
+            throw TransformException("decrypt: ${e.javaClass.simpleName}")
         }
 
-        "encrypt" -> {
-            val key = t.params["key"]
-                ?: throw TransformException("encrypt transform requires a 'key' param")
-            AesGcmCrypto.decrypt(data, key)
+        "smaz2" -> try {
+            Smaz2Bytes.decompress(data, Smaz2Dict.of(t.params["dict"]))
+        } catch (e: Smaz2Exception) {
+            throw TransformException(e.message ?: "smaz2")
+        }
+
+        "smaz2g" -> try {
+            Smaz2g.decode(data, Smaz2Dict.of(t.params["dict"]))
+        } catch (e: Smaz2Exception) {
+            throw TransformException(e.message ?: "smaz2g")
         }
 
         "msvqsc" -> {
@@ -150,11 +194,11 @@ class TransformPipeline {
                     "encrypt" -> {
                         hasBinaryOutput = true
                         endsWithBase64 = false
-                        if (t.params["key"].isNullOrBlank()) {
-                            errors += "encrypt transform requires a 'key' param"
+                        if (t.params["key"].isNullOrBlank() && t.params["key_ref"].isNullOrBlank()) {
+                            errors += "encrypt transform requires a 'key' or 'key_ref' param"
                         }
                     }
-                    "msvqsc" -> {
+                    "msvqsc", "smaz2", "smaz2g" -> {
                         hasBinaryOutput = true
                         endsWithBase64 = false
                     }

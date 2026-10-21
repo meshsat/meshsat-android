@@ -1,0 +1,4 @@
+file h-chain-vectors-v1.json
+sha256 383833c73e709d3f1fcc6f04b6e4b37eb452e1891a6d66e9aa486c8d3bfab3be
+bridge_commit 79689a741ff82c3a97bdd17580ccfd849f3297d5
+generator meshsat internal/engine/h_chain_vectors_test.go (MESHSAT_WRITE_VECTORS=1)

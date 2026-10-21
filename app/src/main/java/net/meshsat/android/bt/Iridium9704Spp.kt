@@ -7,7 +7,6 @@ import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothSocket
 import net.meshsat.android.ble.ModemLink
 import android.content.Context
-import android.util.Base64
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -92,6 +91,15 @@ class Iridium9704Spp(private val context: Context) {
                 table[i] = crc and 0xFFFF
             }
         }
+
+        /**
+         * One JSPR segment's data field: standard base64, no line breaks. java.util.Base64, not
+         * android.util.Base64, so the JVM tests run the bytes a sealed message travels as.
+         */
+        fun jsprSegmentData(segment: ByteArray): String = java.util.Base64.getEncoder().encodeToString(segment)
+
+        /** A JSPR segment's data field back to its bytes, lenient as android.util.Base64.DEFAULT was. */
+        fun jsprSegmentBytes(data: String): ByteArray = java.util.Base64.getMimeDecoder().decode(data)
 
         /** Compute CRC-16/CCITT-FALSE over [data]. */
         fun crc16(data: ByteArray): Int {
@@ -689,7 +697,7 @@ class Iridium9704Spp(private val context: Context) {
         }
 
         val segment = payload.copyOfRange(segStart, segStart + segLen)
-        val b64 = Base64.encodeToString(segment, Base64.NO_WRAP)
+        val b64 = jsprSegmentData(segment)
 
         val resp = JSONObject()
             .put("topic_id", moTopicId)
@@ -757,7 +765,7 @@ class Iridium9704Spp(private val context: Context) {
         val b64Data = json.optString("data", "")
 
         val decoded = try {
-            Base64.decode(b64Data, Base64.DEFAULT)
+            jsprSegmentBytes(b64Data)
         } catch (e: Exception) {
             Log.e(TAG, "MT segment base64 decode failed: ${e.message}")
             return

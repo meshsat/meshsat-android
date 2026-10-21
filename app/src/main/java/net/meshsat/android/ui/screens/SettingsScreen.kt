@@ -627,6 +627,36 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
                 if (iridiumPipe != null) {
                     InfoRow("The node says", if (pipeStatus?.value?.flags == null) "nothing yet" else if (nodeSaysJspr) "RockBLOCK 9704 (JSPR)" else "RockBLOCK 9603 (AT)")
                 }
+                if (node9704) {
+                    // The kits' encrypted satellite chain (MESHSAT-1623): what the 9704 sends, and
+                    // what this phone tells the Hub, which keeps an encrypted modem's messages opaque.
+                    val chain by settings.satelliteChain.collectAsState(initial = net.meshsat.android.engine.SatelliteChain.MODE_UNDECLARED)
+                    SettingRow("Satellite chain") {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            listOf(
+                                net.meshsat.android.engine.SatelliteChain.MODE_UNDECLARED to "Not set",
+                                net.meshsat.android.engine.SatelliteChain.MODE_PLAIN to "Plain",
+                                net.meshsat.android.engine.SatelliteChain.MODE_SEALED to "Encrypted",
+                            ).forEach { (mode, label) ->
+                                FilterChip(
+                                    selected = chain == mode,
+                                    onClick = { scope.launch { settings.setSatelliteChain(mode) } },
+                                    label = { Text(label, style = MaterialTheme.typography.bodySmall) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = MeshSatTeal.copy(alpha = 0.2f),
+                                    ),
+                                )
+                            }
+                        }
+                    }
+                    if (chain == net.meshsat.android.engine.SatelliteChain.MODE_SEALED) {
+                        Text(
+                            "Texts go out as the kits send them: compressed and encrypted with the key from the kit's key bundle. Without that key nothing is sent.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
                 if (node9704 && state9704 == net.meshsat.android.bt.Iridium9704Spp.State.Ready) {
                     iridium9704ModemInfo?.value?.let { info ->
                         if (info.imei.isNotBlank()) InfoRow("IMEI", info.imei)

@@ -31,9 +31,16 @@ object AesGcmCrypto {
     }
 
     /** Encrypt plaintext bytes. Returns [nonce][ciphertext+tag]. */
-    fun encrypt(plaintext: ByteArray, hexKey: String): ByteArray {
+    fun encrypt(plaintext: ByteArray, hexKey: String): ByteArray = encrypt(plaintext, hexKey, null)
+
+    /**
+     * [encrypt] with a fixed [fixedNonce]: only the shared test vectors use one, to compare
+     * bytes with the Bridge's; every send draws a fresh random nonce.
+     */
+    internal fun encrypt(plaintext: ByteArray, hexKey: String, fixedNonce: ByteArray?): ByteArray {
         val key = hexKey.hexToSecretKey()
-        val nonce = ByteArray(NONCE_SIZE).also { SecureRandom().nextBytes(it) }
+        val nonce = fixedNonce?.also { require(it.size == NONCE_SIZE) { "nonce must be $NONCE_SIZE bytes" } }
+            ?: ByteArray(NONCE_SIZE).also { SecureRandom().nextBytes(it) }
 
         val cipher = Cipher.getInstance(ALGORITHM)
         cipher.init(Cipher.ENCRYPT_MODE, key, GCMParameterSpec(TAG_SIZE_BITS, nonce))

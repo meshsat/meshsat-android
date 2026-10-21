@@ -19,7 +19,7 @@ object Smaz2 {
     private const val BIGRAMS =
         "intherreheanonesorteattistenntartondalitseediseangoulecomeneriroderaioicliofasetvetasihamaecomceelllcaurlachhidihofonsotacnarssoprrtsassusnoiltsemctgeloeebetrnipeiepancpooldaadviunamutwimoshyoaiewowosfiepttmiopiaweagsuiddoooirspplscaywaigeirylytuulivimabty"
 
-    private val WORDS = arrayOf(
+    internal val WORDS = arrayOf(
         "that", "this", "with", "from", "your", "have", "more", "will", "home",
         "about", "page", "search", "free", "other", "information", "time", "they",
         "what", "which", "their", "news", "there", "only", "when", "contact", "here",

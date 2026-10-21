@@ -167,6 +167,11 @@ data class InterfaceInfo(
     val status: String,
     val port: String = "",
     val imei: String = "",
+    /**
+     * "sealed" or "plain": what the interface's send chain makes of a payload (HeMB-NG S3-2), as
+     * the Bridge declares it; empty declares nothing. egress_sealed is the older form of sealed.
+     */
+    val egressFormat: String = "",
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("name", name)
@@ -174,6 +179,8 @@ data class InterfaceInfo(
         put("status", status)
         if (port.isNotEmpty()) put("port", port)
         if (imei.isNotEmpty()) put("imei", imei)
+        if (egressFormat.isNotEmpty()) put("egress_format", egressFormat)
+        if (egressFormat == "sealed") put("egress_sealed", true)
     }
 }
 
@@ -208,6 +215,8 @@ data class BridgeBirth(
     val capabilities: List<String> = emptyList(),
     val cotCallsign: String = "",
     val uptimeSec: Long = 0,
+    /** The birth's stamp (BirthStamper), which the Hub orders this phone's births by; empty = now. */
+    val timestamp: String = "",
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("protocol", HubProtocol.VERSION)
@@ -222,7 +231,7 @@ data class BridgeBirth(
         put("cot_type", HubProtocol.COT_MOBILE)
         put("cot_callsign", cotCallsign.ifEmpty { hostname })
         put("uptime_sec", uptimeSec)
-        put("timestamp", HubProtocol.isoTimestamp())
+        put("timestamp", timestamp.ifEmpty { HubProtocol.isoTimestamp() })
     }
 }
 

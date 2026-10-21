@@ -164,6 +164,9 @@ class GatewayService : Service() {
         /** At most one node reconnect this often when the pipe stops taking writes (MESHSAT-1270). */
         private const val PIPE_RECOVERY_COOLDOWN_MS = 60_000L
 
+        /** How soon a satellite chain setting that could not be read is read again (MESHSAT-1623). */
+        private const val SATELLITE_CHAIN_REREAD_MS = 10_000L
+
         /** A mailbox check the user asked for (MESHSAT-400): running, or its last outcome. */
         data class MailboxCheck(
             val running: Boolean = false,
@@ -444,6 +447,7 @@ class GatewayService : Service() {
             initRnsTcp()
             initHubRelay()
             initReticulumTransportNode()
+            watchSatelliteChain()
             initHubReporter()
             // 15. Pass-aware scheduling (MESHSAT-386)
             initPassScheduler()
@@ -1040,7 +1044,11 @@ class GatewayService : Service() {
                     context = this@GatewayService,
                     scope = scope,
                     config = config,
+                    birthStamps = net.meshsat.android.data.SettingsBirthStampStore(settings),
                 )
+                // What the birth declares for the 9704 (HeMB-NG S3-2): read until it is read, and a
+                // failed read keeps the last value, so it never declares less than it did.
+                reporter.imtEgressFormat = { net.meshsat.android.engine.SatelliteChain.egressFormat(satelliteChainMode) }
                 reporter.setCommandCallback { cmd ->
                     handleHubCommand(cmd)
                 }
@@ -2870,7 +2878,7 @@ class GatewayService : Service() {
                     // satellite now. The composer, the rules, the receipts and the Home count all
                     // name this one link, so its messages go out over IMT here. Until 8 Oct 2026
                     // they waited for a 9603 that was not there ("iridium not connected", MESHSAT-1507).
-                    if (iridium0ParkedForImt) return sendVia9704(payload, textPreview)
+                    if (iridium0ParkedForImt) return sendVia9704(payload, textPreview, deliveryId)
                     val spp = iridiumSpp
                         ?: return "iridium not available"
                     if (spp.state.value != IridiumSpp.State.Connected)
@@ -2909,7 +2917,7 @@ class GatewayService : Service() {
                     null // success: Dispatcher.onSent records it
                 }
                 interfaceId == "iridium9704_0" -> {
-                    sendVia9704(payload, textPreview)?.let { return it }
+                    sendVia9704(payload, textPreview, deliveryId)?.let { return it }
                     db.messageDao().insert(
                         Message(
                             transport = "iridium9704", direction = "tx", sender = "self",
@@ -3272,6 +3280,27 @@ class GatewayService : Service() {
         }
     }
 
+    /**
+     * The 9704's satellite chain as last read, for the Hub birth (MESHSAT-1623). Null until the
+     * first read: the birth then declares nothing, which leaves the Hub's declaration as it is.
+     */
+    @Volatile private var satelliteChainMode: String? = null
+
+    private fun watchSatelliteChain() {
+        scope.launch {
+            while (true) {
+                try {
+                    settings.satelliteChain.collect { satelliteChainMode = it }
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Log.w("MeshSat", "Satellite chain setting could not be read, keeping the last value: ${e.message}")
+                    delay(SATELLITE_CHAIN_REREAD_MS)
+                }
+            }
+        }
+    }
+
     // True while the 9603 interface is parked because the node's modem is a 9704 (MESHSAT-1507).
     @Volatile private var iridium0ParkedForImt = false
 
@@ -3292,10 +3321,30 @@ class GatewayService : Service() {
      * driver cancels a send that sees no satellite before it answers, so a retry never leaves a
      * second copy in the modem; a cancel the modem never settled is unconfirmed (MESHSAT-1507).
      */
-    private suspend fun sendVia9704(payload: ByteArray, textPreview: String): String? {
+    private suspend fun sendVia9704(payload: ByteArray, textPreview: String, deliveryId: Long = 0): String? {
         val spp = iridium9704Spp ?: return "9704 not available"
         if (spp.state.value != net.meshsat.android.bt.Iridium9704Spp.State.Ready) return "9704 not ready"
-        val data = if (payload.isNotEmpty()) payload else textPreview.toByteArray()
+        val text = if (payload.isNotEmpty()) payload else textPreview.toByteArray()
+        // The kits' encrypted chain when it is set (MESHSAT-1623). A setting that cannot be read
+        // holds the message rather than send it as it is, and one that cannot be sealed is never
+        // sent as plaintext instead.
+        val mode = try {
+            settings.satelliteChain.first()
+        } catch (e: Exception) {
+            return "the satellite chain setting could not be read: ${e.message}"
+        }
+        val msgRef = if (deliveryId > 0) db.messageDeliveryDao().getById(deliveryId)?.msgRef.orEmpty() else ""
+        val data = if (mode == net.meshsat.android.engine.SatelliteChain.MODE_SEALED &&
+            net.meshsat.android.engine.SatelliteChain.sealsDelivery(msgRef, text)
+        ) {
+            try {
+                net.meshsat.android.engine.SatelliteChain.seal(text, satelliteChainKey())
+            } catch (e: net.meshsat.android.engine.TransformException) {
+                return "${Dispatcher.NEVER} Not sent: ${e.message}. Import the kit's key bundle, or set the satellite chain to plain."
+            }
+        } else {
+            text
+        }
         // Up to 100 KB in one message: nothing is cut into parts.
         val status = spp.sendMessageBlocking(data)
         if (status == net.meshsat.android.bt.Iridium9704Spp.MO_CANCEL_UNANSWERED) {
@@ -3303,6 +3352,15 @@ class GatewayService : Service() {
         }
         if (status != "mo_ack_received") return "9704 MO failed: ${status ?: "timeout"}"
         return null
+    }
+
+    /** The key the kits' satellite chain names (iridium:shared), from an imported key bundle; null when there is none. */
+    private suspend fun satelliteChainKey(): String? = try {
+        net.meshsat.android.data.ConversationKeyRepository(db.conversationKeyDao(), net.meshsat.android.crypto.SecureKeyStore.getInstance(this))
+            .getBySender(net.meshsat.android.engine.SatelliteChain.KEY_ADDRESS)?.hexKey
+    } catch (e: Exception) {
+        Log.w("MeshSat", "Satellite chain key could not be read: ${e.message}")
+        null
     }
 
     /**
@@ -3716,22 +3774,36 @@ class GatewayService : Service() {
                 spp.receivedMessages.collect { payload ->
                     // A framed Reticulum packet is the node's (MESHSAT-1553), not a text.
                     if (net.meshsat.android.rns.ImtFraming.isFramed(payload)) return@collect
-                    val text = payload.toString(Charsets.UTF_8)
                     val imei = spp.modemInfo.value.imei.ifBlank { "9704" }
                     val dedupKey = "iridium9704:${payload.contentHashCode()}"
                     if (deduplicator.isDuplicateKey(dedupKey)) return@collect
+                    // A kit's encrypted chain opens with the bundle's key; one that does not open is
+                    // kept as it came and never shown as a guess (MESHSAT-1623).
+                    val mt = net.meshsat.android.engine.SatelliteChain.readMt(
+                        payload,
+                        if (payload.firstOrNull() == net.meshsat.android.engine.SatelliteChain.PROTOCOL_VERSION) satelliteChainKey() else null,
+                    )
+                    val (text, sealed) = when (mt) {
+                        is net.meshsat.android.engine.SatelliteChain.Mt.Text -> mt.text to mt.sealed
+                        is net.meshsat.android.engine.SatelliteChain.Mt.Unopened -> {
+                            Log.w("MeshSat", "Iridium 9704: an encrypted message from $imei did not open: ${mt.reason}")
+                            "[Encrypted satellite message, cannot open: ${mt.reason}]" to true
+                        }
+                    }
                     db.messageDao().insert(
                         Message(
                             transport = "iridium9704",
                             direction = "rx",
                             sender = imei,
                             text = text,
-                            encrypted = false,
+                            rawText = if (sealed) java.util.Base64.getEncoder().encodeToString(payload) else "",
+                            encrypted = sealed,
                             timestamp = System.currentTimeMillis(),
                         )
                     )
                     postMessageNotification("Iridium 9704: $imei", text)
                     interfaceManager?.recordActivity("iridium9704_0")
+                    if (mt is net.meshsat.android.engine.SatelliteChain.Mt.Unopened) return@collect
                     evaluateAndForward(ForwardingRule.Transport.IRIDIUM, text, imei)
                 }
             }

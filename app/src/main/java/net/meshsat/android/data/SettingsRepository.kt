@@ -103,6 +103,14 @@ class SettingsRepository(private val context: Context) {
         val KEY_HUB_CALLSIGN = stringPreferencesKey("hub_callsign")
         val KEY_HUB_USERNAME = stringPreferencesKey("hub_username")
         val KEY_HUB_HEALTH_INTERVAL = stringPreferencesKey("hub_health_interval") // seconds as string
+        /** The last Hub birth's stamp, RFC 3339 (HeMB-NG S3-2): births are ordered across restarts. */
+        val KEY_HUB_LAST_BIRTH_STAMP = stringPreferencesKey("hub_last_birth_stamp")
+
+        /**
+         * The 9704's satellite chain (MESHSAT-1623): "" sends the text as it is and declares
+         * nothing, as before; "plain" the same, declared; "sealed" the kits' encrypted H chain.
+         */
+        val KEY_SATELLITE_CHAIN = stringPreferencesKey("satellite_chain")
 
         // Hub relay client (MESHSAT-1157)
         val KEY_HUB_RELAY_ENABLED = booleanPreferencesKey("hub_relay_enabled")
@@ -892,6 +900,34 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setSosPrevRuns(json: String) {
         context.dataStore.edit { it[stringPreferencesKey("sos_prev_runs")] = json }
+    }
+
+    /** The 9704's satellite chain: "", "plain" or "sealed" ([KEY_SATELLITE_CHAIN]). */
+    val satelliteChain: Flow<String> = context.dataStore.data.map { it[KEY_SATELLITE_CHAIN] ?: "" }
+
+    suspend fun setSatelliteChain(mode: String) {
+        context.dataStore.edit { it[KEY_SATELLITE_CHAIN] = mode }
+    }
+
+    /** The last Hub birth's stamp as stored, null when none was. Throws when it cannot be read. */
+    suspend fun hubLastBirthStamp(): String? = context.dataStore.data.first()[KEY_HUB_LAST_BIRTH_STAMP]
+
+    /** Throws when it cannot be stored. */
+    suspend fun setHubLastBirthStamp(stamp: String) {
+        context.dataStore.edit { it[KEY_HUB_LAST_BIRTH_STAMP] = stamp }
+    }
+}
+
+/**
+ * The Hub reporter's birth stamps in the settings: a failed read or write, or a stored value that is
+ * not a timestamp, is an error, never "no stamp" (MESHSAT-1623, as the Bridge's store).
+ */
+class SettingsBirthStampStore(private val settings: SettingsRepository) : net.meshsat.android.hub.BirthStampStore {
+    override fun lastBirthStamp(): java.time.Instant? =
+        kotlinx.coroutines.runBlocking { settings.hubLastBirthStamp() }?.let { net.meshsat.android.hub.BirthStamper.parse(it) }
+
+    override fun saveBirthStamp(stamp: java.time.Instant) {
+        kotlinx.coroutines.runBlocking { settings.setHubLastBirthStamp(net.meshsat.android.hub.BirthStamper.format(stamp)) }
     }
 }
 

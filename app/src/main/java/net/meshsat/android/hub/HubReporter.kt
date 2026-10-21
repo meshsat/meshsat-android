@@ -48,7 +48,11 @@ class HubReporter(
     private val context: Context,
     private val scope: CoroutineScope,
     private val config: HubReporterConfig,
-    /** Makes the Paho client of each connect attempt; a test hands in its own (r14 review). */
+    /** The last birth's stamp across restarts (HeMB-NG S3-2); null keeps it for this process only. */
+    birthStamps: BirthStampStore? = null,
+    /** The clock births are stamped from; a test hands in its own. */
+    private val clock: () -> java.time.Instant = { java.time.Instant.now() },
+    /** Makes the Paho client of each connect attempt; a test hands in its own (r14 review). Last, for a trailing lambda. */
     private val newClient: (serverUri: String, clientId: String) -> MqttClient = { uri, id -> MqttClient(uri, id, MemoryPersistence()) },
 ) : net.meshsat.android.sos.SosHubLink {
     /** The name this phone reports to the Hub as, for status lines in the app. */
@@ -69,6 +73,9 @@ class HubReporter(
         private const val TAG = "HubReporter"
         private const val QOS_FIRE_AND_FORGET = 0
         private const val QOS_AT_LEAST_ONCE = 1
+
+        /** How often a birth that did not go out is tried again while connected, as on the Bridge. */
+        internal const val BIRTH_RETRY_MS = 10_000L
     }
 
     enum class State { Disconnected, Connecting, Connected, Error }
@@ -159,6 +166,13 @@ class HubReporter(
 
     /** Each connect, the first and every automatic reconnect, once subscribed. */
     @Volatile var onConnected: (() -> Unit)? = null
+
+    /**
+     * What the 9704's send chain makes of a message, as the birth declares it (egress_format,
+     * HeMB-NG S3-2): "sealed", "plain", or null to declare nothing, which leaves the Hub's stored
+     * declaration as it is. The Hub keeps a sealed modem's messages opaque. [MESHSAT-1623]
+     */
+    @Volatile var imtEgressFormat: (() -> String?)? = null
 
     /**
      * An SOS under its own identity (HeMB-NG C10, MESHSAT-1584). Set before [start]: the session
@@ -617,19 +631,32 @@ class HubReporter(
     }
 
     /**
-     * Modem IMEIs the last birth reported. The Hub links a satellite device to this
-     * bridge only from a birth, and a modem is often paired after the Hub connect,
-     * so the health loop re-announces when this set changes (MESHSAT-1235).
+     * Modems the last birth reported, each with what it declared. The Hub links a satellite device
+     * to this bridge only from a birth, and a modem is often paired after the Hub connect, so the
+     * health loop re-announces when this set changes (MESHSAT-1235), and so when the chain does.
      */
     @Volatile
-    private var announcedImeis: Set<String> = emptySet()
+    private var announcedModems: Set<String> = emptySet()
 
-    private fun modemImeis(interfaces: List<InterfaceInfo>): Set<String> =
-        interfaces.map { it.imei }.filter { it.isNotBlank() }.toSet()
+    private val stamper = BirthStamper(birthStamps)
 
+    /** A birth did not go out (its stamp could not be read or stored, or the publish failed). */
+    private val birthPending = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /**
+     * Stamps, signs and publishes one birth. One whose stamp could not be read or stored does not
+     * go out; it is tried again every [BIRTH_RETRY_MS] while connected, as on the Bridge.
+     */
     private fun publishBirth() {
-        val birth = buildBirthCertificate()
-        announcedImeis = modemImeis(birth.interfaces)
+        val stamp = try {
+            stamper.next(clock())
+        } catch (e: BirthStampException) {
+            birthPending.set(true)
+            Log.w(TAG, "Birth not published, tried again in ${BIRTH_RETRY_MS / 1000} s: ${e.message}")
+            return
+        }
+        val birth = buildBirthCertificate(stamp)
+        announcedModems = modemDeclarations(birth.interfaces)
         val birthJson = birth.toJson()
 
         // Sign the birth message with the bridge's mTLS private key
@@ -643,11 +670,14 @@ class HubReporter(
             QOS_AT_LEAST_ONCE,
             retained = true,
             birthJson.toString(),
-        )
-        Log.i(TAG, "Published bridge birth: ${config.bridgeId}")
+        ) { sent ->
+            birthPending.set(!sent)
+            if (sent) Log.i(TAG, "Published bridge birth: ${config.bridgeId}")
+            else Log.w(TAG, "Birth not published, tried again in ${BIRTH_RETRY_MS / 1000} s")
+        }
     }
 
-    private fun buildBirthCertificate(): BridgeBirth {
+    private fun buildBirthCertificate(stamp: java.time.Instant): BridgeBirth {
         val ifaces = collectInterfaces()
         val caps = collectCapabilities()
         val loc = collectLocation()
@@ -664,18 +694,25 @@ class HubReporter(
             capabilities = caps,
             cotCallsign = config.callsign.ifEmpty { Build.MODEL },
             uptimeSec = uptime,
+            timestamp = BirthStamper.format(stamp),
         )
     }
 
     private fun startHealthLoop() {
         healthJob?.cancel()
         healthJob = scope.launch {
+            launch {
+                while (true) {
+                    delay(BIRTH_RETRY_MS)
+                    if (birthPending.get() && isConnected) publishBirth()
+                }
+            }
             while (true) {
                 delay(config.healthIntervalSec * 1000L)
                 if (!isConnected) continue
                 try {
-                    if (modemImeis(collectInterfaces()) != announcedImeis) {
-                        Log.i(TAG, "Modem set changed, re-publishing birth")
+                    if (modemDeclarations(collectInterfaces()) != announcedModems) {
+                        Log.i(TAG, "Modem set or chain changed, re-publishing birth")
                         publishBirth()
                     }
                     publishHealth()
@@ -872,6 +909,7 @@ class HubReporter(
                 type = "iridium_imt",
                 status = status,
                 imei = spp.modemInfo.value.imei,
+                egressFormat = imtEgressFormat?.invoke().orEmpty(),
             ))
         }
 
@@ -936,10 +974,12 @@ class HubReporter(
         return health
     }
 
-    private fun publish(topic: String, qos: Int, retained: Boolean, payload: String) {
+    /** Publishes off the caller's thread; [onDone] hears whether the client took it. */
+    private fun publish(topic: String, qos: Int, retained: Boolean, payload: String, onDone: ((Boolean) -> Unit)? = null) {
         val c = client
         if (c == null || !c.isConnected) {
             Log.d(TAG, "Hub not connected, dropping publish to $topic")
+            onDone?.invoke(false)
             return
         }
         scope.launch {
@@ -949,8 +989,10 @@ class HubReporter(
                     isRetained = retained
                 }
                 c.publish(topic, msg)
+                onDone?.invoke(true)
             } catch (e: Exception) {
                 Log.w(TAG, "Hub publish to $topic failed: ${e.message}")
+                onDone?.invoke(false)
             }
         }
     }
@@ -981,6 +1023,13 @@ data class HubReporterConfig(
  * innermost cause, which is where Paho puts the real reason ("Unable to connect to server" over
  * a TLS or DNS error). Pure, so it has a test.
  */
+/**
+ * Each modem a birth names with what it declares ("imei:format"), which the health loop compares to
+ * re-announce: a modem paired late, or a chain switched between plain and sealed (MESHSAT-1623).
+ */
+internal fun modemDeclarations(interfaces: List<InterfaceInfo>): Set<String> =
+    interfaces.filter { it.imei.isNotBlank() }.map { "${it.imei}:${it.egressFormat}" }.toSet()
+
 /** Whether a delivered TAK event is one this bridge exported itself, by the topic it arrived on. */
 internal fun isOwnTakExport(topic: String, bridgeId: String, topics: HubTopics = HubTopics.PLATFORM): Boolean {
     val sender = topics.takCotSender(topic)
