@@ -1,5 +1,6 @@
 package net.meshsat.android
 
+import net.meshsat.android.codec.Smaz2
 import net.meshsat.android.codec.Smaz2Bytes
 import net.meshsat.android.codec.Smaz2Dict
 import net.meshsat.android.codec.Smaz2Exception
@@ -82,6 +83,17 @@ class HChainVectorsTest {
             }
         }
         assertEquals("the one known lossy vector, default control_bytes", 1, lossy)
+    }
+
+    @Test
+    fun `the SMS codec compresses as the Bridge and reads its multibyte text back`() {
+        for (x in rows("smaz2").filter { it.getString("dict") == "default" }) {
+            val text = x.getString("text")
+            assertEquals(x.getString("name"), x.getString("compressed_hex"), Smaz2.compress(text).hex())
+            if (text.isNotEmpty()) {
+                assertEquals(x.getString("name"), String(hex(x.getString("decompressed_hex")), Charsets.UTF_8), Smaz2.decompress(hex(x.getString("compressed_hex"))))
+            }
+        }
     }
 
     @Test

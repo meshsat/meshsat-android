@@ -57,68 +57,17 @@ object Smaz2 {
     /**
      * Decompress SMAZ2-compressed bytes back to the original string.
      * Returns null if the input is invalid or empty.
+     *
+     * Through the byte-exact port of the Bridge's decompressor, then UTF-8: appending each
+     * verbatim byte as a char turned every non-ASCII text (Greek, accents, emoji) into garbage.
      */
     fun decompress(data: ByteArray): String? {
         if (data.isEmpty()) return null
-        val res = StringBuilder()
-        var i = 0
-        try {
-            while (i < data.size) {
-                val b = data[i].toInt() and 0xFF
-                when {
-                    // High bit set → bigram lookup
-                    b and 0x80 != 0 -> {
-                        val idx = (b and 0x7F) * 2
-                        if (idx + 1 >= BIGRAMS.length) return null
-                        res.append(BIGRAMS[idx])
-                        res.append(BIGRAMS[idx + 1])
-                        i++
-                    }
-                    // 1..5 → verbatim run of N bytes
-                    b in 1..5 -> {
-                        if (i + b >= data.size) return null
-                        for (j in 1..b) {
-                            res.append(data[i + j].toInt().toChar())
-                        }
-                        i += 1 + b
-                    }
-                    // 6 → word
-                    b == 6 -> {
-                        if (i + 1 >= data.size) return null
-                        val wordIdx = data[i + 1].toInt() and 0xFF
-                        if (wordIdx >= WORDS.size) return null
-                        res.append(WORDS[wordIdx])
-                        i += 2
-                    }
-                    // 7 → word + trailing space
-                    b == 7 -> {
-                        if (i + 1 >= data.size) return null
-                        val wordIdx = data[i + 1].toInt() and 0xFF
-                        if (wordIdx >= WORDS.size) return null
-                        res.append(WORDS[wordIdx])
-                        res.append(' ')
-                        i += 2
-                    }
-                    // 8 → leading space + word
-                    b == 8 -> {
-                        if (i + 1 >= data.size) return null
-                        val wordIdx = data[i + 1].toInt() and 0xFF
-                        if (wordIdx >= WORDS.size) return null
-                        res.append(' ')
-                        res.append(WORDS[wordIdx])
-                        i += 2
-                    }
-                    // 9..127 → literal byte
-                    else -> {
-                        res.append(b.toChar())
-                        i++
-                    }
-                }
-            }
-        } catch (_: Exception) {
-            return null
+        return try {
+            String(Smaz2Bytes.decompress(data, Smaz2Dict.DEFAULT), Charsets.UTF_8)
+        } catch (_: Smaz2Exception) {
+            null
         }
-        return res.toString()
     }
 
     /**
