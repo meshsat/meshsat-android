@@ -7,7 +7,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
-import net.meshsat.android.ble.ModemLink
+import net.meshsat.android.FakeJsprModem
 import net.meshsat.android.bt.Iridium9704Spp
 import net.meshsat.android.crypto.ProvisionImporter
 import net.meshsat.android.engine.SatelliteChain
@@ -25,11 +25,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Test
 import java.io.File
-import java.io.InputStream
-import java.io.OutputStream
 import java.time.Instant
 import java.util.concurrent.CopyOnWriteArrayList
-import java.util.concurrent.LinkedBlockingQueue
 
 /**
  * The app's Hub birth declaration against the real Hub (R32-R1, MESHSAT-1623): the app's own
@@ -65,39 +62,6 @@ class HubBirthDeclarationLiveTest {
         override fun saveBirthStamp(stamp: Instant) {
             if (failSave) throw java.io.IOException("save refused (test)")
             stored = BirthStamper.format(stamp)
-        }
-    }
-
-    /** A RockBLOCK 9704 answering JSPR as the driver's init and poll need, with a test IMEI. */
-    private class FakeModem(private val imei: String) : ModemLink {
-        private val toDriver = LinkedBlockingQueue<Int>()
-        override val input: InputStream = object : InputStream() {
-            override fun read(): Int = toDriver.take()
-            override fun available(): Int = toDriver.size
-        }
-        override val output: OutputStream = object : OutputStream() {
-            private val line = StringBuilder()
-            override fun write(b: Int) {
-                if (b == '\r'.code) {
-                    answer(line.toString()); line.setLength(0)
-                } else line.append(b.toChar())
-            }
-        }
-        override fun setReceiver(receiver: ((ByteArray) -> Unit)?) {}
-
-        private fun answer(request: String) {
-            val parts = request.split(" ", limit = 3)
-            if (parts.size < 2) return
-            val (method, target) = parts
-            val body = when {
-                method == "GET" && target == "apiVersion" -> """{"active_version": {"major": 1, "minor": 0, "patch": 0}}"""
-                method == "GET" && target == "simConfig" -> """{"interface": "internal"}"""
-                method == "GET" && target == "operationalState" -> """{"state": "active"}"""
-                method == "GET" && target == "hwInfo" -> """{"imei": "$imei", "serial_number": "TEST", "hw_version": "test", "board_temp": 20}"""
-                method == "GET" && target == "constellationState" -> """{"constellation_visible": true, "signal_bars": 3}"""
-                else -> "{}"
-            }
-            "200 $target $body\r".toByteArray(Charsets.US_ASCII).forEach { toDriver.put(it.toInt() and 0xFF) }
         }
     }
 
@@ -183,7 +147,7 @@ class HubBirthDeclarationLiveTest {
             assertEquals("", b.imei)
             checkpoint("no-modem")
 
-            spp.attach(FakeModem(imei))
+            spp.attach(FakeJsprModem(imei))
             assertTrue("the 9704 did not come up", until(30_000) { spp.state.value == Iridium9704Spp.State.Ready })
             var n = births.size
             b = nextBirth(n, "the late IMEI")
