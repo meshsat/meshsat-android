@@ -191,10 +191,10 @@ class SmsReceiver : BroadcastReceiver() {
 
         // Step 2a: Try SMAZ2 decompression (bridge/Hub compress with SMAZ2) [MESHSAT-447]
         if (wasEncrypted || rawBytes.contentEquals(payload).not()) {
-            val smaz2Text = net.meshsat.android.codec.Smaz2.decompress(payload)
-            if (smaz2Text != null && smaz2Text.all { it.code in 0x20..0x7E || it == '\n' || it == '\r' || it == '\t' }) {
-                Log.d(TAG, "SMS SMAZ2 decompressed from $sender: ${payload.size}B → \"$smaz2Text\"")
-                return ProcessResult(smaz2Text, text, wasEncrypted, wasCompressed = true)
+            val decoded = smaz2Text(payload)
+            if (decoded != null) {
+                Log.d(TAG, "SMS SMAZ2 decompressed from $sender: ${payload.size}B → \"$decoded\"")
+                return ProcessResult(decoded, text, wasEncrypted, wasCompressed = true)
             }
         }
 
@@ -252,6 +252,17 @@ class SmsReceiver : BroadcastReceiver() {
 
     companion object {
         private const val TAG = "SmsReceiver"
+
+        /**
+         * [payload] as SMAZ2 text, or null when what it decodes to is not readable text: the
+         * payload may never have been compressed. Readable is printable Unicode plus tab, CR and
+         * LF, so Greek and other non-English text count; until MESHSAT-1625 only ASCII did, and a
+         * compressed Greek SMS was shown as its raw bytes.
+         */
+        internal fun smaz2Text(payload: ByteArray): String? {
+            val text = net.meshsat.android.codec.Smaz2.decompress(payload) ?: return null
+            return text.takeIf { s -> s.all { it == '\n' || it == '\r' || it == '\t' || (it.code >= 0x20 && it.code != 0x7F && it.code !in 0x80..0x9F && it != '\uFFFD') } }
+        }
         @Volatile
         private var cachedCodebook: MsvqscCodebook? = null
         private val codebookLock = Any()
