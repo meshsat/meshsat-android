@@ -64,7 +64,6 @@ class HChainVectorsTest {
     fun `smaz2 with either table matches the Bridge both ways`() {
         val vectors = rows("smaz2")
         assertTrue(vectors.size >= 30)
-        var lossy = 0
         for (x in vectors) {
             val name = "${x.getString("name")} (${x.getString("dict")})"
             val dict = Smaz2Dict.of(x.getString("dict"))
@@ -72,17 +71,12 @@ class HChainVectorsTest {
             assertArrayEquals("$name text_hex", x.getString("text").toByteArray(Charsets.UTF_8), text)
             val z = hex(x.getString("compressed_hex"))
             assertEquals("$name compress", x.getString("compressed_hex"), Smaz2Bytes.compress(text, dict).hex())
-            // What the Bridge's own decompressor returns, byte for byte, the text wherever it round trips.
+            // What the Bridge's own decompressor returns, byte for byte: the text, for every vector
+            // since bytes 0x01-0x08 go out as verbatim runs with the default table too. [MESHSAT-1626]
             val back = Smaz2Bytes.decompress(z, dict)
             assertEquals("$name decompress", x.getString("decompressed_hex"), back.hex())
-            if (!back.contentEquals(text)) {
-                lossy++
-                // Only the default table (lib-x) loses, and only bytes 0x01-0x08; the kits' table never does.
-                assertEquals("$name loses", Smaz2Dict.DEFAULT, dict)
-                assertTrue("$name loses", text.any { it in 1..8 })
-            }
+            assertArrayEquals("$name round trip", text, back)
         }
-        assertEquals("the one known lossy vector, default control_bytes", 1, lossy)
     }
 
     @Test

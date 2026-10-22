@@ -139,9 +139,11 @@ object Smaz2 {
                 }
             }
 
-            // Literal char 1-8 range (self-encoding)
+            // Bytes 1-8 are escape codes to every decoder: each goes out as its own verbatim run
+            // (1, the byte), as the Bridge and Smaz2Bytes do. [MESHSAT-1626]
             val ch = sb[pos].toInt() and 0xFF
-            if (ch in 1..8 && ch < 128) {
+            if (ch in 1..8) {
+                dst.add(1)
                 dst.add(ch.toByte())
                 pos++
                 verbatimLen = 0

@@ -90,8 +90,11 @@ object Smaz2Bytes {
                 }
             }
             val ch = s[pos].toInt() and 0xFF
-            // lib-x writes bytes 1-8 as they are (its decoder reads them as escapes).
+            // Bytes 1-8 are escape codes to every decoder, so each goes out as its own verbatim
+            // run (1, the byte), as the Bridge's compressor does since MESHSAT-1626; lib-x wrote
+            // them as they are and the text came back as other bytes.
             if (ch in 1..8) {
+                dst.add(1)
                 dst.add(ch)
                 pos++
                 verbatimLen = 0
