@@ -130,6 +130,34 @@ class InteropLxmfTest {
         assertEquals(1, peers.size); assertEquals(p.delivery, peers[0].destHash); assertEquals("A", peers[0].displayName)
     }
 
+    /**
+     * The HeMB-NG mid (contract C2) crosses upstream LXMF both ways byte for byte: Python sends the
+     * fixture's fields map and we read the mid from it; we send ours and Python gets the fixture's
+     * bytes. The Bridge's lxmf_test.go does the same at its pin. [MESHSAT-1641]
+     */
+    @Test
+    fun midFieldBothWays() {
+        val fixture = org.json.JSONObject(
+            java.io.File(requireNotNull(javaClass.classLoader?.getResource("hemb-ng/v1/lxmf_mid_field.json")).toURI()).readText(),
+        )
+        val fieldsHex = fixture.getString("fields_msgpack_hex")
+        val mid = requireNotNull(net.meshsat.android.hubmsg.HubMsgIds.parseCanonical(fixture.getString("mid")))
+        val k = Kit()
+        val p = PyPeer.start(PyPeer.Opts(name = "A", connect = "127.0.0.1:${k.port}"))
+        bringUp(k, p)
+
+        p.send("cmd" to "send_lxm", "dest" to k.router.hashHex, "content" to "with an id", "method" to "opportunistic",
+            "fields_hex" to fieldsHex)
+        val m = take(k.got, 15_000, "the LXMF message with a mid")
+        assertTrue(m.signatureValid)
+        assertTrue(java.util.Arrays.equals(mid, net.meshsat.android.lxmf.LxMid.midOf(m.fields)))
+
+        val o = k.router.send(h(p.delivery), "with an id".toByteArray(), fields = net.meshsat.android.lxmf.LxMid.fields(mid))
+        val rcv = p.wait("lxm_received", null, 15_000)
+        assertEquals(fieldsHex, rcv["fields_hex"]); assertEquals(true, rcv["signature_validated"])
+        assertEquals(LxState.DELIVERED, o.result.get(15, TimeUnit.SECONDS))
+    }
+
     @Test
     fun directLinkBothWays() {
         val k = Kit()
