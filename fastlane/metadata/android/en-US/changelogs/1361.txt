@@ -1,0 +1,1 @@
+Settings now shows a check value for the satellite key, next to the satellite chain. Compare it with the kit's to see both hold the same key, without showing the key.
