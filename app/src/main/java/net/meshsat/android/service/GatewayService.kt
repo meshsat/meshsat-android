@@ -1106,6 +1106,7 @@ class GatewayService : Service() {
                 reporter.start()
                 hubReporter = reporter
                 Log.i("MeshSat", "Hub Reporter initialized: bridge=$bridgeId")
+                initHubDirectory(reporter, hubUrl, bridgeId, password)
                 // hub_0 follows this client (MESHSAT-1261). The observer belongs here, not in
                 // initInterfaceManager: that runs before this one, so it would bind to a null
                 // reporter and collect nothing, leaving hub_0 Offline while the Hub was up.
@@ -1122,6 +1123,47 @@ class GatewayService : Service() {
                 }
             } catch (e: Exception) {
                 Log.w("MeshSat", "Hub Reporter init failed: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * The tenant's signed directory (HeMB-NG C9.5, MESHSAT-1642): the Hub pushes nothing to a
+     * phone, so it is read on every connect to the Hub and every 15 minutes while connected.
+     */
+    private suspend fun initHubDirectory(
+        reporter: net.meshsat.android.hub.HubReporter,
+        hubUrl: String,
+        bridgeId: String,
+        password: String,
+    ) {
+        val hubApiBase = net.meshsat.android.hub.relay.RelayTunnel.deriveHubApiBase(hubUrl, settings.hubRelayUrl.first())
+        if (hubApiBase.isBlank() || password.isBlank()) {
+            Log.w("MeshSat", "Hub directory: Hub URL or password not configured")
+            return
+        }
+        val client = net.meshsat.android.hub.directory.HubDirectoryClient(
+            net.meshsat.android.hub.directory.HubDirectoryStore.get(this),
+        )
+        val poll = {
+            when (val o = client.poll(hubApiBase, bridgeId, password)) {
+                is net.meshsat.android.hub.directory.HubDirectoryClient.Outcome.Applied ->
+                    Log.i("MeshSat", "Hub directory: version ${o.result.state.version}, " +
+                        "${o.result.state.contacts.size} contacts, ${o.result.state.groups.size} groups, " +
+                        "key ${o.result.state.keyId.take(12)}")
+                is net.meshsat.android.hub.directory.HubDirectoryClient.Outcome.Refused ->
+                    Log.w("MeshSat", "Hub directory refused: ${o.result.reason} ${o.result.detail}")
+                is net.meshsat.android.hub.directory.HubDirectoryClient.Outcome.Failed ->
+                    Log.w("MeshSat", "Hub directory: ${o.message}")
+                net.meshsat.android.hub.directory.HubDirectoryClient.Outcome.NotModified -> Unit
+            }
+        }
+        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            reporter.state.collectLatest { state ->
+                while (state == HubReporter.State.Connected) {
+                    poll()
+                    delay(15 * 60_000L)
+                }
             }
         }
     }

@@ -44,6 +44,8 @@ object ProvisionImporter {
         val reticulumTcp: String,
         /** The tenant's topic root ("meshsat" or "meshsat/<tenant>"; MESHSAT-1467). */
         val topicPrefix: String = "",
+        /** The Hub's directory signing key, PKIX DER in base64: the key the phone pins (MESHSAT-1642). */
+        val dirSignPub: String = "",
     )
 
     /** Check if a scanned string is a provisioning URL. */
@@ -215,6 +217,7 @@ object ProvisionImporter {
             certExpiry = json.optString("cert_exp", ""),
             reticulumTcp = json.optString("ret_tcp", ""),
             topicPrefix = json.optString("mqtt_topic_prefix", ""),
+            dirSignPub = json.optString("dir_sign_pub", ""),
         )
     }
 
@@ -273,6 +276,18 @@ object ProvisionImporter {
                     version = 1,
                 )
             )
+        }
+
+        // The directory key: pinned from the bundle, never replaced by the HTTPS bootstrap
+        // (MESHSAT-1642). A bad key here is the Hub's bug and must not cost the provisioning.
+        if (bundle.dirSignPub.isNotBlank()) {
+            try {
+                net.meshsat.android.hub.directory.HubDirectoryClient(
+                    net.meshsat.android.hub.directory.HubDirectoryStore.get(context),
+                ).pinFromBundle(java.util.Base64.getDecoder().decode(bundle.dirSignPub))
+            } catch (e: Exception) {
+                Log.w(TAG, "Directory key in the bundle not pinned: ${e.message}")
+            }
         }
 
         Log.i(TAG, "Hub provisioned: ${bundle.bridgeId} → ${bundle.mqttUrl}")

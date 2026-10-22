@@ -1,0 +1,45 @@
+{
+  "after_rotation": {
+    "rotations": [
+      {
+        "v": 2,
+        "key_id": "9d626b3ce65ff43ab31a2aa1954ff9ca68787010cec293f6d5ff0ba322fc22fc",
+        "alg": "ES256",
+        "payload": "eyJ0eXBlIjoicm90YXRpb24iLCJ0ZW5hbnRfaWQiOiJhY21lIiwidmVyc2lvbiI6NSwibmV3X2tleV9pZCI6ImNjZDM0NmU0MWQ3NzU2YWE1Yzk0NzVhZTJiMmU0MzhjMGRlMGUyZGI4ZDY1MzYwMzBlYzg4YTJkZmQ1OWU2NmIiLCJuZXdfa2V5X3BraXgiOiJNRmt3RXdZSEtvWkl6ajBDQVFZSUtvWkl6ajBEQVFjRFFnQUU1S1F2THF6bVYxbDVyRVJvblBnYkMrR2YvV053VnEzdTJRbk9WalFRZDJtNGxPNkpNd0ZybjNXVnAvMFBpeHAxNnlpemZiRmhhdU90WVYvKzhqbkZvZz09In0=",
+        "sig": "MEQCIGOTc3xAnREVS6BbHbo5JAZo/maFSMs4tql5nThKkPmeAiBYsGx3wXsP/zcXeiRWl26QSUCWt+z28hu20145mM+MVQ=="
+      }
+    ],
+    "snapshot": {
+      "v": 2,
+      "key_id": "ccd346e41d7756aa5c9475ae2b2e438c0de0e2db8d6536030ec88a2dfd59e66b",
+      "alg": "ES256",
+      "payload": "eyJ0eXBlIjoic25hcHNob3QiLCJ0ZW5hbnRfaWQiOiJhY21lIiwidmVyc2lvbiI6NSwic2lnbmVkX2F0IjoiMjAyNi0xMC0yMlQxOToyOTo0MS4wNzgyNzkzNDNaIiwiY29udGFjdHMiOlt7ImlkIjoiYzMiLCJ0ZW5hbnRfaWQiOiJhY21lIiwiZGlzcGxheV9uYW1lIjoiS2l0IEEiLCJyb2xlIjoiZ2F0ZXdheSIsImdyb3VwX2lkcyI6WyJnMSJdLCJjcmVhdGVkX2F0IjoiMjAyNi0xMC0yMlQxOToyOTo0MVoiLCJ1cGRhdGVkX2F0IjoiMjAyNi0xMC0yMlQxOToyOTo0MVoiLCJvcmlnaW4iOiJodWI6YWNtZSIsImFkZHJlc3NlcyI6W3siaWQiOiJlNTIwMDQzZS0xNmRjLTQwNzUtOTM4Zi1kNjQ2Mzc2NTdmYzYiLCJraW5kIjoiTVFUVCIsInZhbHVlIjoiYnJpZGdlOmtpdC1hIiwicHJpbWFyeV9yYW5rIjowLCJvcmlnaW4iOiJodWI6YWNtZSJ9LHsiaWQiOiJlZTgzZDJiYS00YzlkLTQ2MzUtYWJlMC00MWJhNmUxMDg5NGQiLCJraW5kIjoiVEVUUkEiLCJ2YWx1ZSI6InRldHJhOjEwMDEiLCJsYWJlbCI6IkRNTyAxIiwicHJpbWFyeV9yYW5rIjoxLCJvcmlnaW4iOiJodWI6YWNtZSJ9XX0seyJpZCI6ImMxIiwidGVuYW50X2lkIjoiYWNtZSIsImRpc3BsYXlfbmFtZSI6Ik9uZSIsImdyb3VwX2lkcyI6WyJnMSJdLCJjcmVhdGVkX2F0IjoiMjAyNi0xMC0yMlQxOToyOTo0MFoiLCJ1cGRhdGVkX2F0IjoiMjAyNi0xMC0yMlQxOToyOTo0MFoiLCJvcmlnaW4iOiJodWI6YWNtZSIsImFkZHJlc3NlcyI6W119LHsiaWQiOiJjMiIsInRlbmFudF9pZCI6ImFjbWUiLCJkaXNwbGF5X25hbWUiOiJUd28iLCJjcmVhdGVkX2F0IjoiMjAyNi0xMC0yMlQxOToyOTo0MFoiLCJ1cGRhdGVkX2F0IjoiMjAyNi0xMC0yMlQxOToyOTo0MFoiLCJvcmlnaW4iOiJodWI6YWNtZSIsImFkZHJlc3NlcyI6W119XSwiZ3JvdXBzIjpbeyJpZCI6ImcxIiwidGVuYW50X2lkIjoiYWNtZSIsIm5hbWUiOiJOb3J0aCB0ZWFtIiwia2luZCI6IlRFQU0iLCJtZW1iZXJfaWRzIjpbImMxIiwiYzMiXSwiY3JlYXRlZF9hdCI6IjIwMjYtMTAtMjJUMTk6Mjk6NDFaIiwidXBkYXRlZF9hdCI6IjIwMjYtMTAtMjJUMTk6Mjk6NDFaIiwib3JpZ2luIjoiaHViOmFjbWUifV0sInBvbGljaWVzIjpbXX0=",
+      "sig": "MEYCIQDPNinDnYliwADgA+2oR1faoKMZ41ieAI9DesH3WT6UKgIhAJAbN49t+5wkPOT9/BrPYeHN4TlPkEDjyCAMYyvSfQ9C"
+    }
+  },
+  "first": {
+    "rotations": [],
+    "snapshot": {
+      "v": 2,
+      "key_id": "9d626b3ce65ff43ab31a2aa1954ff9ca68787010cec293f6d5ff0ba322fc22fc",
+      "alg": "ES256",
+      "payload": "eyJ0eXBlIjoic25hcHNob3QiLCJ0ZW5hbnRfaWQiOiJhY21lIiwidmVyc2lvbiI6NCwic2lnbmVkX2F0IjoiMjAyNi0xMC0yMlQxOToyOTo0MS4wNTU3OTMwNloiLCJjb250YWN0cyI6W3siaWQiOiJjMyIsInRlbmFudF9pZCI6ImFjbWUiLCJkaXNwbGF5X25hbWUiOiJLaXQgQSIsInJvbGUiOiJnYXRld2F5IiwiZ3JvdXBfaWRzIjpbImcxIl0sImNyZWF0ZWRfYXQiOiIyMDI2LTEwLTIyVDE5OjI5OjQxWiIsInVwZGF0ZWRfYXQiOiIyMDI2LTEwLTIyVDE5OjI5OjQxWiIsIm9yaWdpbiI6Imh1YjphY21lIiwiYWRkcmVzc2VzIjpbeyJpZCI6ImU1MjAwNDNlLTE2ZGMtNDA3NS05MzhmLWQ2NDYzNzY1N2ZjNiIsImtpbmQiOiJNUVRUIiwidmFsdWUiOiJicmlkZ2U6a2l0LWEiLCJwcmltYXJ5X3JhbmsiOjAsIm9yaWdpbiI6Imh1YjphY21lIn0seyJpZCI6ImVlODNkMmJhLTRjOWQtNDYzNS1hYmUwLTQxYmE2ZTEwODk0ZCIsImtpbmQiOiJURVRSQSIsInZhbHVlIjoidGV0cmE6MTAwMSIsImxhYmVsIjoiRE1PIDEiLCJwcmltYXJ5X3JhbmsiOjEsIm9yaWdpbiI6Imh1YjphY21lIn1dfSx7ImlkIjoiYzEiLCJ0ZW5hbnRfaWQiOiJhY21lIiwiZGlzcGxheV9uYW1lIjoiT25lIiwiZ3JvdXBfaWRzIjpbImcxIl0sImNyZWF0ZWRfYXQiOiIyMDI2LTEwLTIyVDE5OjI5OjQwWiIsInVwZGF0ZWRfYXQiOiIyMDI2LTEwLTIyVDE5OjI5OjQwWiIsIm9yaWdpbiI6Imh1YjphY21lIiwiYWRkcmVzc2VzIjpbXX0seyJpZCI6ImMyIiwidGVuYW50X2lkIjoiYWNtZSIsImRpc3BsYXlfbmFtZSI6IlR3byIsImNyZWF0ZWRfYXQiOiIyMDI2LTEwLTIyVDE5OjI5OjQwWiIsInVwZGF0ZWRfYXQiOiIyMDI2LTEwLTIyVDE5OjI5OjQwWiIsIm9yaWdpbiI6Imh1YjphY21lIiwiYWRkcmVzc2VzIjpbXX1dLCJncm91cHMiOlt7ImlkIjoiZzEiLCJ0ZW5hbnRfaWQiOiJhY21lIiwibmFtZSI6Ik5vcnRoIHRlYW0iLCJraW5kIjoiVEVBTSIsIm1lbWJlcl9pZHMiOlsiYzEiLCJjMyJdLCJjcmVhdGVkX2F0IjoiMjAyNi0xMC0yMlQxOToyOTo0MVoiLCJ1cGRhdGVkX2F0IjoiMjAyNi0xMC0yMlQxOToyOTo0MVoiLCJvcmlnaW4iOiJodWI6YWNtZSJ9XSwicG9saWNpZXMiOltdfQ==",
+      "sig": "MEYCIQCipU5952NCJ83fN8jI/ZZSLjUwkoaDf6wfOV3+zHCteQIhAJTAz6S3mmeXUswIg3VvCPZSafJQuArdJ0PNPpVrz4uj"
+    }
+  },
+  "first_version": 4,
+  "new_key_id": "ccd346e41d7756aa5c9475ae2b2e438c0de0e2db8d6536030ec88a2dfd59e66b",
+  "note": "made by meshsat-hub's own relay directory handler (hemb-ng/after-s32, MESHSAT-1642): the answer to phone-1 of tenant acme before and after a key rotation, and tenant other's answer",
+  "old_key_id": "9d626b3ce65ff43ab31a2aa1954ff9ca68787010cec293f6d5ff0ba322fc22fc",
+  "old_key_pkix": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEb7QIin47xscwouJv6smH5Ay4YNpKjpJYNbs/EFzpcF1M5D15+JPZeZJME//Hc4E/RRwUeVTXyqQlQ5lfCLVGLQ==",
+  "other_tenant": {
+    "rotations": [],
+    "snapshot": {
+      "v": 2,
+      "key_id": "ccd346e41d7756aa5c9475ae2b2e438c0de0e2db8d6536030ec88a2dfd59e66b",
+      "alg": "ES256",
+      "payload": "eyJ0eXBlIjoic25hcHNob3QiLCJ0ZW5hbnRfaWQiOiJvdGhlciIsInZlcnNpb24iOjIsInNpZ25lZF9hdCI6IjIwMjYtMTAtMjJUMTk6Mjk6NDEuMDc5NzcxNzkyWiIsImNvbnRhY3RzIjpbeyJpZCI6ImM5IiwidGVuYW50X2lkIjoib3RoZXIiLCJkaXNwbGF5X25hbWUiOiJOaW5lIiwiY3JlYXRlZF9hdCI6IjIwMjYtMTAtMjJUMTk6Mjk6NDBaIiwidXBkYXRlZF9hdCI6IjIwMjYtMTAtMjJUMTk6Mjk6NDBaIiwib3JpZ2luIjoiaHViOm90aGVyIiwiYWRkcmVzc2VzIjpbXX1dLCJncm91cHMiOltdLCJwb2xpY2llcyI6W119",
+      "sig": "MEUCIFG5vibYbwB2Poj4+X4swYG5OGl3ofwx6yCX43mmaqj6AiEA62bOvRLkVWdItsnvpZ0Hn823HlwHQzWO4zgC/xnNXa0="
+    }
+  }
+}
