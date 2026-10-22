@@ -32,6 +32,9 @@ internal class FakeJsprModem(private val imei: String, private val segment: Int 
     /** Every MO the driver completed, as the modem received it (payload and its two CRC bytes). */
     val mos = LinkedBlockingQueue<ByteArray>()
 
+    /** Ask for one malformed segment (negative start) before the real ones, as a faulty modem might. */
+    @Volatile var badSegmentFirst = false
+
     private var moLength = 0
     private var moId = 0
     private val moBytes = ByteArrayOutputStream()
@@ -49,10 +52,13 @@ internal class FakeJsprModem(private val imei: String, private val segment: Int 
             method == "GET" && target == "simConfig" -> send("""200 simConfig {"interface": "internal"}""")
             method == "GET" && target == "operationalState" -> send("""200 operationalState {"state": "active"}""")
             method == "GET" && target == "hwInfo" -> send("""200 hwInfo {"imei": "$imei", "serial_number": "TEST", "hw_version": "test", "board_temp": 20}""")
+            method == "GET" && target == "firmware" && body.optString("slot") == "primary" ->
+                send("""200 firmware {"slot": "primary", "validity": 1, "version": {"major": 5, "minor": 2, "patch": 1, "build_info": "fake"}, "hash": "abc"}""")
             method == "GET" && target == "constellationState" -> send("""200 constellationState {"constellation_visible": true, "signal_bars": 3}""")
             method == "PUT" && target == "messageOriginate" -> {
                 moLength = body.getInt("message_length"); moId++; moBytes.reset()
                 send("""200 messageOriginate {"topic_id": ${body.getInt("topic_id")}, "message_response": "message_accepted", "message_id": $moId}""")
+                if (badSegmentFirst) send("""299 messageOriginateSegment {"topic_id": 244, "message_id": $moId, "segment_length": 4, "segment_start": -1}""")
                 var start = 0
                 while (start < moLength) {
                     val len = minOf(segment, moLength - start)
@@ -70,6 +76,10 @@ internal class FakeJsprModem(private val imei: String, private val segment: Int 
             else -> send("200 $target {}")
         }
     }
+
+    /** Any line, as the modem would send it unasked: malformed ones included. */
+    @Synchronized
+    fun push(line: String) = send(line)
 
     /** The satellite hands the modem [payload] for the phone: notice, segments, then the status. */
     @Synchronized

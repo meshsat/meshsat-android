@@ -71,6 +71,18 @@ class Iridium9704Spp(private val context: Context) {
          * A status without an id (-1) still does, as before.
          */
         internal fun moStatusSettles(inFlightId: Int, statusId: Int): Boolean = statusId < 0 || statusId == inFlightId
+
+        /**
+         * The modem's firmware version as the official RockBLOCK 9704 C library makes it
+         * (`rbGetFirmwareVersion`): "v" major.minor.patch from `GET firmware {"slot": "primary"}`,
+         * or "" when the modem did not answer. hwInfo carries only the hardware version; the
+         * firmware field used to repeat it. [MESHSAT-1630]
+         */
+        internal fun firmwareVersion(resp: JSONObject?): String {
+            val v = resp?.optJSONObject("version") ?: return ""
+            if (!v.has("major") || !v.has("minor") || !v.has("patch")) return ""
+            return "v${v.optInt("major")}.${v.optInt("minor")}.${v.optInt("patch")}"
+        }
         private const val MAX_SEGMENT_SIZE = 1446
         const val RAW_TOPIC = 244   // IMT topic for raw payloads; the Reticulum interface sends on it too (MESHSAT-1553)
 
@@ -186,7 +198,11 @@ class Iridium9704Spp(private val context: Context) {
     private var moFinalStatus: String = ""
 
     // --- MT state ---
+    // The MT buffer grows as segments land, zero-filled up to the furthest byte written, never past
+    // message_length_max: the announced length is not allocated up front, so a negative one cannot
+    // throw and a huge one cannot exhaust memory. [MESHSAT-1630]
     private var mtBuffer: ByteArray? = null
+    private var mtLengthMax: Int = 0
     private var mtReceived: Int = 0
     private var mtMessageId: Int = 0
     private var mtTopicId: Int = 0
@@ -358,10 +374,11 @@ class Iridium9704Spp(private val context: Context) {
             // Step 4: Query hardware info
             val hwResp = sendJspr("GET", "hwInfo", JSONObject())
             if (hwResp != null) {
+                val firmware = firmwareVersion(sendJspr("GET", "firmware", JSONObject().put("slot", "primary")))
                 _modemInfo.value = ModemInfo(
                     imei = hwResp.optString("imei", ""),
                     serial = hwResp.optString("serial_number", ""),
-                    firmwareVersion = hwResp.optString("hw_version", ""),
+                    firmwareVersion = firmware,
                     hardwareVersion = hwResp.optString("hw_version", ""),
                     boardTemp = hwResp.optInt("board_temp", 0),
                 )
@@ -691,7 +708,8 @@ class Iridium9704Spp(private val context: Context) {
         val segStart = json.optInt("segment_start", 0)
         val segLen = json.optInt("segment_length", 0)
 
-        if (segStart + segLen > payload.size) {
+        // A negative field from the modem reached copyOfRange and threw in the handler. [MESHSAT-1630]
+        if (segStart < 0 || segLen < 0 || segStart > payload.size - segLen) {
             Log.w(TAG, "MO segment request out of bounds: start=$segStart len=$segLen payload=${payload.size}")
             return
         }
@@ -754,7 +772,8 @@ class Iridium9704Spp(private val context: Context) {
         mtTopicId = json.optInt("topic_id", 0)
         mtMessageId = json.optInt("message_id", 0)
         val maxLen = json.optInt("message_length_max", 0)
-        mtBuffer = ByteArray(maxLen)
+        mtLengthMax = maxOf(0, maxLen)
+        mtBuffer = ByteArray(0)
         mtReceived = 0
         Log.d(TAG, "MT incoming: id=$mtMessageId topic=$mtTopicId maxLen=$maxLen")
     }
@@ -771,12 +790,15 @@ class Iridium9704Spp(private val context: Context) {
             return
         }
 
-        if (segStart + decoded.size <= buf.size) {
-            decoded.copyInto(buf, segStart)
+        if (segStart >= 0 && decoded.size <= mtLengthMax && segStart <= mtLengthMax - decoded.size) {
+            val end = segStart + decoded.size
+            val grown = if (buf.size < end) buf.copyOf(end) else buf
+            decoded.copyInto(grown, segStart)
+            mtBuffer = grown
             mtReceived += decoded.size
             Log.d(TAG, "MT segment: start=$segStart len=${decoded.size}")
         } else {
-            Log.w(TAG, "MT segment out of bounds: start=$segStart len=${decoded.size} buf=${buf.size}")
+            Log.w(TAG, "MT segment out of bounds: start=$segStart len=${decoded.size} max=$mtLengthMax")
         }
     }
 
