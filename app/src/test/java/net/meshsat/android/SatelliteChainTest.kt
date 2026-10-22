@@ -225,4 +225,58 @@ class SatelliteChainTest {
         assertTrue("one byte more is over", wireLen(pool.copyOf(lo + 1)) > SatelliteChain.MAX_WIRE_BYTES)
         expectRefused("one byte over") { SatelliteChain.seal(pool.copyOf(lo + 1), key, chain = SatelliteChain.Chain.LEGACY) }
     }
+
+    /**
+     * The check value both ends show for the key (the Bridge's key_check): SHA-256 of the 32 key
+     * bytes, first 4 bytes in hex. The vectors are shared with the Bridge's keystore test.
+     */
+    @Test
+    fun `a key's check value is the Bridge's`() {
+        assertEquals("630dcd29", SatelliteChain.keyCheck(key))
+        assertEquals("02d449a3", SatelliteChain.keyCheck("11".repeat(32)))
+        assertEquals("upper or lower case, the same key", "630dcd29", SatelliteChain.keyCheck(key.uppercase()))
+        expectRefused("not a key") { SatelliteChain.keyCheck("convkey:shared") }
+    }
+
+    /**
+     * What the service sends (`outbound`, which sendVia9704 calls): on each setting, for a text,
+     * an SOS and a burst, with a key and without one. The key is read only when the text is sealed.
+     */
+    @Test
+    fun `the service seals a text on the setting's chain and nothing else`() = kotlinx.coroutines.runBlocking {
+        val reads = java.util.concurrent.atomic.AtomicInteger()
+        val withKey: suspend () -> String? = { reads.incrementAndGet(); key }
+        for (mode in listOf(null, SatelliteChain.MODE_UNDECLARED, SatelliteChain.MODE_PLAIN)) {
+            assertArrayEquals("$mode sends the text as it is", greek, SatelliteChain.outbound(mode, "", greek, key = withKey))
+        }
+        assertEquals("no key read for an unsealed setting", 0, reads.get())
+        for ((mode, chain) in listOf(SatelliteChain.MODE_SEALED to SatelliteChain.Chain.H, SatelliteChain.MODE_LEGACY to SatelliteChain.Chain.LEGACY)) {
+            val wire = SatelliteChain.outbound(mode, "", greek, key = withKey)
+            assertEquals(SatelliteChain.PROTOCOL_VERSION, wire[0])
+            assertArrayEquals("$mode seals on $chain", greek, SatelliteChain.open(wire, key, chain = chain))
+            assertEquals("$mode reads back on its own setting", SatelliteChain.Mt.Text(String(greek, Charsets.UTF_8), true, chain), SatelliteChain.inbound(wire, mode) { key })
+            val sos = byteArrayOf(0x53, 0x4F, 0x53, 0x01, 0x02)
+            assertArrayEquals("$mode: an SOS goes as it is", sos, SatelliteChain.outbound(mode, "sos:7", sos, key = withKey))
+            assertArrayEquals("$mode: a burst goes as it is", greek, SatelliteChain.outbound(mode, "burst:3", greek, key = withKey))
+            expectRefused("$mode with no key") { kotlinx.coroutines.runBlocking { SatelliteChain.outbound(mode, "", greek) { null } } }
+            expectRefused("$mode with another channel's reference") { kotlinx.coroutines.runBlocking { SatelliteChain.outbound(mode, "", greek) { "convkey:shared" } } }
+        }
+    }
+
+    /** What the service reads (`inbound`): the key only for a versioned payload, H first when nothing is set. */
+    @Test
+    fun `the service reads a plain text without the key and a sealed one on either chain`() = kotlinx.coroutines.runBlocking {
+        val reads = java.util.concurrent.atomic.AtomicInteger()
+        val withKey: suspend () -> String? = { reads.incrementAndGet(); key }
+        assertEquals(SatelliteChain.Mt.Text("hello", sealed = false), SatelliteChain.inbound("hello".toByteArray(), SatelliteChain.MODE_SEALED, withKey))
+        assertEquals("a plain text never reads the key", 0, reads.get())
+        val h = SatelliteChain.seal(greek, key)
+        val legacy = SatelliteChain.seal(greek, key, chain = SatelliteChain.Chain.LEGACY)
+        for (mode in listOf(null, SatelliteChain.MODE_PLAIN, SatelliteChain.MODE_SEALED, SatelliteChain.MODE_LEGACY)) {
+            assertEquals("$mode opens H", SatelliteChain.Chain.H, (SatelliteChain.inbound(h, mode, withKey) as SatelliteChain.Mt.Text).chain)
+            assertEquals("$mode opens legacy", SatelliteChain.Chain.LEGACY, (SatelliteChain.inbound(legacy, mode, withKey) as SatelliteChain.Mt.Text).chain)
+            assertTrue("$mode, no key: unopened", SatelliteChain.inbound(h, mode) { null } is SatelliteChain.Mt.Unopened)
+            assertTrue("$mode, wrong key: unopened", SatelliteChain.inbound(legacy, mode) { otherKey } is SatelliteChain.Mt.Unopened)
+        }
+    }
 }

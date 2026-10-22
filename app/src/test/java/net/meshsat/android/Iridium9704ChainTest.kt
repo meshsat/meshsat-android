@@ -90,8 +90,9 @@ class Iridium9704ChainTest {
 
     /**
      * The coordinated switch and the rollback (r33 review R33-R2), through what the service does:
-     * the setting picks the chain (`chainOf`), the driver carries the wire both ways, and the
-     * receive side opens it on the chain the phone is set to. H, then legacy, then H again.
+     * the service's own send step (`outbound`, which sendVia9704 calls) seals on the setting's
+     * chain, the driver carries the wire both ways, and the service's own receive step (`inbound`,
+     * which the MT collector calls) opens it on the chain the phone is set to. H, legacy, H again.
      */
     @Test
     fun `H, rollback to the legacy chain, and H again, out and in through the driver`() = runBlocking {
@@ -102,7 +103,7 @@ class Iridium9704ChainTest {
         for (mode in listOf(SatelliteChain.MODE_SEALED, SatelliteChain.MODE_LEGACY, SatelliteChain.MODE_SEALED)) {
             val chain = requireNotNull(SatelliteChain.chainOf(mode))
             val text = texts.getValue(mode).toByteArray(Charsets.UTF_8)
-            val wire = SatelliteChain.seal(text, key, chain = chain)
+            val wire = SatelliteChain.outbound(mode, "", text) { key }
             val got = sendAndTake(wire)
             assertArrayEquals("$mode out", wire, got)
             assertArrayEquals("$mode opens on its chain", text, SatelliteChain.open(got, key, chain = chain))
@@ -115,7 +116,7 @@ class Iridium9704ChainTest {
             assertEquals(
                 "$mode reads on the phone's setting",
                 SatelliteChain.Mt.Text(String(text, Charsets.UTF_8), sealed = true, chain = chain),
-                SatelliteChain.readMt(payload, key, preferred = chain),
+                SatelliteChain.inbound(payload, mode) { key },
             )
         }
     }

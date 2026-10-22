@@ -664,6 +664,31 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
+                    // The key the chain seals with, by its check value: the same check in the
+                    // kit's key list means both ends hold the same key (MESHSAT-1623).
+                    var satKeyCheck by remember { mutableStateOf<String?>(null) }
+                    LaunchedEffect(chain) {
+                        satKeyCheck = withContext(Dispatchers.IO) {
+                            try {
+                                val keys = net.meshsat.android.data.ConversationKeyRepository(
+                                    net.meshsat.android.data.AppDatabase.getInstance(context).conversationKeyDao(),
+                                    net.meshsat.android.crypto.SecureKeyStore.getInstance(context),
+                                )
+                                net.meshsat.android.engine.SatelliteChain.key { keys.getBySender(it)?.hexKey }
+                                    ?.let { net.meshsat.android.engine.SatelliteChain.keyCheck(it) }.orEmpty()
+                            } catch (e: Exception) {
+                                ""
+                            }
+                        }
+                    }
+                    InfoRow(
+                        "Key ${net.meshsat.android.engine.SatelliteChain.KEY_REF}",
+                        when (val c = satKeyCheck) {
+                            null -> "reading"
+                            "" -> "none, import the kit's key bundle"
+                            else -> "check $c"
+                        },
+                    )
                 }
                 if (node9704 && state9704 == net.meshsat.android.bt.Iridium9704Spp.State.Ready) {
                     iridium9704ModemInfo?.value?.let { info ->

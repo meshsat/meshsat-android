@@ -189,36 +189,74 @@ class HubBirthOrderTest {
     }
 
     /**
-     * A1: the first birth (plain) is held at the broker; the chain turns sealed; the next birth
-     * fails; then the held one is taken. Nothing changes after that, and the sealed birth must still
+     * A1: the first birth ([from]) is held at the broker; the chain turns [to]; the next birth
+     * fails; then the held one is taken. Nothing changes after that, and the [to] birth must still
      * go out by itself, with no two births in flight at any time.
      */
-    @Test
-    fun `an older birth taken late does not clear a newer one that failed`() = runBlocking {
+    private fun a1(from: String, to: String, name: String) = runBlocking {
+        mode.set(from)
         val brokerRef = AtomicReference<Broker?>()
         val r = reporter(brokerRef) { SatelliteChain.egressFormat(mode.get()) }
         val release = CountDownLatch(1)
         script.put(Next.Hold(release, thenTake = true))
         script.put(Next.Fail)
+        val want = SatelliteChain.egressFormat(to)
         try {
             r.start()
             val b = withTimeout(10_000) { while (brokerRef.get() == null) delay(10); brokerRef.get()!! }
             assertTrue("the first birth reached the broker", until(10_000) { b.attempts.get() >= 1 })
-            mode.set(SatelliteChain.MODE_SEALED)
-            delay(3_000) // health ticks ask for the sealed birth while the plain one is held
+            mode.set(to)
+            delay(3_000) // health ticks ask for the new birth while the first one is held
             assertEquals("nothing else goes out while a birth is in flight", 1, b.attempts.get())
             release.countDown()
             assertTrue(
-                "the sealed birth went out by itself",
-                until(30_000) { b.taken.size >= 2 && format(b.taken.last()) == "sealed" },
+                "the $want birth went out by itself",
+                until(30_000) { b.taken.size >= 2 && format(b.taken.last()) == want },
             )
             assertEquals("one birth at a time", 1, b.maxInFlight.get())
-            assertTrue("the failed sealed birth was tried again", b.attempts.get() >= 3)
-            assertEquals("plain", format(b.taken.first()))
+            assertTrue("the failed $want birth was tried again", b.attempts.get() >= 3)
+            assertEquals(SatelliteChain.egressFormat(from), format(b.taken.first()))
             assertOrdered(b.taken)
-            writeOut("a1-older-taken-late", b.taken)
+            writeOut(name, b.taken)
         } finally {
             release.countDown()
+            r.stop()
+        }
+    }
+
+    @Test
+    fun `an older birth taken late does not clear a newer one that failed`() =
+        a1(SatelliteChain.MODE_PLAIN, SatelliteChain.MODE_SEALED, "a1-older-taken-late")
+
+    /** A1 the other way round: sealed held, the chain turns plain (r33: the inverse format change). */
+    @Test
+    fun `an older sealed birth taken late does not clear a newer plain one that failed`() =
+        a1(SatelliteChain.MODE_SEALED, SatelliteChain.MODE_PLAIN, "a1-inverse-older-taken-late")
+
+    /**
+     * A1 with the completions the other way round (r33: the passing control): the first birth is
+     * taken at once, the chain turns sealed, and the sealed birth then fails. It is tried again
+     * until it is taken.
+     */
+    @Test
+    fun `an older birth taken first and a newer one that fails after it is tried again`() = runBlocking {
+        mode.set(SatelliteChain.MODE_PLAIN)
+        val brokerRef = AtomicReference<Broker?>()
+        val r = reporter(brokerRef) { SatelliteChain.egressFormat(mode.get()) }
+        script.put(Next.Take)
+        script.put(Next.Fail)
+        try {
+            r.start()
+            val b = withTimeout(10_000) { while (brokerRef.get() == null) delay(10); brokerRef.get()!! }
+            assertTrue("the plain birth was taken", until(10_000) { b.taken.size == 1 })
+            assertEquals("plain", format(b.taken.first()))
+            mode.set(SatelliteChain.MODE_SEALED)
+            assertTrue("the sealed birth was taken after it failed", until(30_000) { format(b.taken.last()) == "sealed" })
+            assertTrue("the failed sealed birth was tried again", b.attempts.get() >= 3)
+            assertEquals(1, b.maxInFlight.get())
+            assertOrdered(b.taken)
+            writeOut("a1-control-reverse-order", b.taken)
+        } finally {
             r.stop()
         }
     }
@@ -248,14 +286,13 @@ class HubBirthOrderTest {
 
     /**
      * A2: a birth (the one a reconnect asks for, while the health loop runs) pauses after its stamp
-     * is reserved and before its snapshot. The chain turns sealed meanwhile. No other birth may be
-     * built or sent in between; when it resumes, the births taken go up in stamp order in the order
-     * they were sent, and the last one declares what is current.
+     * is reserved and before its snapshot. The chain turns from [from] to [to] meanwhile. No other
+     * birth may be built or sent in between; when it resumes, the births taken go up in stamp order
+     * in the order they were sent, and the last one declares what is current.
      */
-    @Test
-    fun `a stamp always labels the snapshot built with it`() = runBlocking {
+    private fun a2(from: String, to: String, name: String) = runBlocking {
         val brokerRef = AtomicReference<Broker?>()
-        mode.set(SatelliteChain.MODE_PLAIN)
+        mode.set(from)
         val inSnapshot = CountDownLatch(1)
         val resume = CountDownLatch(1)
         val r = reporter(brokerRef) {
@@ -265,11 +302,13 @@ class HubBirthOrderTest {
             }
             SatelliteChain.egressFormat(mode.get())
         }
+        val first = SatelliteChain.egressFormat(from)
+        val want = SatelliteChain.egressFormat(to)
         try {
             r.start()
             val b = withTimeout(10_000) { while (brokerRef.get() == null) delay(10); brokerRef.get()!! }
-            assertTrue("the first birth (plain) was taken", until(10_000) { b.taken.size == 1 })
-            assertEquals("plain", format(b.taken.first()))
+            assertTrue("the first birth ($first) was taken", until(10_000) { b.taken.size == 1 })
+            assertEquals(first, format(b.taken.first()))
             delay(1_500)
 
             // A reconnect asks for a birth; it pauses between its stamp and its snapshot.
@@ -277,20 +316,29 @@ class HubBirthOrderTest {
             val savesBefore = store.saves.get()
             b.callback!!.connectComplete(true, "tcp://hub.invalid:1883")
             assertTrue("the reconnect's birth paused after its stamp", inSnapshot.await(10, TimeUnit.SECONDS))
-            mode.set(SatelliteChain.MODE_SEALED)
-            delay(3_000) // health ticks see sealed while that birth is paused
+            mode.set(to)
+            delay(3_000) // health ticks see the new chain while that birth is paused
             assertEquals("no birth was sent while one was being built", 1, b.attempts.get())
             assertEquals("no other stamp was taken meanwhile", savesBefore + 1, store.saves.get())
             resume.countDown()
-            assertTrue("the current declaration went out", until(30_000) { b.taken.size >= 2 && format(b.taken.last()) == "sealed" })
+            assertTrue("the current declaration went out", until(30_000) { b.taken.size >= 2 && format(b.taken.last()) == want })
             delay(2_500)
             assertEquals(1, b.maxInFlight.get())
             assertOrdered(b.taken)
-            assertEquals("sealed", format(b.taken.last()))
-            writeOut("a2-snapshot-paused", b.taken)
+            assertEquals(want, format(b.taken.last()))
+            writeOut(name, b.taken)
         } finally {
             resume.countDown()
             r.stop()
         }
     }
+
+    @Test
+    fun `a stamp always labels the snapshot built with it`() =
+        a2(SatelliteChain.MODE_PLAIN, SatelliteChain.MODE_SEALED, "a2-snapshot-paused")
+
+    /** A2 the other way round: sealed first, the chain turns plain while the birth is paused. */
+    @Test
+    fun `a stamp labels its snapshot when the chain turns plain`() =
+        a2(SatelliteChain.MODE_SEALED, SatelliteChain.MODE_PLAIN, "a2-inverse-snapshot-paused")
 }

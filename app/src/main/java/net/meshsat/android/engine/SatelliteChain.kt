@@ -111,6 +111,41 @@ object SatelliteChain {
      */
     suspend fun key(lookup: suspend (String) -> String?): String? = lookup(KEY_REF)?.takeIf { HEX_KEY.matches(it) }
 
+    /**
+     * A key's check value: the first 4 bytes of SHA-256 over its 32 bytes, in hex, as a Bridge's
+     * key list gives it (key_check). Two ends that show the same check hold the same key, and the
+     * check shows nothing of the key itself.
+     */
+    fun keyCheck(keyHex: String): String {
+        val raw = checkKey(keyHex).chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+        return java.security.MessageDigest.getInstance("SHA-256").digest(raw).copyOf(4).joinToString("") { "%02x".format(it) }
+    }
+
+    /**
+     * What the service sends through the 9704 for one delivery on setting [mode]: the text sealed
+     * on the chain the setting picks, or the payload as it is when the setting picks none or the
+     * delivery is not a text ([sealsDelivery]). The key is read only when it is needed. Throws
+     * [TransformException] when the delivery must be sealed and cannot be.
+     */
+    suspend fun outbound(
+        mode: String?,
+        msgRef: String,
+        payload: ByteArray,
+        pipeline: TransformPipeline = TransformPipeline(),
+        key: suspend () -> String?,
+    ): ByteArray {
+        val chain = chainOf(mode) ?: return payload
+        if (!sealsDelivery(msgRef, payload)) return payload
+        return seal(payload, key(), pipeline, chain)
+    }
+
+    /**
+     * What the service makes of one IMT payload on setting [mode]: [readMt] with the chain the
+     * setting picks first (H when it picks none). The key is read only for a versioned payload.
+     */
+    suspend fun inbound(payload: ByteArray, mode: String?, key: suspend () -> String?): Mt =
+        readMt(payload, if (payload.firstOrNull() == PROTOCOL_VERSION) key() else null, preferred = chainOf(mode) ?: Chain.H)
+
     /** What an IMT message from the satellite is, once it is not a Reticulum packet. */
     sealed interface Mt {
         /** A text: [sealed] when it came through a chain and opened, on [chain]. */

@@ -3335,15 +3335,10 @@ class GatewayService : Service() {
         }
         val msgRef = if (deliveryId > 0) db.messageDeliveryDao().getById(deliveryId)?.msgRef.orEmpty() else ""
         // The H chain, or the legacy chain the kits ran before it (the agreed rollback, r33 R33-R2).
-        val chain = net.meshsat.android.engine.SatelliteChain.chainOf(mode)
-        val data = if (chain != null && net.meshsat.android.engine.SatelliteChain.sealsDelivery(msgRef, text)) {
-            try {
-                net.meshsat.android.engine.SatelliteChain.seal(text, satelliteChainKey(), chain = chain)
-            } catch (e: net.meshsat.android.engine.TransformException) {
-                return "${Dispatcher.NEVER} Not sent: ${e.message}. Import the kit's key bundle, or set the satellite chain to plain."
-            }
-        } else {
-            text
+        val data = try {
+            net.meshsat.android.engine.SatelliteChain.outbound(mode, msgRef, text) { satelliteChainKey() }
+        } catch (e: net.meshsat.android.engine.TransformException) {
+            return "${Dispatcher.NEVER} Not sent: ${e.message}. Import the kit's key bundle, or set the satellite chain to plain."
         }
         // Up to 100 KB in one message: nothing is cut into parts.
         val status = spp.sendMessageBlocking(data)
@@ -3783,12 +3778,7 @@ class GatewayService : Service() {
                     // A kit's encrypted chain opens with the bundle's key, the chain this phone is
                     // set to first; one that does not open is kept as it came and never shown as a
                     // guess (MESHSAT-1623).
-                    val mt = net.meshsat.android.engine.SatelliteChain.readMt(
-                        payload,
-                        if (payload.firstOrNull() == net.meshsat.android.engine.SatelliteChain.PROTOCOL_VERSION) satelliteChainKey() else null,
-                        preferred = net.meshsat.android.engine.SatelliteChain.chainOf(satelliteChainMode)
-                            ?: net.meshsat.android.engine.SatelliteChain.Chain.H,
-                    )
+                    val mt = net.meshsat.android.engine.SatelliteChain.inbound(payload, satelliteChainMode) { satelliteChainKey() }
                     val (text, sealed) = when (mt) {
                         is net.meshsat.android.engine.SatelliteChain.Mt.Text -> mt.text to mt.sealed
                         is net.meshsat.android.engine.SatelliteChain.Mt.Unopened -> {
