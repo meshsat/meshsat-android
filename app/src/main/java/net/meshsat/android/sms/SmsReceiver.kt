@@ -260,6 +260,13 @@ class SmsReceiver : BroadcastReceiver() {
          * compressed Greek SMS was shown as its raw bytes.
          */
         internal fun smaz2Text(payload: ByteArray): String? {
+            // A payload that is itself readable UTF-8 with a character above ASCII is the text,
+            // never SMAZ2: Greek, accented or emoji text mostly goes out uncompressed, and read as
+            // SMAZ2 each of its bytes above 0x7F is a bigram whose letters compress back to the
+            // same bytes, so the round trip below cannot tell a word like "Καλημέρα". A compressed
+            // payload is almost never such text: its verbatim counts and word codes are control
+            // bytes, its bigram codes mostly stray bytes above 0x7F. [MESHSAT-1646]
+            if (isPlainNonAscii(payload)) return null
             val text = net.meshsat.android.codec.Smaz2.decompress(payload) ?: return null
             if (!text.all { it == '\n' || it == '\r' || it == '\t' || (it.code >= 0x20 && it.code != 0x7F && it.code !in 0x80..0x9F && it != '\uFFFD') }) return null
             // Compressed only if compressing the text again gives these very bytes: every sender
@@ -268,6 +275,15 @@ class SmsReceiver : BroadcastReceiver() {
             // bigram, so an encrypted Greek SMS, never compressed, came out as ASCII gibberish
             // that passed the readable check. [MESHSAT-1646]
             return text.takeIf { net.meshsat.android.codec.Smaz2.compress(it).contentEquals(payload) }
+        }
+
+        private fun isPlainNonAscii(payload: ByteArray): Boolean {
+            if (payload.none { it < 0 }) return false
+            val decoder = Charsets.UTF_8.newDecoder()
+                .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+                .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
+            val text = try { decoder.decode(java.nio.ByteBuffer.wrap(payload)).toString() } catch (_: java.nio.charset.CharacterCodingException) { return false }
+            return text.all { it == '\n' || it == '\r' || it == '\t' || (it.code >= 0x20 && it.code != 0x7F && it.code !in 0x80..0x9F && it != '\uFFFD') }
         }
         @Volatile
         private var cachedCodebook: MsvqscCodebook? = null

@@ -41,7 +41,7 @@ class SmsSmaz2TextTest {
     fun `an encrypted SMS that was never compressed is not read as SMAZ2`() {
         // SMAZ2 gains nothing on these, so the sender does not compress them; read as SMAZ2 each
         // byte above 0x7F was a bigram ("cafe" with an accent came out "cafssta"). [MESHSAT-1646]
-        for (s in listOf("café", "Καλημέρα από το σκάφος", "ok 👍", "Είμαστε στο βόρειο φυλάκιο, όλοι καλά")) {
+        for (s in listOf("café", "Καλημέρα από το σκάφος", "ok 👍", "Είμαστε στο βόρειο φυλάκιο, όλοι καλά", "Καλημέρα", "Ναι", "Όχι")) {
             val raw = s.toByteArray(Charsets.UTF_8)
             assertTrue("$s: not compressible", net.meshsat.android.codec.Smaz2.compress(s).size >= raw.size)
             assertNull(s, SmsReceiver.smaz2Text(raw))
