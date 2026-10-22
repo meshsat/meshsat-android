@@ -34,8 +34,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         HubOpEventEntity::class,
         HubOpMissingEntity::class,
         HubInboxEntity::class,
+        LxmfMidEntity::class,
     ],
-    version = 21,
+    version = 22,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -60,6 +61,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun telemetryDao(): TelemetryDao
     abstract fun smsPartReportDao(): SmsPartReportDao
     abstract fun hubMsgDao(): HubMsgDao
+    abstract fun lxmfMidDao(): LxmfMidDao
 
     companion object {
         @Volatile
@@ -304,6 +306,20 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * The LXMF message ids taken in (r40 review R40-R2, MESHSAT-1641): filed in one transaction
+         * with the message. Room's own CREATE statements for LxmfMidEntity; nothing else changes.
+         */
+        val MIGRATION_21_22 = object : Migration(21, 22) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `lxmf_mids` (`origin` TEXT NOT NULL, `mid` TEXT NOT NULL, " +
+                        "`received_at` INTEGER NOT NULL, PRIMARY KEY(`origin`, `mid`))"
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_lxmf_mids_received_at` ON `lxmf_mids` (`received_at`)")
+            }
+        }
+
         /** Cards handed over by QR code (MESHSAT-566, 575); nothing else changes. */
         val MIGRATION_16_17 = object : Migration(16, 17) {
             override fun migrate(db: SupportSQLiteDatabase) {
@@ -336,7 +352,7 @@ abstract class AppDatabase : RoomDatabase() {
                     MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13,
                     MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16,
                     MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20,
-                    MIGRATION_20_21,
+                    MIGRATION_20_21, MIGRATION_21_22,
                 )
                 .fallbackToDestructiveMigration()
                 .build()

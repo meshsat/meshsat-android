@@ -36,6 +36,7 @@ import net.meshsat.android.crypto.MsvqscEncoder
 import net.meshsat.android.data.AppDatabase
 import net.meshsat.android.data.ForwardingRuleEntity
 import net.meshsat.android.data.Message
+import net.meshsat.android.data.insertLxmfOnce
 import net.meshsat.android.data.NodePosition
 import net.meshsat.android.data.SettingsRepository
 import net.meshsat.android.data.SignalRecord
@@ -2285,6 +2286,14 @@ class GatewayService : Service() {
         val name = settings.lxmfDisplayName.first().ifBlank {
             settings.hubBridgeId.first().ifBlank { "MeshSat phone" }
         }
+        // The LXMF message ids past their retention go at each start (MESHSAT-1641).
+        scope.launch {
+            try {
+                db.lxmfMidDao().pruneBefore(System.currentTimeMillis() - net.meshsat.android.data.LXMF_MID_RETENTION_MS)
+            } catch (e: Exception) {
+                Log.w("MeshSat", "LXMF: pruning message ids failed: ${e.message}")
+            }
+        }
         val stack = net.meshsat.android.rns.RnsStack(
             identity = identity,
             interfaces = rnsInterfaces,
@@ -2293,26 +2302,36 @@ class GatewayService : Service() {
             displayName = name,
             onMessage = { m ->
                 scope.launch {
-                    // A repeat of a message already taken (same sender, same mid) is dropped, even
-                    // across a restart. [MESHSAT-1641]
+                    val row = Message(
+                        transport = "lxmf",
+                        direction = "rx",
+                        sender = m.sourceHex,
+                        recipient = m.destHex,
+                        text = m.contentString,
+                        rawText = if (m.title.isNotEmpty()) m.titleString else "",
+                        encrypted = false,
+                        timestamp = (m.timestamp * 1000).toLong().takeIf { it > 0 } ?: System.currentTimeMillis(),
+                        forwardedTo = if (m.signatureValid) "" else "lxmf:unverified",
+                    )
+                    // A message with a mid is filed with its (sender, mid) in one transaction, and a
+                    // repeat (same sender, same mid) is dropped, even across a restart. Nothing is
+                    // shown unless the message was filed: a failed write records nothing, so the
+                    // message can come again and be taken then (r40 review R40-R2). [MESHSAT-1641]
                     val mid = net.meshsat.android.lxmf.LxMid.midOf(m.fields)
-                    if (mid != null && !lxmfMidInbox.firstTime(m.sourceHex, mid)) {
+                    val id = try {
+                        if (mid != null) {
+                            db.insertLxmfOnce(m.sourceHex, net.meshsat.android.lxmf.LxMid.format(mid), System.currentTimeMillis(), row)
+                        } else {
+                            db.messageDao().insert(row)
+                        }
+                    } catch (e: Exception) {
+                        Log.w("MeshSat", "LXMF: filing a message from ${m.sourceHex.take(8)} failed, nothing recorded: ${e.message}")
+                        return@launch
+                    }
+                    if (id == null) {
                         Log.i("MeshSat", "LXMF: a repeat of a message already taken from ${m.sourceHex.take(8)}, dropped")
                         return@launch
                     }
-                    db.messageDao().insert(
-                        Message(
-                            transport = "lxmf",
-                            direction = "rx",
-                            sender = m.sourceHex,
-                            recipient = m.destHex,
-                            text = m.contentString,
-                            rawText = if (m.title.isNotEmpty()) m.titleString else "",
-                            encrypted = false,
-                            timestamp = (m.timestamp * 1000).toLong().takeIf { it > 0 } ?: System.currentTimeMillis(),
-                            forwardedTo = if (m.signatureValid) "" else "lxmf:unverified",
-                        )
-                    )
                     val from = GatewayService.rnsStack?.lxmf?.peerInfo(m.source)?.displayName ?: m.sourceHex.take(8)
                     postMessageNotification("Reticulum: $from", m.contentString)
                     interfaceManager?.recordActivity(m.iface)
@@ -2350,7 +2369,6 @@ class GatewayService : Service() {
 
     /** Outbound LXMF messages by hash, to the row that shows their state, and to their delivery ledger entry. */
     private val lxmfRows = java.util.concurrent.ConcurrentHashMap<String, Long>()
-    private val lxmfMidInbox by lazy { net.meshsat.android.lxmf.LxMidInbox(java.io.File(filesDir, "lxmf_mids.tsv")) }
     private val lxmfLedger = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
     private fun ledgerStatus(s: net.meshsat.android.lxmf.LxState): String = when (s) {

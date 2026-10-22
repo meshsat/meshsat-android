@@ -2,7 +2,6 @@ package net.meshsat.android
 
 import net.meshsat.android.lxmf.LxMessage
 import net.meshsat.android.lxmf.LxMid
-import net.meshsat.android.lxmf.LxMidInbox
 import net.meshsat.android.rns.MpBin
 import net.meshsat.android.rns.MpInt
 import net.meshsat.android.rns.MpMap
@@ -11,13 +10,10 @@ import net.meshsat.android.rns.Msgpack
 import org.json.JSONObject
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
-import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
-import java.nio.file.Files
 
 /**
  * The HeMB-NG mid on LXMF (contract C2, S2-R7) against the Hub's fixture lxmf_mid_field.json,
@@ -75,22 +71,23 @@ class LxMidTest {
         assertArrayEquals(mid, LxMid.midOf(LxMessage.unpack(m.packed).fields))
     }
 
+    /**
+     * The mid's room at this app's packet limits (r40 review, decision 4; LXMF 1.2.0): with it, 252
+     * bytes of content fill a single packet and 253 do not (below 256 bytes msgpack's bin header is
+     * one byte shorter); 283 fill a link packet and 284 do not. Without it the limits are 287 and
+     * 319. (The Bridge follows LXMF 1.1.0: 295, so 259 there.)
+     */
     @Test
-    fun `a repeat is dropped, also after a restart, and forgotten after the retention`() {
-        val dir = Files.createTempDirectory("lxmid").toFile()
-        val f = File(dir, "lxmf_mids.tsv")
-        var t = 1_000_000L
-        val a = LxMidInbox(f, now = { t }, retentionMs = 10_000)
-        assertTrue(a.firstTime("aa", mid))
-        assertFalse(a.firstTime("aa", mid))
-        assertTrue("another sender, the same mid", a.firstTime("bb", mid))
-        val restarted = LxMidInbox(f, now = { t }, retentionMs = 10_000)
-        assertFalse("after a restart", restarted.firstTime("aa", mid))
-        t += 20_000
-        val later = LxMidInbox(f, now = { t }, retentionMs = 10_000)
-        assertTrue("past the retention", later.firstTime("aa", mid))
-        f.appendText("garbage line\n")
-        assertFalse(LxMidInbox(f, now = { t }, retentionMs = 10_000).firstTime("aa", mid))
-        dir.deleteRecursively()
+    fun `the mid's room at the packet limits`() {
+        fun size(n: Int, withMid: Boolean) =
+            LxMessage(ByteArray(16) { 7 }, ByteArray(16) { 9 }, content = ByteArray(n) { 'x'.code.toByte() },
+                fields = if (withMid) LxMid.fields(mid) else net.meshsat.android.rns.MpMap(emptyList())).contentSize()
+        assertEquals(LxMessage.ENCRYPTED_PACKET_MAX_CONTENT, size(252, true))
+        assertEquals(LxMessage.ENCRYPTED_PACKET_MAX_CONTENT + 1, size(253, true))
+        assertEquals(LxMessage.LINK_PACKET_MAX_CONTENT, size(283, true))
+        assertEquals(LxMessage.LINK_PACKET_MAX_CONTENT + 1, size(284, true))
+        assertEquals(LxMessage.ENCRYPTED_PACKET_MAX_CONTENT, size(287, false))
+        assertEquals(287, LxMessage.ENCRYPTED_PACKET_MAX_CONTENT)
+        assertEquals(319, LxMessage.LINK_PACKET_MAX_CONTENT)
     }
 }

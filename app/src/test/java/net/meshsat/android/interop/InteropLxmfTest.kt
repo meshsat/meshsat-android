@@ -156,6 +156,17 @@ class InteropLxmfTest {
         val rcv = p.wait("lxm_received", null, 15_000)
         assertEquals(fieldsHex, rcv["fields_hex"]); assertEquals(true, rcv["signature_validated"])
         assertEquals(LxState.DELIVERED, o.result.get(15, TimeUnit.SECONDS))
+
+        // The boundary with the mid (r40 review, decision 4): 252 bytes still go as one packet, 253
+        // over a link, and stock LXMF 1.2.0 takes both.
+        for ((n, want) in listOf(252 to LxMethod.OPPORTUNISTIC, 253 to LxMethod.DIRECT)) {
+            val body = "b".repeat(n)
+            val out = k.router.send(h(p.delivery), body.toByteArray(), fields = net.meshsat.android.lxmf.LxMid.fields(mid))
+            assertEquals("$n bytes", want, out.method)
+            val got = p.wait("lxm_received", { it["content"] == body }, 20_000)
+            assertEquals("$n bytes", fieldsHex, got["fields_hex"])
+            assertEquals("$n bytes", LxState.DELIVERED, out.result.get(20, TimeUnit.SECONDS))
+        }
     }
 
     @Test

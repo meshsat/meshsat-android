@@ -271,14 +271,15 @@ class DeliveryWorkerRoomTest {
         val d = queued(status = "sent")
         val path = context.getDatabasePath(name).path
         db.close()
-        // The version-19 schema is today's without sms_sends (MIGRATION_19_20) and the hub_msg
-        // tables (MIGRATION_20_21); it upgrades through 20 to the current version.
+        // The version-19 schema is today's without sms_sends (MIGRATION_19_20), the hub_msg
+        // tables (MIGRATION_20_21) and lxmf_mids (MIGRATION_21_22); it upgrades through 20 and 21
+        // to the current version.
         SQLiteDatabase.openDatabase(path, null, SQLiteDatabase.OPEN_READWRITE).use {
-            for (t in listOf("sms_sends", "hub_ops", "hub_op_events", "hub_op_missing", "hub_inbox")) it.execSQL("DROP TABLE $t")
+            for (t in listOf("sms_sends", "hub_ops", "hub_op_events", "hub_op_missing", "hub_inbox", "lxmf_mids")) it.execSQL("DROP TABLE $t")
             it.version = 19
         }
         db = AppDatabase.build(context, name)
-        assertEquals(21, db.openHelper.readableDatabase.version)
+        assertEquals(22, db.openHelper.readableDatabase.version)
         assertEquals("sent" to null, row(d))
 
         register("a", 1, d)

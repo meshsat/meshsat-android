@@ -193,13 +193,15 @@ class HubMsgRoomTest {
         val id = db.messageDao().insert(Message(transport = "sms", direction = "rx", sender = "+31600000000", text = "kept"))
         val path = context.getDatabasePath(name).path
         db.close()
+        // Version 20 is today's without the hub_msg tables and lxmf_mids (MIGRATION_21_22); it
+        // upgrades through 21 to the current version.
         SQLiteDatabase.openDatabase(path, null, SQLiteDatabase.OPEN_READWRITE).use {
-            for (t in listOf("hub_ops", "hub_op_events", "hub_op_missing", "hub_inbox")) it.execSQL("DROP TABLE $t")
+            for (t in listOf("hub_ops", "hub_op_events", "hub_op_missing", "hub_inbox", "lxmf_mids")) it.execSQL("DROP TABLE $t")
             it.version = 20
         }
         db = AppDatabase.build(context, name)
         store = RoomHubMsgStore(db)
-        assertEquals(21, db.openHelper.readableDatabase.version)
+        assertEquals(22, db.openHelper.readableDatabase.version)
         assertEquals(1, count("SELECT COUNT(*) FROM messages WHERE id = $id AND text = 'kept'"))
         val op = outgoing()
         store.keepEvent(event(op, "forwarded", "hub_forwarded", "hub"), true, now)
