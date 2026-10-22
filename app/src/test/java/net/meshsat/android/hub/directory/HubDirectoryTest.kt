@@ -435,6 +435,23 @@ class HubDirectoryTest {
         assertEquals("", store.current.tenantId)
     }
 
+    /** A bootstrap that started before the reprovision does not pin the old Hub's key. */
+    @Test fun aBootstrapFromBeforeTheSwitchPinsNothing() {
+        val store = HubDirectoryStore(File(tmp.root, "d.json"))
+        val c = client(store)
+        c.applyProvisioning(ctxA, "acme", null)
+        server.dispatcher = object : okhttp3.mockwebserver.Dispatcher() {
+            override fun dispatch(request: okhttp3.mockwebserver.RecordedRequest): MockResponse {
+                c.applyProvisioning(ctxB, "other", null)
+                return keyAnswer(hub.getString("old_key_pkix"))
+            }
+        }
+        val o = c.poll(base(), "phone-1", "pw")
+        assertTrue(o.toString(), o is HubDirectoryClient.Outcome.Failed)
+        assertEquals("", store.current.pinnedKey)
+        assertEquals("no directory read without a pinned key", 1, server.requestCount)
+    }
+
     @Test fun theContextSurvivesARestart() {
         val f = File(tmp.root, "d.json")
         client(HubDirectoryStore(f)).applyProvisioning(ctxB, "other", b64(hub.getString("old_key_pkix")))
