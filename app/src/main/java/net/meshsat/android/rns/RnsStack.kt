@@ -166,8 +166,8 @@ class RnsStack(
     }
 
     /** Sends an LXMF message; [method] null = auto (direct across the satellite). */
-    fun send(dest: ByteArray, content: String, title: String = "", method: LxMethod? = null): LxmfRouter.Outbound =
-        lxmf.send(dest, content.toByteArray(Charsets.UTF_8), title.toByteArray(Charsets.UTF_8), method = method)
+    fun send(dest: ByteArray, content: String, title: String = "", method: LxMethod? = null, fields: MpMap = MpMap(emptyList())): LxmfRouter.Outbound =
+        lxmf.send(dest, content.toByteArray(Charsets.UTF_8), title.toByteArray(Charsets.UTF_8), fields = fields, method = method)
 
     companion object {
         private const val TAG = "RnsStack"

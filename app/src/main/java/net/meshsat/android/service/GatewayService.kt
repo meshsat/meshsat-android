@@ -2251,6 +2251,13 @@ class GatewayService : Service() {
             displayName = name,
             onMessage = { m ->
                 scope.launch {
+                    // A repeat of a message already taken (same sender, same mid) is dropped, even
+                    // across a restart. [MESHSAT-1641]
+                    val mid = net.meshsat.android.lxmf.LxMid.midOf(m.fields)
+                    if (mid != null && !lxmfMidInbox.firstTime(m.sourceHex, mid)) {
+                        Log.i("MeshSat", "LXMF: a repeat of a message already taken from ${m.sourceHex.take(8)}, dropped")
+                        return@launch
+                    }
                     db.messageDao().insert(
                         Message(
                             transport = "lxmf",
@@ -2301,6 +2308,7 @@ class GatewayService : Service() {
 
     /** Outbound LXMF messages by hash, to the row that shows their state, and to their delivery ledger entry. */
     private val lxmfRows = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private val lxmfMidInbox by lazy { net.meshsat.android.lxmf.LxMidInbox(java.io.File(filesDir, "lxmf_mids.tsv")) }
     private val lxmfLedger = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
     private fun ledgerStatus(s: net.meshsat.android.lxmf.LxState): String = when (s) {
@@ -2327,7 +2335,9 @@ class GatewayService : Service() {
     fun sendLxmf(destHex: String, text: String, method: net.meshsat.android.lxmf.LxMethod? = null): String {
         val stack = rnsStack ?: throw IllegalStateException("Reticulum node not running")
         val dest = ByteArray(16) { i -> destHex.substring(2 * i, 2 * i + 2).toInt(16).toByte() }
-        val o = stack.send(dest, text, method = method)
+        // Each message this phone writes carries its own mid (UUIDv7); the router's retries resend
+        // the same message, so the same mid. [MESHSAT-1641]
+        val o = stack.send(dest, text, method = method, fields = net.meshsat.android.lxmf.LxMid.fields(net.meshsat.android.lxmf.LxMid.newMid()))
         scope.launch {
             val id = db.messageDao().insert(
                 Message(
