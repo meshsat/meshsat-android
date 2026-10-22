@@ -261,7 +261,13 @@ class SmsReceiver : BroadcastReceiver() {
          */
         internal fun smaz2Text(payload: ByteArray): String? {
             val text = net.meshsat.android.codec.Smaz2.decompress(payload) ?: return null
-            return text.takeIf { s -> s.all { it == '\n' || it == '\r' || it == '\t' || (it.code >= 0x20 && it.code != 0x7F && it.code !in 0x80..0x9F && it != '\uFFFD') } }
+            if (!text.all { it == '\n' || it == '\r' || it == '\t' || (it.code >= 0x20 && it.code != 0x7F && it.code !in 0x80..0x9F && it != '\uFFFD') }) return null
+            // Compressed only if compressing the text again gives these very bytes: every sender
+            // (both apps, the Bridge, the Hub) compresses byte for byte alike and only when it
+            // gains. Read as SMAZ2, an uncompressed payload turns each byte above 0x7F into a
+            // bigram, so an encrypted Greek SMS, never compressed, came out as ASCII gibberish
+            // that passed the readable check. [MESHSAT-1646]
+            return text.takeIf { net.meshsat.android.codec.Smaz2.compress(it).contentEquals(payload) }
         }
         @Volatile
         private var cachedCodebook: MsvqscCodebook? = null
