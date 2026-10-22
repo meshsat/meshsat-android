@@ -14,7 +14,6 @@ import androidx.core.content.ContextCompat
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.UUID
-import net.meshsat.android.codec.ProtocolVersion
 import net.meshsat.android.crypto.AesGcmCrypto
 import net.meshsat.android.crypto.MsvqscEncoder
 import net.meshsat.android.crypto.MsvqscWire
@@ -22,8 +21,8 @@ import net.meshsat.android.crypto.MsvqscWire
 /**
  * Sends SMS messages with optional MSVQ-SC compression and AES-256-GCM encryption.
  *
- * TX pipeline: text → MSVQ-SC encode (lossy) → AES-GCM encrypt → base64 → SMS
- * Either layer can be independently enabled/disabled.
+ * TX pipeline: text → SMAZ2 or MSVQ-SC (lossy) → the app SMS wire v2 frame naming the codec →
+ * AES-GCM encrypt → base64 → SMS (SmsWireV2). Either layer can be independently enabled/disabled.
  */
 object SmsSender {
 
@@ -53,54 +52,31 @@ object SmsSender {
         sentIntent: PendingIntent? = null,
         receipt: SmsReceipt? = null,
     ) {
-        var payload: ByteArray = text.toByteArray(Charsets.UTF_8)
-        var compressed = false
-
-        // Step 0: SMAZ2 lossless compression (if enabled) [MESHSAT-447]
-        if (smaz2) {
-            val smaz2Bytes = net.meshsat.android.codec.Smaz2.compress(text)
-            if (smaz2Bytes.size < payload.size) {
-                Log.d(TAG, "SMAZ2: ${payload.size}B → ${smaz2Bytes.size}B")
-                payload = smaz2Bytes
-                compressed = true
-            } else {
-                Log.d(TAG, "SMAZ2: no gain (${payload.size}B → ${smaz2Bytes.size}B), skipping")
+        // The app SMS wire v2 (SmsWireV2, r40 review R40-R1): the frame names its codec, so the
+        // receiver never guesses. SMAZ2 when it gains [MESHSAT-447], else MSVQ-SC (lossy) when
+        // set and it encodes, else the text.
+        val frame = SmsWireV2.frame(text, smaz2, msvqscEncoder?.let { enc ->
+            {
+                enc.encode(text, msvqscStages).also { w ->
+                    if (w == null) Log.w(TAG, "MSVQ-SC encode failed, sending uncompressed")
+                }
             }
-        }
+        })
+        val compressed = frame[0] != SmsWireV2.CODEC_TEXT
+        val keyed = !encryptionKey.isNullOrEmpty()
 
-        // Step 1: MSVQ-SC lossy compression (if enabled, overrides SMAZ2)
-        if (msvqscEncoder != null && !compressed) {
-            val wire = msvqscEncoder.encode(text, msvqscStages)
-            if (wire != null) {
-                Log.d(TAG, "MSVQ-SC: ${payload.size}B → ${wire.size}B ($msvqscStages stages)")
-                payload = wire
-                compressed = true
-            } else {
-                Log.w(TAG, "MSVQ-SC encode failed, sending uncompressed")
-            }
-        }
-
-        // Step 2: AES-GCM encryption (if key provided)
-        if (!encryptionKey.isNullOrEmpty()) {
-            payload = AesGcmCrypto.encrypt(payload, encryptionKey)
-            Log.d(TAG, "Encrypted: ${payload.size}B")
-        }
-
-        // Step 3: Prepend protocol version byte (if payload was transformed)
-        if (compressed || !encryptionKey.isNullOrEmpty()) {
-            payload = ProtocolVersion.prependVersionByte(payload)
-        }
-
-        // Step 4: Base64 encode for SMS transport (if binary payload)
-        val finalText = if (compressed || !encryptionKey.isNullOrEmpty()) {
-            Base64.encodeToString(payload, Base64.NO_WRAP)
+        // A plain SMS (no key, nothing compressed) goes as typed; anything else as base64 of the
+        // v2 wire, sealed with AES-256-GCM when a key is set.
+        val finalText = if (compressed || keyed) {
+            val wire = SmsWireV2.wire(frame, if (keyed) { f -> AesGcmCrypto.encrypt(f, encryptionKey!!) } else null)
+            Base64.encodeToString(wire, Base64.NO_WRAP)
         } else {
             text
         }
 
         Log.d(TAG, "SMS to $to: ${text.length}B text → ${finalText.length} chars SMS" +
-                (if (compressed) " [msvqsc]" else "") +
-                (if (!encryptionKey.isNullOrEmpty()) " [encrypted]" else ""))
+                (if (compressed) " [codec ${frame[0]}]" else "") +
+                (if (keyed) " [encrypted]" else ""))
 
         // Step 5: Send via Android SMS API
         val smsManager = SmsCapability.manager(context) ?: run {

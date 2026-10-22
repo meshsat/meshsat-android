@@ -119,9 +119,10 @@ class SmsReceiver : BroadcastReceiver() {
     /**
      * Process an incoming SMS through the decode pipeline:
      * 1. Try base64 decode
-     * 2. Try AES-GCM decrypt (with conversation key or global key)
-     * 3. Detect MSVQ-SC wire header → codebook decode
-     * 4. Fall through to plain text
+     * 2. The app SMS wire v2 (SmsWireV2): read by the codec its frame names, or shown as it came
+     * 3. Version 1: try AES-GCM decrypt (with conversation key or global key)
+     * 4. Version 1: SMAZ2, then the MSVQ-SC wire header → codebook decode (guessed)
+     * 5. Fall through to plain text
      */
     private suspend fun processIncoming(
         text: String,
@@ -145,7 +146,41 @@ class SmsReceiver : BroadcastReceiver() {
             return ProcessResult(text, "", wasEncrypted = false, wasCompressed = false)
         }
 
-        // Could be: encrypted+compressed, encrypted-only, compressed-only
+        // Key resolution order: per-sender → Hub wildcard (sms:*) → global settings key [MESHSAT-447]
+        // Keys in Room are SecureKeyStore references ("convkey:X") — resolve via store.
+        fun resolveKey(raw: String?): String? {
+            if (raw == null || raw.isEmpty()) return null
+            if (raw.startsWith("convkey:") && secureKeyStore != null) {
+                return secureKeyStore.get(raw)
+            }
+            return raw // legacy plaintext key
+        }
+        val convKey = if (autoDecrypt) resolveKey(db.conversationKeyDao().getBySender(sender)?.hexKey) else null
+        val wildcardKey = if (autoDecrypt) resolveKey(db.conversationKeyDao().getBySender("*")?.hexKey) else null
+        val keyToUse = if (!autoDecrypt) "" else convKey?.ifEmpty { null } ?: wildcardKey?.ifEmpty { null } ?: globalKey
+        val keySource = when {
+            convKey != null && convKey.isNotEmpty() -> "conv key"
+            wildcardKey != null && wildcardKey.isNotEmpty() -> "hub wildcard sms:*"
+            else -> "global key"
+        }
+
+        // The app SMS wire v2 (SmsWireV2, r40 review R40-R1): the frame names its codec, so
+        // nothing is guessed. A frame whose mode or codec this app does not read, or that no key
+        // opens, is shown as it came, unless the version 1 rule below opens it with the key: an
+        // old sender's random nonce can start with 0x02.
+        val v2 = SmsWireV2.read(
+            rawBytes,
+            open = { p ->
+                if (keyToUse.isEmpty()) null else try { AesGcmCrypto.decrypt(p, keyToUse) } catch (_: Exception) { null }
+            },
+            msvqsc = codebook?.let { cb -> { b: ByteArray -> try { cb.decode(b) } catch (_: Exception) { null } } },
+        )
+        if (v2 is SmsWireV2.Read.Text) {
+            Log.d(TAG, "SMS from $sender: app SMS wire v2, codec ${v2.codec}" + if (v2.encrypted) " ($keySource)" else "")
+            return ProcessResult(v2.text, text, v2.encrypted, wasCompressed = v2.codec != SmsWireV2.CODEC_TEXT)
+        }
+
+        // Version 1 or unversioned: encrypted+compressed, encrypted-only, compressed-only, guessed.
         var payload = rawBytes
         var wasEncrypted = false
 
@@ -155,38 +190,20 @@ class SmsReceiver : BroadcastReceiver() {
         payload = versionResult.data
 
         // Step 1: Try AES-GCM decrypt (if looks encrypted and auto-decrypt enabled)
-        if (autoDecrypt && AesGcmCrypto.looksEncrypted(text)) {
-            // Key resolution order: per-sender → Hub wildcard (sms:*) → global settings key [MESHSAT-447]
-            // Keys in Room are SecureKeyStore references ("convkey:X") — resolve via store.
-            fun resolveKey(raw: String?): String? {
-                if (raw == null || raw.isEmpty()) return null
-                if (raw.startsWith("convkey:") && secureKeyStore != null) {
-                    return secureKeyStore.get(raw)
-                }
-                return raw // legacy plaintext key
+        if (autoDecrypt && AesGcmCrypto.looksEncrypted(text) && keyToUse.isNotEmpty()) {
+            try {
+                payload = AesGcmCrypto.decrypt(payload, keyToUse)
+                wasEncrypted = true
+                Log.d(TAG, "SMS decrypted from $sender ($keySource)")
+            } catch (e: Exception) {
+                Log.w(TAG, "SMS decrypt failed from $sender: ${e.message}")
+                // Decrypt failed — might not actually be encrypted
+                // Fall through with original rawBytes
             }
-            val convKey = resolveKey(db.conversationKeyDao().getBySender(sender)?.hexKey)
-            val wildcardKey = resolveKey(db.conversationKeyDao().getBySender("*")?.hexKey)
-            val keyToUse = convKey?.ifEmpty { null }
-                ?: wildcardKey?.ifEmpty { null }
-                ?: globalKey
-
-            if (keyToUse.isNotEmpty()) {
-                try {
-                    payload = AesGcmCrypto.decrypt(payload, keyToUse)
-                    wasEncrypted = true
-                    val keySource = when {
-                        convKey != null && convKey.isNotEmpty() -> "conv key"
-                        wildcardKey != null && wildcardKey.isNotEmpty() -> "hub wildcard sms:*"
-                        else -> "global key"
-                    }
-                    Log.d(TAG, "SMS decrypted from $sender ($keySource)")
-                } catch (e: Exception) {
-                    Log.w(TAG, "SMS decrypt failed from $sender: ${e.message}")
-                    // Decrypt failed — might not actually be encrypted
-                    // Fall through with original rawBytes
-                }
-            }
+        }
+        if (v2 is SmsWireV2.Read.Kept && !wasEncrypted) {
+            Log.w(TAG, "SMS from $sender: app SMS wire v2 this app does not read (or no key opens it), shown as it came")
+            return ProcessResult(text, "", wasEncrypted = v2.encrypted, wasCompressed = false)
         }
 
         // Step 2a: Try SMAZ2 decompression (bridge/Hub compress with SMAZ2) [MESHSAT-447]
