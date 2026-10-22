@@ -171,7 +171,11 @@ build-release:
       # The full app as APKs (GitHub, F-Droid, the phone); the Google Play edition only as the
       # AAB Play wants, signed with the upload key and re-signed by Play (MESHSAT-1335).
       echo "Building signed release APKs (fdroid) + AAB (play)..."
-      bash ./gradlew assembleFdroidRelease bundlePlayRelease
+      # Both release variants compile at once (two workers) in one Kotlin daemon, and since
+      # 2.22.0 they no longer fit in gradle.properties' 1.5 GB: GC overhead limit exceeded in
+      # compileFdroidReleaseKotlin and compilePlayReleaseKotlin, twice. The larger heap is for
+      # this job only; local builds on the 8 GB SDK VM keep the smaller one (MESHSAT-1623).
+      bash ./gradlew -Pkotlin.daemon.jvmargs=-Xmx3072m assembleFdroidRelease bundlePlayRelease
 
       # ── Collect artifacts ──
       # One APK per processor type plus a universal one; gradle already names each file
