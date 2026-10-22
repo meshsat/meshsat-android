@@ -1,8 +1,10 @@
 package net.meshsat.android
 
 import android.content.ContextWrapper
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.onSubscription
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import net.meshsat.android.bt.Iridium9704Spp
@@ -24,11 +26,11 @@ class Iridium9704DriverGuardsTest {
     private lateinit var spp: Iridium9704Spp
 
     @Before
-    fun up() = runBlocking {
+    fun up() {
         modem = FakeJsprModem("300000000000001", segment = 100)
         spp = Iridium9704Spp(object : ContextWrapper(null) {})
         spp.attach(modem)
-        withTimeout(30_000) { spp.state.first { it == Iridium9704Spp.State.Ready } }
+        runBlocking { withTimeout(30_000) { spp.state.first { it == Iridium9704Spp.State.Ready } } }
     }
 
     @After
@@ -48,11 +50,16 @@ class Iridium9704DriverGuardsTest {
         assertEquals("v1.2.3", Iridium9704Spp.firmwareVersion(JSONObject("""{"version": {"major": 1, "minor": 2, "patch": 3}}""")))
     }
 
-    private fun takesTheNextGoodMt() = runBlocking {
+    private fun takesTheNextGoodMt() {
         val payload = "after the bad lines".toByteArray()
-        val got = async { withTimeout(30_000) { spp.receivedMessages.first() } }
-        modem.deliverMt(payload, id = 42)
-        assertArrayEquals(payload, got.await())
+        val got = runBlocking {
+            val subscribed = CompletableDeferred<Unit>()
+            val first = async { withTimeout(30_000) { spp.receivedMessages.onSubscription { subscribed.complete(Unit) }.first() } }
+            subscribed.await() // the flow keeps nothing for late collectors
+            modem.deliverMt(payload, id = 42)
+            first.await()
+        }
+        assertArrayEquals(payload, got)
     }
 
     private fun b64(n: Int) = Iridium9704Spp.jsprSegmentData(ByteArray(n) { 0x41 })
@@ -81,10 +88,10 @@ class Iridium9704DriverGuardsTest {
     }
 
     @Test
-    fun `a negative MO segment request is ignored and the real segments still send the message`() = runBlocking {
+    fun `a negative MO segment request is ignored and the real segments still send the message`() {
         modem.badSegmentFirst = true
         val wire = ByteArray(250) { it.toByte() }
-        assertEquals("mo_ack_received", spp.sendMessageBlocking(wire))
+        assertEquals("mo_ack_received", runBlocking { spp.sendMessageBlocking(wire) })
         val mo = modem.mos.take()
         assertArrayEquals(wire, mo.copyOfRange(0, mo.size - 2))
     }
