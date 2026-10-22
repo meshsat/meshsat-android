@@ -39,6 +39,14 @@ data class DirSkip(val kind: String, val id: String, val reason: String, val det
  * version sequence but are counted apart (contract C7.6, as on the Bridge since r19).
  */
 data class DirectoryState(
+    /**
+     * The provisioning context the directory belongs to (broker URL, bridge id, topic root, tenant;
+     * HubDirectoryClient.provisioningContext): a provisioning that changes it starts the directory
+     * over, even with the same signing key (r40 review R40-R3).
+     */
+    val context: String = "",
+    /** The tenant the provisioning bundle names (tenant_id); empty for a bundle without it. */
+    val expectedTenant: String = "",
     /** The trusted key, PKIX DER in base64; empty while none is pinned. */
     val pinnedKey: String = "",
     /** Where the key came from: "bundle", "https" or "rotation". */
@@ -59,6 +67,8 @@ data class DirectoryState(
     val keyId: String get() = pinnedPkix?.let { DirectoryEnvelope.keyId(it) } ?: ""
 
     fun toJson(): JSONObject = JSONObject()
+        .put("context", context)
+        .put("expected_tenant", expectedTenant)
         .put("pinned_key", pinnedKey)
         .put("pin_source", pinSource)
         .put("tenant_id", tenantId)
@@ -86,6 +96,8 @@ data class DirectoryState(
 
     companion object {
         fun fromJson(o: JSONObject): DirectoryState = DirectoryState(
+            context = o.optString("context", ""),
+            expectedTenant = o.optString("expected_tenant", ""),
             pinnedKey = o.optString("pinned_key", ""),
             pinSource = o.optString("pin_source", ""),
             tenantId = o.optString("tenant_id", ""),
@@ -154,6 +166,8 @@ object DirectoryApply {
     // checkHubVersion: the tenant must be named and the one this phone follows, the version above held.
     private fun check(state: DirectoryState, what: String, tenant: String, version: Long, held: Long): Pair<String, String>? = when {
         tenant.isEmpty() -> OTHER_TENANT to "the $what names no tenant"
+        state.expectedTenant.isNotEmpty() && state.expectedTenant != tenant ->
+            OTHER_TENANT to "this phone was provisioned for tenant \"${state.expectedTenant}\", the $what is \"$tenant\""
         state.tenantId.isNotEmpty() && state.tenantId != tenant ->
             OTHER_TENANT to "this phone follows tenant \"${state.tenantId}\", the $what is \"$tenant\""
         version <= held -> NOT_NEWER to "$what version $version, this phone holds $held"

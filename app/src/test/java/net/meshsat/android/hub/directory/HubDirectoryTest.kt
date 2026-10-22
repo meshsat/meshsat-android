@@ -299,7 +299,7 @@ class HubDirectoryTest {
     @Test fun aPinnedKeyIsNeverReplacedByTheHttpsBootstrap() {
         val store = HubDirectoryStore(File(tmp.root, "d.json"))
         val bundleKey = p256().public.encoded
-        client(store).pinFromBundle(bundleKey)
+        client(store).applyProvisioning("ctx", "acme", bundleKey)
         assertTrue(client(store).bootstrap(base()))
         assertEquals("nothing fetched", 0, server.requestCount)
         assertEquals(DirectoryEnvelope.keyId(bundleKey), store.current.keyId)
@@ -332,25 +332,123 @@ class HubDirectoryTest {
         assertEquals("no request over plain http", 1, server.requestCount)
     }
 
-    @Test fun theProvisioningBundleCarriesTheDirectoryKey() {
+    @Test fun theProvisioningBundleCarriesTheDirectoryKeyAndTheTenant() {
         val b = net.meshsat.android.crypto.ProvisionImporter.parseBundle(
-            JSONObject().put("bid", "phone-1").put("dir_sign_pub", hub.getString("old_key_pkix")).toString(),
+            JSONObject().put("bid", "phone-1").put("dir_sign_pub", hub.getString("old_key_pkix")).put("tenant_id", "acme").toString(),
         )
         assertEquals(hub.getString("old_key_id"), DirectoryEnvelope.keyId(b64(b.dirSignPub)))
-        assertEquals("", net.meshsat.android.crypto.ProvisionImporter.parseBundle("""{"bid":"p"}""").dirSignPub)
+        assertEquals("acme", b.tenantId)
+        val old = net.meshsat.android.crypto.ProvisionImporter.parseBundle("""{"bid":"p"}""")
+        assertEquals("" to "", old.dirSignPub to old.tenantId)
     }
 
-    @Test fun aBundleWithAnotherKeyStartsTheDirectoryOverAndTheSameKeyKeepsIt() {
+    // ---- the provisioning context (r40 review R40-R3) ----
+
+    private val ctxA = HubDirectoryClient.provisioningContext("wss://mqtt-hub.example/mqtt", "phone-1", "meshsat/acme", "acme")
+    private val ctxB = HubDirectoryClient.provisioningContext("wss://mqtt-hub.example/mqtt", "phone-1", "meshsat/other", "other")
+
+    /** The review's probe: reprovisioned to another tenant on the same Hub, same key: the directory starts over. */
+    @Test fun aReprovisionToAnotherTenantUnderTheSameKeyStartsOver() {
         val store = HubDirectoryStore(File(tmp.root, "d.json"))
-        val held = DirectoryApply.answer(pinned(hub.getString("old_key_pkix")), hub.getJSONObject("first"), 10).state
-        store.save(held)
-        client(store).pinFromBundle(b64(hub.getString("old_key_pkix")))
+        val c = client(store)
+        c.applyProvisioning(ctxA, "acme", b64(hub.getString("old_key_pkix")))
+        store.update { DirectoryApply.answer(it, hub.getJSONObject("first"), 10).state }
+        store.update { DirectoryApply.answer(it, hub.getJSONObject("after_rotation"), 11).state }
+        assertEquals("acme" to 3, store.current.tenantId to store.current.contacts.size)
+        // The Hub's current key, the same for every tenant of it, in the new tenant's bundle.
+        c.applyProvisioning(ctxB, "other", b64(store.current.pinnedKey))
+        assertEquals("", store.current.tenantId)
+        assertTrue("the old tenant's contacts are gone", store.current.contacts.isEmpty())
+        assertEquals(0L to 0L, store.current.version to store.current.keyVersion)
+        val r = DirectoryApply.answer(store.current, hub.getJSONObject("other_tenant"), 12)
+        assertTrue(r.reason, r.applied)
+        assertEquals("other", r.state.tenantId)
+        assertEquals(listOf("Nine"), r.state.contacts.map { it.displayName })
+    }
+
+    /** Tenant B's snapshot applies whether its version is below, equal to or above what A held. */
+    @Test fun theNewTenantsVersionMayBeLowerEqualOrHigher() {
+        val key = p256()
+        val pkix = key.public.encoded
+        for (bVersion in listOf(5L, 10L, 20L)) {
+            val store = HubDirectoryStore(File(tmp.newFolder(), "d.json"))
+            val c = client(store)
+            c.applyProvisioning(ctxA, "acme", pkix)
+            store.update { DirectoryApply.snapshot(it, seal(key, snap("acme", 10, JSONArray().put(contact("a1", "A one")))), 1).state }
+            assertEquals(10L, store.current.version)
+            c.applyProvisioning(ctxB, "other", pkix)
+            val r = DirectoryApply.snapshot(store.current, seal(key, snap("other", bVersion, JSONArray().put(contact("b1", "B one")))), 2)
+            assertTrue("B at $bVersion: ${r.reason}", r.applied)
+            assertEquals(listOf("B one"), r.state.contacts.map { it.displayName })
+        }
+    }
+
+    @Test fun reScanningTheSameContextKeepsTheDirectory() {
+        val store = HubDirectoryStore(File(tmp.root, "d.json"))
+        val c = client(store)
+        c.applyProvisioning(ctxA, "acme", b64(hub.getString("old_key_pkix")))
+        store.update { DirectoryApply.answer(it, hub.getJSONObject("first"), 10).state }
+        val held = store.current
+        c.applyProvisioning(ctxA, "acme", b64(hub.getString("old_key_pkix")))
         assertEquals(held, store.current)
+        c.applyProvisioning(ctxA, "acme", null)
+        assertEquals("a bundle without a key keeps it in the same context", held, store.current)
+        // Another key in the same context starts over under it.
         val other = p256().public.encoded
-        client(store).pinFromBundle(other)
+        c.applyProvisioning(ctxA, "acme", other)
         assertEquals(DirectoryEnvelope.keyId(other), store.current.keyId)
-        assertEquals(0L, store.current.version)
         assertTrue(store.current.contacts.isEmpty())
-        assertNull(runCatching { client(store).pinFromBundle(ByteArray(10)) }.getOrNull())
+        assertNull(runCatching { c.applyProvisioning(ctxA, "acme", ByteArray(10)) }.getOrNull())
+    }
+
+    @Test fun anotherHubWithAnotherKeyAndNoKeyInTheBundle() {
+        val store = HubDirectoryStore(File(tmp.root, "d.json"))
+        val c = client(store)
+        c.applyProvisioning(ctxA, "acme", b64(hub.getString("old_key_pkix")))
+        store.update { DirectoryApply.answer(it, hub.getJSONObject("first"), 10).state }
+        val otherHub = HubDirectoryClient.provisioningContext("wss://mqtt-hub.elsewhere/mqtt", "phone-1", "meshsat", "default")
+        c.applyProvisioning(otherHub, "default", null)
+        assertEquals("", store.current.pinnedKey)
+        assertTrue(store.current.contacts.isEmpty())
+        // The bootstrap then fills the pin from the new Hub, once.
+        server.enqueue(keyAnswer(hub.getString("old_key_pkix")))
+        assertTrue(c.bootstrap(base()))
+        assertEquals("https", store.current.pinSource)
+    }
+
+    /** A read that started before the reprovision cannot bring the old tenant back. */
+    @Test fun aReplyFromBeforeTheSwitchIsDropped() {
+        val store = HubDirectoryStore(File(tmp.root, "d.json"))
+        val c = client(store)
+        c.applyProvisioning(ctxA, "acme", b64(hub.getString("old_key_pkix")))
+        server.dispatcher = object : okhttp3.mockwebserver.Dispatcher() {
+            override fun dispatch(request: okhttp3.mockwebserver.RecordedRequest): MockResponse {
+                // The phone is reprovisioned while the read is out.
+                c.applyProvisioning(ctxB, "other", b64(hub.getString("old_key_pkix")))
+                return MockResponse().setBody(hub.getJSONObject("first").toString())
+            }
+        }
+        val o = c.poll(base(), "phone-1", "pw")
+        assertTrue(o.toString(), o is HubDirectoryClient.Outcome.Failed)
+        assertEquals(ctxB, store.current.context)
+        assertTrue(store.current.contacts.isEmpty())
+        assertEquals("", store.current.tenantId)
+    }
+
+    @Test fun theContextSurvivesARestart() {
+        val f = File(tmp.root, "d.json")
+        client(HubDirectoryStore(f)).applyProvisioning(ctxB, "other", b64(hub.getString("old_key_pkix")))
+        val again = HubDirectoryStore(f).current
+        assertEquals(ctxB to "other", again.context to again.expectedTenant)
+    }
+
+    /** The bundle's tenant binds the directory from the first snapshot on. */
+    @Test fun aSnapshotOfAnotherTenantIsRefusedFromTheFirstOne() {
+        val key = p256()
+        val store = HubDirectoryStore(File(tmp.root, "d.json"))
+        client(store).applyProvisioning(ctxA, "acme", key.public.encoded)
+        val r = DirectoryApply.snapshot(store.current, seal(key, snap("other", 1)), 1)
+        assertEquals(DirectoryApply.OTHER_TENANT, r.reason)
+        assertTrue(DirectoryApply.snapshot(store.current, seal(key, snap("acme", 1)), 1).applied)
     }
 }

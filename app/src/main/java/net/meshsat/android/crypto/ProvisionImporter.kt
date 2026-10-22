@@ -46,6 +46,8 @@ object ProvisionImporter {
         val topicPrefix: String = "",
         /** The Hub's directory signing key, PKIX DER in base64: the key the phone pins (MESHSAT-1642). */
         val dirSignPub: String = "",
+        /** The bridge's tenant: the only tenant whose directory this phone takes (r40 review R40-R3). */
+        val tenantId: String = "",
     )
 
     /** Check if a scanned string is a provisioning URL. */
@@ -218,6 +220,7 @@ object ProvisionImporter {
             reticulumTcp = json.optString("ret_tcp", ""),
             topicPrefix = json.optString("mqtt_topic_prefix", ""),
             dirSignPub = json.optString("dir_sign_pub", ""),
+            tenantId = json.optString("tenant_id", ""),
         )
     }
 
@@ -278,16 +281,24 @@ object ProvisionImporter {
             )
         }
 
-        // The directory key: pinned from the bundle, never replaced by the HTTPS bootstrap
-        // (MESHSAT-1642). A bad key here is the Hub's bug and must not cost the provisioning.
-        if (bundle.dirSignPub.isNotBlank()) {
-            try {
-                net.meshsat.android.hub.directory.HubDirectoryClient(
-                    net.meshsat.android.hub.directory.HubDirectoryStore.get(context),
-                ).pinFromBundle(java.util.Base64.getDecoder().decode(bundle.dirSignPub))
-            } catch (e: Exception) {
-                Log.w(TAG, "Directory key in the bundle not pinned: ${e.message}")
-            }
+        // The directory's context and key (MESHSAT-1642, r40 review R40-R3): another broker, bridge
+        // id, topic root or tenant starts the directory over, even under the same signing key; the
+        // bundle's key is pinned, never replaced by the HTTPS bootstrap. A bad key here is the
+        // Hub's bug and must not cost the provisioning: the directory then starts over unpinned.
+        val dirContext = net.meshsat.android.hub.directory.HubDirectoryClient.provisioningContext(
+            bundle.mqttUrl, bundle.bridgeId, bundle.topicPrefix, bundle.tenantId,
+        )
+        val dirClient = net.meshsat.android.hub.directory.HubDirectoryClient(
+            net.meshsat.android.hub.directory.HubDirectoryStore.get(context),
+        )
+        try {
+            dirClient.applyProvisioning(
+                dirContext, bundle.tenantId,
+                bundle.dirSignPub.takeIf { it.isNotBlank() }?.let { java.util.Base64.getDecoder().decode(it) },
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "Directory key in the bundle not pinned: ${e.message}")
+            dirClient.applyProvisioning(dirContext, bundle.tenantId, null)
         }
 
         Log.i(TAG, "Hub provisioned: ${bundle.bridgeId} → ${bundle.mqttUrl}")

@@ -15,9 +15,10 @@ import java.util.Base64
  * read it").
  *
  * The key: the one in the provisioning bundle (`dir_sign_pub`) is pinned when the bundle is
- * applied. Only a phone with none pinned takes it once from `GET /api/relay/directory-key` over
- * HTTPS, with no redirect followed and the key hashing to its id; after that only a rotation
- * record signed by the pinned key moves it. [MESHSAT-1642]
+ * applied (applyProvisioning, which also sets the context the directory belongs to). Only a phone
+ * with none pinned takes it once from `GET /api/relay/directory-key` over HTTPS, with no redirect
+ * followed and the key hashing to its id; after that only a rotation record signed by the pinned
+ * key, or a new provisioning, moves it. [MESHSAT-1642]
  *
  * [requireHttps] is false only in tests against a plain local server.
  */
@@ -36,22 +37,35 @@ class HubDirectoryClient(
     }
 
     /**
-     * Pin the key a provisioning bundle carries. The bundle came from the Hub over HTTPS with a
-     * single-use claim, so it outranks a key fetched on its own; a different key than the pinned
-     * one starts the directory over (a new provisioning can be another tenant).
+     * A provisioning bundle was applied (r40 review R40-R3). Scanning a provisioning code is a
+     * deliberate act with a single-use claim over HTTPS, so it sets the context the directory
+     * belongs to. A new [context] (another broker, bridge id, topic root or tenant) starts the
+     * directory over even when the signing key is the same, as every tenant of a Hub shares it:
+     * the held contacts, versions and tenant go, the bundle's key is pinned, or none when the bundle
+     * has none (the HTTPS bootstrap then fetches the new Hub's once), and only snapshots of
+     * [tenant] are taken. The same context keeps the directory, and pins the bundle's key when none
+     * is pinned; a different key in the same context starts over too.
      */
-    fun pinFromBundle(pkix: ByteArray): DirectoryState {
-        DirectoryEnvelope.p256(pkix)
-        val b64 = Base64.getEncoder().encodeToString(pkix)
+    fun applyProvisioning(context: String, tenant: String, pkix: ByteArray?): DirectoryState {
+        pkix?.let { DirectoryEnvelope.p256(it) }
+        val b64 = pkix?.let { Base64.getEncoder().encodeToString(it) }
         return store.update { s ->
-            if (s.pinnedKey == b64) s.copy(pinSource = if (s.pinSource == "https") "bundle" else s.pinSource)
-            else DirectoryState(pinnedKey = b64, pinSource = "bundle")
+            val sameContext = s.context == context && s.expectedTenant == tenant
+            when {
+                sameContext && (b64 == null || s.pinnedKey == b64) -> s
+                sameContext && s.pinnedKey.isEmpty() -> s.copy(pinnedKey = b64!!, pinSource = "bundle")
+                else -> DirectoryState(
+                    context = context, expectedTenant = tenant,
+                    pinnedKey = b64 ?: "", pinSource = if (b64 != null) "bundle" else "",
+                )
+            }
         }
     }
 
     /** Take the Hub's key over HTTPS, only while none is pinned. True when a key is pinned after. */
     fun bootstrap(hubApiBase: String): Boolean {
         if (store.current.pinnedKey.isNotEmpty()) return true
+        val context = store.current.context
         val url = endpoint(hubApiBase, "/api/relay/directory-key")
         val conn = open(url)
         try {
@@ -65,9 +79,10 @@ class HubDirectoryClient(
             }
             DirectoryEnvelope.p256(pkix)
             val b64 = Base64.getEncoder().encodeToString(pkix)
-            // A bundle that landed meanwhile wins: this only fills an empty pin.
-            store.update { s -> if (s.pinnedKey.isEmpty()) s.copy(pinnedKey = b64, pinSource = "https") else s }
-            return true
+            // A bundle that landed meanwhile wins: this only fills an empty pin, in the context
+            // the fetch started in.
+            store.update { s -> if (s.pinnedKey.isEmpty() && s.context == context) s.copy(pinnedKey = b64, pinSource = "https") else s }
+            return store.current.pinnedKey.isNotEmpty()
         } finally {
             conn.disconnect()
         }
@@ -78,6 +93,9 @@ class HubDirectoryClient(
         return try {
             if (!bootstrap(hubApiBase)) return Outcome.Failed("no directory key")
             val held = store.current
+            // The answer applies only to the context it was asked in: a provisioning that lands
+            // while it is out starts the directory over, and nothing of the old one comes back.
+            val context = held.context
             val query = "?since=${held.version}&key_id=" + URLEncoder.encode(held.keyId, "UTF-8")
             val url = endpoint(hubApiBase, "/api/relay/directory$query")
             val conn = open(url)
@@ -85,7 +103,7 @@ class HubDirectoryClient(
             try {
                 when (val code = conn.responseCode) {
                     304 -> {
-                        store.update { it.copy(checkedAt = now()) }
+                        store.update { if (it.context == context) it.copy(checkedAt = now()) else it }
                         Outcome.NotModified
                     }
                     200 -> {
@@ -93,9 +111,10 @@ class HubDirectoryClient(
                         val answer = JSONObject(readCapped(conn))
                         var result: DirectoryApply.Result? = null
                         store.update { s ->
-                            DirectoryApply.answer(s, answer, now()).also { result = it }.state.copy(checkedAt = now())
+                            if (s.context != context) s
+                            else DirectoryApply.answer(s, answer, now()).also { result = it }.state.copy(checkedAt = now())
                         }
-                        val r = result!!
+                        val r = result ?: return Outcome.Failed("the provisioning changed while the directory was read; answer dropped")
                         if (r.reason.isEmpty()) Outcome.Applied(r) else Outcome.Refused(r)
                     }
                     else -> Outcome.Failed("GET /api/relay/directory answered HTTP $code")
@@ -153,6 +172,13 @@ class HubDirectoryClient(
     }
 
     companion object {
+        /**
+         * The context a provisioning bundle sets: the broker, the bridge id, the topic root and the
+         * tenant. A change in any of them is another directory (r40 review R40-R3).
+         */
+        fun provisioningContext(mqttUrl: String, bridgeId: String, topicPrefix: String, tenant: String): String =
+            listOf(mqttUrl.trim().lowercase(), bridgeId, topicPrefix, tenant).joinToString("|")
+
         /** A directory of a few thousand contacts; anything larger is refused unread. */
         const val MAX_BODY = 4 * 1024 * 1024
     }
