@@ -85,6 +85,38 @@ class Iridium9704ChainTest {
         modem.deliverMt(wire)
         val payload = got.await()
         assertArrayEquals(wire, payload)
-        assertEquals(SatelliteChain.Mt.Text(x.getString("text"), sealed = true), SatelliteChain.readMt(payload, x.getString("key_hex")))
+        assertEquals(SatelliteChain.Mt.Text(x.getString("text"), sealed = true, chain = SatelliteChain.Chain.H), SatelliteChain.readMt(payload, x.getString("key_hex")))
+    }
+
+    /**
+     * The coordinated switch and the rollback (r33 review R33-R2), through what the service does:
+     * the setting picks the chain (`chainOf`), the driver carries the wire both ways, and the
+     * receive side opens it on the chain the phone is set to. H, then legacy, then H again.
+     */
+    @Test
+    fun `H, rollback to the legacy chain, and H again, out and in through the driver`() = runBlocking {
+        val texts = mapOf(
+            SatelliteChain.MODE_SEALED to "first on the H chain, όλα καλά",
+            SatelliteChain.MODE_LEGACY to "rolled back to the old chain, όλα καλά",
+        )
+        for (mode in listOf(SatelliteChain.MODE_SEALED, SatelliteChain.MODE_LEGACY, SatelliteChain.MODE_SEALED)) {
+            val chain = requireNotNull(SatelliteChain.chainOf(mode))
+            val text = texts.getValue(mode).toByteArray(Charsets.UTF_8)
+            val wire = SatelliteChain.seal(text, key, chain = chain)
+            val got = sendAndTake(wire)
+            assertArrayEquals("$mode out", wire, got)
+            assertArrayEquals("$mode opens on its chain", text, SatelliteChain.open(got, key, chain = chain))
+
+            val incoming = async { withTimeout(30_000) { spp.receivedMessages.first() } }
+            delay(200)
+            modem.deliverMt(wire, id = 20 + chain.ordinal)
+            val payload = incoming.await()
+            assertArrayEquals("$mode in", wire, payload)
+            assertEquals(
+                "$mode reads on the phone's setting",
+                SatelliteChain.Mt.Text(String(text, Charsets.UTF_8), sealed = true, chain = chain),
+                SatelliteChain.readMt(payload, key, preferred = chain),
+            )
+        }
     }
 }

@@ -188,7 +188,10 @@ class KeyBundleImporterTest {
         assertEquals(TrustStatus.NEW_TRUSTED, success.status)
         assertEquals(1, trustDao.store.size)
         assertTrue(trustDao.store.values.first().pubkey.contentEquals(pub))
-        assertEquals(2, convDao.store.size)
+        // Each entry under its address and under channel:address (MESHSAT-1623, R33-R3).
+        assertEquals(4, convDao.store.size)
+        assertTrue(convDao.store.containsKey("sms:+31612345678"))
+        assertTrue(convDao.store.containsKey("mesh:!abc12345"))
         assertEquals(2, credDao.store.size)
     }
 
@@ -355,5 +358,57 @@ class KeyBundleImporterTest {
             url, FakeBridgeTrustDao(), FakeConversationKeyDao(), FakeProviderCredentialDao()
         )
         assertTrue("Expected Malformed, got $result", result is ImportResult.Malformed)
+    }
+
+    // ------------- The satellite chain's key: exactly iridium:shared (r33 review A4) -----
+
+    private fun keyOf(b: Byte) = ByteArray(32) { b }
+
+    private suspend fun satelliteKey(convDao: FakeConversationKeyDao) =
+        net.meshsat.android.engine.SatelliteChain.key { convDao.getBySender(it)?.hexKey }
+
+    private suspend fun importEntries(entries: List<TestEntry>, convDao: FakeConversationKeyDao, trustDao: FakeBridgeTrustDao, kp: Pair<PrivateKey, ByteArray>, bh: ByteArray) {
+        val result = KeyBundleImporter.importFromURL(bundleToUrl(buildV2Bundle(bh, entries, kp.first, kp.second)), trustDao, convDao, FakeProviderCredentialDao())
+        assertTrue("import: $result", result is ImportResult.Success)
+    }
+
+    @Test
+    fun `the satellite chain takes the iridium shared key, whatever order a mesh shared key comes in`() = runBlocking {
+        val iridium = TestEntry(0x02, "shared", keyOf(0x11))
+        val mesh = TestEntry(0x01, "shared", keyOf(0x22))
+        val want = "11".repeat(32)
+        for (order in listOf(listOf(iridium, mesh), listOf(mesh, iridium))) {
+            val convDao = FakeConversationKeyDao()
+            val kp = generateEd25519Keypair()
+            importEntries(order, convDao, FakeBridgeTrustDao(), kp, randomBridgeHash())
+            assertEquals("order ${order.map { it.channelType }}", want, satelliteKey(convDao))
+            // The address row, kept for the SMS lookups, is whichever came last: never read here.
+            assertEquals(order.last().key.joinToString("") { "%02x".format(it) }, convDao.store["shared"]?.hexKey)
+        }
+    }
+
+    @Test
+    fun `no iridium shared key means none, never another channel's`() = runBlocking {
+        val convDao = FakeConversationKeyDao()
+        importEntries(listOf(TestEntry(0x01, "shared", keyOf(0x22))), convDao, FakeBridgeTrustDao(), generateEd25519Keypair(), randomBridgeHash())
+        assertEquals(null, satelliteKey(convDao))
+        try {
+            net.meshsat.android.engine.SatelliteChain.seal("hello".toByteArray(), satelliteKey(convDao))
+            org.junit.Assert.fail("sealed without the iridium key")
+        } catch (e: net.meshsat.android.engine.TransformException) {
+        }
+    }
+
+    @Test
+    fun `a re-import replaces the iridium shared key, and a mesh one after it does not`() = runBlocking {
+        val convDao = FakeConversationKeyDao()
+        val trustDao = FakeBridgeTrustDao()
+        val kp = generateEd25519Keypair()
+        val bh = randomBridgeHash()
+        importEntries(listOf(TestEntry(0x02, "shared", keyOf(0x11))), convDao, trustDao, kp, bh)
+        importEntries(listOf(TestEntry(0x02, "shared", keyOf(0x33))), convDao, trustDao, kp, bh)
+        assertEquals("33".repeat(32), satelliteKey(convDao))
+        importEntries(listOf(TestEntry(0x01, "shared", keyOf(0x22))), convDao, trustDao, kp, bh)
+        assertEquals("33".repeat(32), satelliteKey(convDao))
     }
 }

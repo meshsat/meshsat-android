@@ -632,11 +632,12 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
                     // what this phone tells the Hub, which keeps an encrypted modem's messages opaque.
                     val chain by settings.satelliteChain.collectAsState(initial = net.meshsat.android.engine.SatelliteChain.MODE_UNDECLARED)
                     SettingRow("Satellite chain") {
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             listOf(
                                 net.meshsat.android.engine.SatelliteChain.MODE_UNDECLARED to "Not set",
                                 net.meshsat.android.engine.SatelliteChain.MODE_PLAIN to "Plain",
                                 net.meshsat.android.engine.SatelliteChain.MODE_SEALED to "Encrypted",
+                                net.meshsat.android.engine.SatelliteChain.MODE_LEGACY to "Encrypted (old)",
                             ).forEach { (mode, label) ->
                                 FilterChip(
                                     selected = chain == mode,
@@ -649,9 +650,16 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
                             }
                         }
                     }
-                    if (chain == net.meshsat.android.engine.SatelliteChain.MODE_SEALED) {
+                    val chainHint = when (chain) {
+                        net.meshsat.android.engine.SatelliteChain.MODE_SEALED ->
+                            "Texts go out as the kits send them: compressed and encrypted with the key from the kit's key bundle. Without that key nothing is sent."
+                        net.meshsat.android.engine.SatelliteChain.MODE_LEGACY ->
+                            "The kits' chain from before, for a kit that has not switched: compressed, encrypted, base64, with the same key."
+                        else -> null
+                    }
+                    if (chainHint != null) {
                         Text(
-                            "Texts go out as the kits send them: compressed and encrypted with the key from the kit's key bundle. Without that key nothing is sent.",
+                            chainHint,
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )

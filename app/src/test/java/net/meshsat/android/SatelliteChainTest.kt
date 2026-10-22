@@ -4,6 +4,7 @@ import net.meshsat.android.bt.Iridium9704Spp
 import net.meshsat.android.engine.SatelliteChain
 import net.meshsat.android.engine.TransformException
 import net.meshsat.android.engine.TransformPipeline
+import net.meshsat.android.engine.TransformSpec
 import net.meshsat.android.hub.InterfaceInfo
 import net.meshsat.android.hub.imtStatus
 import net.meshsat.android.hub.modemDeclarations
@@ -140,6 +141,7 @@ class SatelliteChainTest {
         assertFalse(none.has("egress_sealed"))
 
         assertEquals("sealed", SatelliteChain.egressFormat(SatelliteChain.MODE_SEALED))
+        assertEquals("the rollback chain is sealed too", "sealed", SatelliteChain.egressFormat(SatelliteChain.MODE_LEGACY))
         assertEquals("plain", SatelliteChain.egressFormat(SatelliteChain.MODE_PLAIN))
         assertEquals(null, SatelliteChain.egressFormat(SatelliteChain.MODE_UNDECLARED))
         assertEquals(null, SatelliteChain.egressFormat(null))
@@ -163,5 +165,64 @@ class SatelliteChainTest {
         val plain = modemDeclarations(listOf(InterfaceInfo("iridium_imt_0", "iridium_imt", "online", imei = "300000000000001", egressFormat = "plain")))
         assertNotEquals(late, plain)
         assertEquals(setOf("300000000000001:sealed"), late)
+    }
+
+    @Test
+    fun `the setting picks the chain both ways`() {
+        assertEquals(SatelliteChain.Chain.H, SatelliteChain.chainOf(SatelliteChain.MODE_SEALED))
+        assertEquals(SatelliteChain.Chain.LEGACY, SatelliteChain.chainOf(SatelliteChain.MODE_LEGACY))
+        assertEquals(null, SatelliteChain.chainOf(SatelliteChain.MODE_PLAIN))
+        assertEquals(null, SatelliteChain.chainOf(SatelliteChain.MODE_UNDECLARED))
+        assertEquals(null, SatelliteChain.chainOf(null))
+        // The rollback chain is parallax's: smaz2 with no dict (the default table), encrypt, base64.
+        assertEquals(
+            listOf(TransformSpec("smaz2"), TransformSpec("encrypt", mapOf("key" to key)), TransformSpec("base64")),
+            SatelliteChain.Chain.LEGACY.steps(key),
+        )
+    }
+
+    /** The review's A3, which reproduced R33-R2 on 2.22.0, now with parallax's chain: it opens. */
+    @Test
+    fun `a legacy wire from the general pipeline opens on the satellite path`() {
+        val text = "hello there, the satellite is in range".toByteArray()
+        val legacy = listOf(TransformSpec("smaz2"), TransformSpec("encrypt", mapOf("key" to key)), TransformSpec("base64"))
+        val pipeline = TransformPipeline()
+        val wire = byteArrayOf(1) + pipeline.applyEgress(text, legacy)
+        assertArrayEquals(text, pipeline.applyIngress(wire.copyOfRange(1, wire.size), legacy))
+        val want = SatelliteChain.Mt.Text(String(text), sealed = true, chain = SatelliteChain.Chain.LEGACY)
+        assertEquals(want, SatelliteChain.readMt(wire, key, preferred = SatelliteChain.Chain.LEGACY))
+        assertEquals(want, SatelliteChain.readMt(wire, key, preferred = SatelliteChain.Chain.H))
+        // And an H wire still opens on the legacy setting, by its own tag.
+        val h = SatelliteChain.seal(text, key)
+        assertEquals(SatelliteChain.Mt.Text(String(text), sealed = true, chain = SatelliteChain.Chain.H), SatelliteChain.readMt(h, key, preferred = SatelliteChain.Chain.LEGACY))
+        // Wrong key: neither chain reads it.
+        assertTrue(SatelliteChain.readMt(wire, otherKey, preferred = SatelliteChain.Chain.LEGACY) is SatelliteChain.Mt.Unopened)
+    }
+
+    @Test
+    fun `the rollback chain has the same one-message limit, at the boundary and no further`() {
+        // Wire = version byte + base64 of (nonce + smaz2 with the default table + tag).
+        fun wireLen(b: ByteArray): Int {
+            val z = net.meshsat.android.codec.Smaz2Bytes.compress(b, net.meshsat.android.codec.Smaz2Dict.DEFAULT).size
+            return 1 + 4 * ((28 + z + 2) / 3)
+        }
+        // Bytes 0x80-0xFF only: the default table copies them verbatim (it has no word or bigram for
+        // them), so they come back exactly and every byte added grows the output. Bytes 0x01-0x08
+        // do not come back from the default table at all (MESHSAT-1626).
+        val rng = java.util.Random(1623)
+        val pool = ByteArray(SatelliteChain.MAX_WIRE_BYTES) { (0x80 + rng.nextInt(0x80)).toByte() }
+        var lo = 1
+        var hi = pool.size
+        while (lo < hi) { // the longest prefix whose wire fits
+            val mid = (lo + hi + 1) / 2
+            if (wireLen(pool.copyOf(mid)) <= SatelliteChain.MAX_WIRE_BYTES) lo = mid else hi = mid - 1
+        }
+        val most = pool.copyOf(lo)
+        val wire = SatelliteChain.seal(most, key, chain = SatelliteChain.Chain.LEGACY)
+        assertEquals(wireLen(most), wire.size)
+        assertTrue(wire.size <= SatelliteChain.MAX_WIRE_BYTES)
+        assertArrayEquals(most, SatelliteChain.open(wire, key, chain = SatelliteChain.Chain.LEGACY))
+        assertTrue("one byte more is over", wireLen(pool.copyOf(lo + 1)) > SatelliteChain.MAX_WIRE_BYTES)
+        expectRefused("one byte over") { SatelliteChain.seal(pool.copyOf(lo + 1), key, chain = SatelliteChain.Chain.LEGACY) }
     }
 }

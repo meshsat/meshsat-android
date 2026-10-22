@@ -169,7 +169,7 @@ class HChainVectorsTest {
             assertArrayEquals("$name open", text, TransformPipeline().applyIngress(wire.copyOfRange(1, wire.size), steps))
             if (dictName == "meshtastic") {
                 assertArrayEquals("$name open", text, SatelliteChain.open(wire, key))
-                assertEquals("$name readMt", SatelliteChain.Mt.Text(String(text, Charsets.UTF_8), sealed = true), SatelliteChain.readMt(wire, key))
+                assertEquals("$name readMt", SatelliteChain.Mt.Text(String(text, Charsets.UTF_8), sealed = true, chain = SatelliteChain.Chain.H), SatelliteChain.readMt(wire, key))
             }
 
             // The version byte once: the nonce follows it, whatever its first byte.
@@ -198,6 +198,58 @@ class HChainVectorsTest {
                 assertTrue("$name read as $mt", mt is SatelliteChain.Mt.Unopened)
             } else {
                 assertTrue("$name read as $mt", mt is SatelliteChain.Mt.Text && !mt.sealed)
+            }
+        }
+    }
+
+    @Test
+    fun `the rollback chain matches the Bridge byte for byte, both ways, as parallax runs it`() {
+        assertTrue("the spec names parallax's chain, smaz2 with no dict", v.getJSONObject("spec").getString("rollback_egress").startsWith("""[{"type":"smaz2"},"""))
+        val vectors = rows("legacy_envelopes")
+        assertTrue(vectors.size >= 6)
+        var nonceOpensWithVersion = 0
+        for (x in vectors) {
+            val name = x.getString("name")
+            assertEquals("$name table", "default", x.getString("dict"))
+            val key = x.getString("key_hex")
+            val nonce = hex(x.getString("nonce_hex"))
+            val text = x.getString("text").toByteArray(Charsets.UTF_8)
+            val wire = hex(x.getString("wire_hex"))
+            if (nonce[0] == SatelliteChain.PROTOCOL_VERSION) nonceOpensWithVersion++
+
+            // App to Bridge.
+            val sealed = SatelliteChain.seal(text, key, TransformPipeline().apply { fixedNonce = nonce }, SatelliteChain.Chain.LEGACY)
+            assertEquals("$name wire", x.getString("wire_hex"), sealed.hex())
+            assertEquals("$name wire_len", x.getInt("wire_len"), sealed.size)
+
+            // Bridge to app, on the legacy setting and, while the ends switch, on the H setting too.
+            assertArrayEquals("$name open", text, SatelliteChain.open(wire, key, chain = SatelliteChain.Chain.LEGACY))
+            val want = SatelliteChain.Mt.Text(String(text, Charsets.UTF_8), sealed = true, chain = SatelliteChain.Chain.LEGACY)
+            assertEquals("$name readMt legacy", want, SatelliteChain.readMt(wire, key, preferred = SatelliteChain.Chain.LEGACY))
+            assertEquals("$name readMt from H", want, SatelliteChain.readMt(wire, key, preferred = SatelliteChain.Chain.H))
+            // One version byte, then base64 text.
+            assertEquals(SatelliteChain.PROTOCOL_VERSION, wire[0])
+            assertTrue("$name base64 after the version byte", wire.drop(1).all { it.toInt().toChar() in 'A'..'Z' || it.toInt().toChar() in 'a'..'z' || it.toInt().toChar() in '0'..'9' || it.toInt().toChar() in "+/=" })
+        }
+        assertTrue("a legacy vector's nonce starts with 0x01", nonceOpensWithVersion >= 1)
+    }
+
+    @Test
+    fun `a rollback wire that does not open is refused on either setting`() {
+        val vectors = rows("legacy_reject")
+        assertTrue(vectors.size >= 5)
+        for (x in vectors) {
+            val name = x.getString("name")
+            val bytes = hex(x.getString("bytes_hex"))
+            val key = x.getString("key_hex")
+            try {
+                SatelliteChain.open(bytes, key, chain = SatelliteChain.Chain.LEGACY)
+                fail("$name opened")
+            } catch (e: TransformException) {
+            }
+            for (preferred in SatelliteChain.Chain.values()) {
+                val mt = SatelliteChain.readMt(bytes, key, preferred = preferred)
+                assertTrue("$name on $preferred read as $mt", mt is SatelliteChain.Mt.Unopened)
             }
         }
     }

@@ -114,8 +114,13 @@ class TransformPipeline {
     }
 
     private fun reverseTransform(t: TransformSpec, data: ByteArray): ByteArray = when (t.type) {
-        // Lenient as android.util.Base64.DEFAULT was: line breaks and other non-alphabet bytes are skipped.
-        "base64" -> java.util.Base64.getMimeDecoder().decode(data)
+        // Lenient as android.util.Base64.DEFAULT was: line breaks and other non-alphabet bytes are
+        // skipped. What is not base64 at all is an error, as every other step's failure is.
+        "base64" -> try {
+            java.util.Base64.getMimeDecoder().decode(data)
+        } catch (e: IllegalArgumentException) {
+            throw TransformException("base64: ${e.message}")
+        }
 
         "encrypt" -> try {
             AesGcmCrypto.decrypt(data, encryptKey(t))

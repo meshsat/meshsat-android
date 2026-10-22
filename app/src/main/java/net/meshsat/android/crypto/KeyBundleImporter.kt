@@ -389,6 +389,20 @@ object KeyBundleImporter {
                     label = "Bridge $channelName (${bridgeHashHex.take(8)})",
                 ),
             )
+            // The same key under its channel too ("iridium:shared"), which is how a chain's
+            // key_ref names it. The row above is keyed by the address alone, so a mesh "shared"
+            // and an iridium "shared" in one bundle replace each other there in entry order
+            // (MESHSAT-1623, r33 review R33-R3); the satellite chain reads only this one. The
+            // latest bundle imported for a channel:address wins, as the address row always did.
+            if (channelName != "unknown") {
+                convKeyDao.upsert(
+                    ConversationKey(
+                        sender = "$channelName:$address",
+                        hexKey = hexKey,
+                        label = "Bridge $channelName (${bridgeHashHex.take(8)})",
+                    ),
+                )
+            }
 
             credDao.upsert(
                 ProviderCredential(

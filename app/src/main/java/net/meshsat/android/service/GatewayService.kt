@@ -3334,11 +3334,11 @@ class GatewayService : Service() {
             return "the satellite chain setting could not be read: ${e.message}"
         }
         val msgRef = if (deliveryId > 0) db.messageDeliveryDao().getById(deliveryId)?.msgRef.orEmpty() else ""
-        val data = if (mode == net.meshsat.android.engine.SatelliteChain.MODE_SEALED &&
-            net.meshsat.android.engine.SatelliteChain.sealsDelivery(msgRef, text)
-        ) {
+        // The H chain, or the legacy chain the kits ran before it (the agreed rollback, r33 R33-R2).
+        val chain = net.meshsat.android.engine.SatelliteChain.chainOf(mode)
+        val data = if (chain != null && net.meshsat.android.engine.SatelliteChain.sealsDelivery(msgRef, text)) {
             try {
-                net.meshsat.android.engine.SatelliteChain.seal(text, satelliteChainKey())
+                net.meshsat.android.engine.SatelliteChain.seal(text, satelliteChainKey(), chain = chain)
             } catch (e: net.meshsat.android.engine.TransformException) {
                 return "${Dispatcher.NEVER} Not sent: ${e.message}. Import the kit's key bundle, or set the satellite chain to plain."
             }
@@ -3354,10 +3354,13 @@ class GatewayService : Service() {
         return null
     }
 
-    /** The key the kits' satellite chain names (iridium:shared), from an imported key bundle; null when there is none. */
+    /**
+     * The key the kits' satellite chains name, stored by a key bundle under exactly iridium:shared
+     * (never the address alone, which another channel's "shared" can take); null when there is none.
+     */
     private suspend fun satelliteChainKey(): String? = try {
-        net.meshsat.android.data.ConversationKeyRepository(db.conversationKeyDao(), net.meshsat.android.crypto.SecureKeyStore.getInstance(this))
-            .getBySender(net.meshsat.android.engine.SatelliteChain.KEY_ADDRESS)?.hexKey
+        val keys = net.meshsat.android.data.ConversationKeyRepository(db.conversationKeyDao(), net.meshsat.android.crypto.SecureKeyStore.getInstance(this))
+        net.meshsat.android.engine.SatelliteChain.key { keys.getBySender(it)?.hexKey }
     } catch (e: Exception) {
         Log.w("MeshSat", "Satellite chain key could not be read: ${e.message}")
         null
@@ -3777,11 +3780,14 @@ class GatewayService : Service() {
                     val imei = spp.modemInfo.value.imei.ifBlank { "9704" }
                     val dedupKey = "iridium9704:${payload.contentHashCode()}"
                     if (deduplicator.isDuplicateKey(dedupKey)) return@collect
-                    // A kit's encrypted chain opens with the bundle's key; one that does not open is
-                    // kept as it came and never shown as a guess (MESHSAT-1623).
+                    // A kit's encrypted chain opens with the bundle's key, the chain this phone is
+                    // set to first; one that does not open is kept as it came and never shown as a
+                    // guess (MESHSAT-1623).
                     val mt = net.meshsat.android.engine.SatelliteChain.readMt(
                         payload,
                         if (payload.firstOrNull() == net.meshsat.android.engine.SatelliteChain.PROTOCOL_VERSION) satelliteChainKey() else null,
+                        preferred = net.meshsat.android.engine.SatelliteChain.chainOf(satelliteChainMode)
+                            ?: net.meshsat.android.engine.SatelliteChain.Chain.H,
                     )
                     val (text, sealed) = when (mt) {
                         is net.meshsat.android.engine.SatelliteChain.Mt.Text -> mt.text to mt.sealed
