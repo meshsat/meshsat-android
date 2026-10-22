@@ -1,0 +1,1 @@
+The node's satellite modem can now also use the kits' old encrypted chain (Encrypted (old)), so a phone and a kit can switch chains together and back. The satellite key now comes only from the kit bundle's iridium entry: import the kit's key bundle again after this update.
