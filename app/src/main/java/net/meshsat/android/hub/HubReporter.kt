@@ -20,7 +20,10 @@ import net.meshsat.android.mqtt.PahoClients
 import net.meshsat.android.service.GatewayService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -399,6 +402,8 @@ class HubReporter(
         stopped = true
         healthJob?.cancel()
         healthJob = null
+        birthJob?.cancel()
+        birthJob = null
 
         val c = client
         if (c != null && c.isConnected) {
@@ -621,42 +626,74 @@ class HubReporter(
 
     /** The birth, then the route's walk: only once the session's subscriptions hold. */
     private fun announce() {
-        try {
-            publishBirth()
-        } catch (e: Exception) {
-            Log.w(TAG, "Birth after subscribe failed: ${e.message}")
-        }
+        requestBirth()
         // The session is clean: what the Hub said while it was away is asked for again (hub_msg).
         onConnected?.invoke()
     }
 
     /**
-     * Modems the last birth reported, each with what it declared. The Hub links a satellite device
-     * to this bridge only from a birth, and a modem is often paired after the Hub connect, so the
-     * health loop re-announces when this set changes (MESHSAT-1235), and so when the chain does.
+     * Modems the last birth the broker took reported, each with what it declared, or null before
+     * the first. The Hub links a satellite device to this bridge only from a birth, and a modem is
+     * often paired after the Hub connect, so the health loop asks for a birth when what is current
+     * differs from this (MESHSAT-1235), and so when the chain does.
      */
     @Volatile
-    private var announcedModems: Set<String> = emptySet()
+    private var acknowledgedModems: Set<String>? = null
 
     private val stamper = BirthStamper(birthStamps)
 
-    /** A birth did not go out (its stamp could not be read or stored, or the publish failed). */
-    private val birthPending = java.util.concurrent.atomic.AtomicBoolean(false)
+    /**
+     * Births go out one at a time, from one worker (r33 review R33-R1). Two at once could finish
+     * out of order: an older one that the broker took cleared the newer one's retry, and a stamp
+     * taken before a pause could label a newer configuration. Every cause of a birth (a connect,
+     * a change of modem or chain, a failure) only asks for one; the worker builds it from what is
+     * current when it starts, stamp and snapshot together, publishes it and waits for the broker.
+     */
+    private val birthRequests = Channel<Unit>(Channel.CONFLATED)
+
+    /** A birth is owed. Set by every request and every failure; cleared only as the worker starts one. */
+    private val birthOwed = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    private var birthJob: Job? = null
+
+    /** Asks for a birth; requests made while one is being built and sent bring another after it. */
+    private fun requestBirth() {
+        birthOwed.set(true)
+        birthRequests.trySend(Unit)
+    }
+
+    private fun startBirthWorker() {
+        if (birthJob?.isActive == true) return
+        birthJob = scope.launch {
+            while (isActive) {
+                // The next request, or the retry period while one is owed.
+                withTimeoutOrNull(BIRTH_RETRY_MS) { birthRequests.receive() }
+                if (stopped || !isConnected || !birthOwed.get()) continue
+                birthOwed.set(false)
+                if (!publishBirthNow()) {
+                    birthOwed.set(true)
+                    Log.w(TAG, "Birth not published, tried again in ${BIRTH_RETRY_MS / 1000} s")
+                }
+            }
+        }
+    }
 
     /**
-     * Stamps, signs and publishes one birth. One whose stamp could not be read or stored does not
-     * go out; it is tried again every [BIRTH_RETRY_MS] while connected, as on the Bridge.
+     * Stamps, builds, signs and publishes one birth and waits for the broker; only the worker calls
+     * it. A birth whose stamp could not be read or stored does not go out (the stamp is stored
+     * before it is used, as on the Bridge), and only one the broker took counts as announced.
      */
-    private fun publishBirth() {
+    private fun publishBirthNow(): Boolean {
+        val c = client ?: return false
+        if (!c.isConnected) return false
         val stamp = try {
             stamper.next(clock())
         } catch (e: BirthStampException) {
-            birthPending.set(true)
-            Log.w(TAG, "Birth not published, tried again in ${BIRTH_RETRY_MS / 1000} s: ${e.message}")
-            return
+            Log.w(TAG, "Birth not stamped: ${e.message}")
+            return false
         }
         val birth = buildBirthCertificate(stamp)
-        announcedModems = modemDeclarations(birth.interfaces)
+        val declared = modemDeclarations(birth.interfaces)
         val birthJson = birth.toJson()
 
         // Sign the birth message with the bridge's mTLS private key
@@ -665,15 +702,19 @@ class HubReporter(
             Log.i(TAG, "Birth ${if (signed) "signed" else "unsigned"}: ${config.bridgeId}")
         }
 
-        publish(
-            topics.bridgeBirth(config.bridgeId),
-            QOS_AT_LEAST_ONCE,
-            retained = true,
-            birthJson.toString(),
-        ) { sent ->
-            birthPending.set(!sent)
-            if (sent) Log.i(TAG, "Published bridge birth: ${config.bridgeId}")
-            else Log.w(TAG, "Birth not published, tried again in ${BIRTH_RETRY_MS / 1000} s")
+        return try {
+            val msg = MqttMessage(birthJson.toString().toByteArray(StandardCharsets.UTF_8)).apply {
+                qos = QOS_AT_LEAST_ONCE
+                isRetained = true
+            }
+            // Returns once the broker has it (QoS 1), or throws.
+            c.publish(topics.bridgeBirth(config.bridgeId), msg)
+            acknowledgedModems = declared
+            Log.i(TAG, "Published bridge birth: ${config.bridgeId}")
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "Birth publish failed: ${e.message}")
+            false
         }
     }
 
@@ -699,21 +740,16 @@ class HubReporter(
     }
 
     private fun startHealthLoop() {
+        startBirthWorker()
         healthJob?.cancel()
         healthJob = scope.launch {
-            launch {
-                while (true) {
-                    delay(BIRTH_RETRY_MS)
-                    if (birthPending.get() && isConnected) publishBirth()
-                }
-            }
             while (true) {
                 delay(config.healthIntervalSec * 1000L)
                 if (!isConnected) continue
                 try {
-                    if (modemDeclarations(collectInterfaces()) != announcedModems) {
+                    if (modemDeclarations(collectInterfaces()) != acknowledgedModems && !birthOwed.get()) {
                         Log.i(TAG, "Modem set or chain changed, re-publishing birth")
-                        publishBirth()
+                        requestBirth()
                     }
                     publishHealth()
                 } catch (e: Exception) {
@@ -971,12 +1007,10 @@ class HubReporter(
         return health
     }
 
-    /** Publishes off the caller's thread; [onDone] hears whether the client took it. */
-    private fun publish(topic: String, qos: Int, retained: Boolean, payload: String, onDone: ((Boolean) -> Unit)? = null) {
+    private fun publish(topic: String, qos: Int, retained: Boolean, payload: String) {
         val c = client
         if (c == null || !c.isConnected) {
             Log.d(TAG, "Hub not connected, dropping publish to $topic")
-            onDone?.invoke(false)
             return
         }
         scope.launch {
@@ -986,10 +1020,8 @@ class HubReporter(
                     isRetained = retained
                 }
                 c.publish(topic, msg)
-                onDone?.invoke(true)
             } catch (e: Exception) {
                 Log.w(TAG, "Hub publish to $topic failed: ${e.message}")
-                onDone?.invoke(false)
             }
         }
     }
