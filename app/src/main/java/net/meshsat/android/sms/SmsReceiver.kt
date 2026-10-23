@@ -109,7 +109,7 @@ class SmsReceiver : BroadcastReceiver() {
         }
     }
 
-    private data class ProcessResult(
+    internal data class ProcessResult(
         val displayText: String,
         val rawText: String,
         val wasEncrypted: Boolean,
@@ -164,79 +164,7 @@ class SmsReceiver : BroadcastReceiver() {
             else -> "global key"
         }
 
-        // The app SMS wire v2 (SmsWireV2, r40 review R40-R1): the frame names its codec, so
-        // nothing is guessed. A frame whose mode or codec this app does not read, or that no key
-        // opens, is shown as it came, unless the version 1 rule below opens it with the key: an
-        // old sender's random nonce can start with 0x02.
-        val v2 = SmsWireV2.read(
-            rawBytes,
-            open = { p ->
-                if (keyToUse.isEmpty()) null else try { AesGcmCrypto.decrypt(p, keyToUse) } catch (_: Exception) { null }
-            },
-            msvqsc = codebook?.let { cb -> { b: ByteArray -> try { cb.decode(b) } catch (_: Exception) { null } } },
-        )
-        if (v2 is SmsWireV2.Read.Text) {
-            Log.d(TAG, "SMS from $sender: app SMS wire v2, codec ${v2.codec}" + if (v2.encrypted) " ($keySource)" else "")
-            return ProcessResult(v2.text, text, v2.encrypted, wasCompressed = v2.codec != SmsWireV2.CODEC_TEXT)
-        }
-
-        // Version 1 or unversioned: encrypted+compressed, encrypted-only, compressed-only, guessed.
-        var payload = rawBytes
-        var wasEncrypted = false
-
-        // Step 0: Strip protocol version byte (if present)
-        val versionResult = ProtocolVersion.stripVersionByte(payload)
-        ProtocolVersion.logVersionInfo(versionResult.version, sender)
-        payload = versionResult.data
-
-        // Step 1: Try AES-GCM decrypt (if looks encrypted and auto-decrypt enabled)
-        if (autoDecrypt && AesGcmCrypto.looksEncrypted(text) && keyToUse.isNotEmpty()) {
-            try {
-                payload = AesGcmCrypto.decrypt(payload, keyToUse)
-                wasEncrypted = true
-                Log.d(TAG, "SMS decrypted from $sender ($keySource)")
-            } catch (e: Exception) {
-                Log.w(TAG, "SMS decrypt failed from $sender: ${e.message}")
-                // Decrypt failed — might not actually be encrypted
-                // Fall through with original rawBytes
-            }
-        }
-        if (v2 is SmsWireV2.Read.Kept && !wasEncrypted) {
-            Log.w(TAG, "SMS from $sender: app SMS wire v2 this app does not read (or no key opens it), shown as it came")
-            return ProcessResult(text, "", wasEncrypted = v2.encrypted, wasCompressed = false)
-        }
-
-        // Step 2a: Try SMAZ2 decompression (bridge/Hub compress with SMAZ2) [MESHSAT-447]
-        if (wasEncrypted || rawBytes.contentEquals(payload).not()) {
-            val decoded = smaz2Text(payload)
-            if (decoded != null) {
-                Log.d(TAG, "SMS SMAZ2 decompressed from $sender: ${payload.size}B → \"$decoded\"")
-                return ProcessResult(decoded, text, wasEncrypted, wasCompressed = true)
-            }
-        }
-
-        // Step 2b: Check if payload is MSVQ-SC wire format
-        if (codebook != null && MsvqscWire.looksLikeMsvqsc(payload)) {
-            try {
-                val decoded = codebook.decode(payload)
-                Log.d(TAG, "SMS MSVQ-SC decoded from $sender: ${payload.size}B → \"$decoded\"" +
-                        if (wasEncrypted) " [was encrypted]" else "")
-                return ProcessResult(decoded, text, wasEncrypted, wasCompressed = true)
-            } catch (e: Exception) {
-                Log.w(TAG, "MSVQ-SC decode failed: ${e.message}")
-            }
-        }
-
-        // Step 3: If decrypted but not compressed, return as text
-        if (wasEncrypted) {
-            val decryptedText = String(payload, Charsets.UTF_8)
-            Log.i(TAG, "SMS decrypted result from $sender: \"$decryptedText\" (${payload.size}B)")
-            return ProcessResult(decryptedText, text, wasEncrypted = true, wasCompressed = false)
-        }
-
-        // Step 4: Not recognized — show as-is
-        Log.d(TAG, "SMS from $sender: unrecognized binary (${rawBytes.size}B)")
-        return ProcessResult(text, "", wasEncrypted = false, wasCompressed = false)
+        return decode(text, sender, rawBytes, keyToUse, keySource, autoDecrypt, codebook)
     }
 
     private fun postNotification(context: Context, sender: String, text: String) {
@@ -269,6 +197,103 @@ class SmsReceiver : BroadcastReceiver() {
 
     companion object {
         private const val TAG = "SmsReceiver"
+
+        /**
+         * processIncoming's steps once the SMS is decoded from base64 ([rawBytes]) and the key is
+         * resolved ([keyToUse], empty for none; [keySource] names it for the log).
+         */
+        internal fun decode(
+            text: String,
+            sender: String,
+            rawBytes: ByteArray,
+            keyToUse: String,
+            keySource: String,
+            autoDecrypt: Boolean,
+            codebook: MsvqscCodebook?,
+        ): ProcessResult {
+            // The app SMS wire v2 (SmsWireV2, r40 review R40-R1): the frame names its codec, so
+            // nothing is guessed. What the key opens is read first: a sealed v2 frame here, version 1
+            // or unversioned below. Only then a clear v2 frame, which nothing authenticates: an old
+            // sender's random nonce, or a Bridge chain's, can start 02 00 with a rest that reads, and
+            // the key that opens it must win (r41 review V2). A frame whose mode or codec this app
+            // does not read, or that no key opens, is shown as it came.
+            val v2 = SmsWireV2.read(
+                rawBytes,
+                open = { p ->
+                    if (keyToUse.isEmpty()) null else try { AesGcmCrypto.decrypt(p, keyToUse) } catch (_: Exception) { null }
+                },
+                msvqsc = codebook?.let { cb -> { b: ByteArray -> try { cb.decode(b) } catch (_: Exception) { null } } },
+            )
+            if (v2 is SmsWireV2.Read.Text && v2.encrypted) {
+                Log.d(TAG, "SMS from $sender: app SMS wire v2, codec ${v2.codec} ($keySource)")
+                return ProcessResult(v2.text, text, wasEncrypted = true, wasCompressed = v2.codec != SmsWireV2.CODEC_TEXT)
+            }
+
+            // Version 1 or unversioned: encrypted+compressed, encrypted-only, compressed-only, guessed.
+            var payload = rawBytes
+            var wasEncrypted = false
+
+            // Step 0: Strip protocol version byte (if present)
+            val versionResult = ProtocolVersion.stripVersionByte(payload)
+            ProtocolVersion.logVersionInfo(versionResult.version, sender)
+            payload = versionResult.data
+
+            // Step 1: Try AES-GCM decrypt (if looks encrypted and auto-decrypt enabled)
+            if (autoDecrypt && looksSealed(text, rawBytes) && keyToUse.isNotEmpty()) {
+                try {
+                    payload = AesGcmCrypto.decrypt(payload, keyToUse)
+                    wasEncrypted = true
+                    Log.d(TAG, "SMS decrypted from $sender ($keySource)")
+                } catch (e: Exception) {
+                    Log.w(TAG, "SMS decrypt failed from $sender: ${e.message}")
+                    // Decrypt failed — might not actually be encrypted
+                    // Fall through with original rawBytes
+                }
+            }
+            if (v2 is SmsWireV2.Read.Text && !wasEncrypted) {
+                Log.d(TAG, "SMS from $sender: app SMS wire v2, clear, codec ${v2.codec}")
+                return ProcessResult(v2.text, text, wasEncrypted = false, wasCompressed = v2.codec != SmsWireV2.CODEC_TEXT)
+            }
+            if (v2 is SmsWireV2.Read.Kept && !wasEncrypted) {
+                Log.w(TAG, "SMS from $sender: app SMS wire v2 this app does not read (or no key opens it), shown as it came")
+                return ProcessResult(text, "", wasEncrypted = v2.encrypted, wasCompressed = false)
+            }
+
+            // Step 2a: Try SMAZ2 decompression (bridge/Hub compress with SMAZ2) [MESHSAT-447]
+            if (wasEncrypted || rawBytes.contentEquals(payload).not()) {
+                val decoded = smaz2Text(payload)
+                if (decoded != null) {
+                    Log.d(TAG, "SMS SMAZ2 decompressed from $sender: ${payload.size}B → \"$decoded\"")
+                    return ProcessResult(decoded, text, wasEncrypted, wasCompressed = true)
+                }
+            }
+
+            // Step 2b: Check if payload is MSVQ-SC wire format
+            if (codebook != null && MsvqscWire.looksLikeMsvqsc(payload)) {
+                try {
+                    val decoded = codebook.decode(payload)
+                    Log.d(TAG, "SMS MSVQ-SC decoded from $sender: ${payload.size}B → \"$decoded\"" +
+                            if (wasEncrypted) " [was encrypted]" else "")
+                    return ProcessResult(decoded, text, wasEncrypted, wasCompressed = true)
+                } catch (e: Exception) {
+                    Log.w(TAG, "MSVQ-SC decode failed: ${e.message}")
+                }
+            }
+
+            // Step 3: If decrypted but not compressed, return as text
+            if (wasEncrypted) {
+                val decryptedText = String(payload, Charsets.UTF_8)
+                Log.i(TAG, "SMS decrypted result from $sender: \"$decryptedText\" (${payload.size}B)")
+                return ProcessResult(decryptedText, text, wasEncrypted = true, wasCompressed = false)
+            }
+
+            // Step 4: Not recognized — show as-is
+            Log.d(TAG, "SMS from $sender: unrecognized binary (${rawBytes.size}B)")
+            return ProcessResult(text, "", wasEncrypted = false, wasCompressed = false)
+        }
+
+        /** AesGcmCrypto.looksEncrypted on the bytes already decoded: a nonce and a tag at least. */
+        private fun looksSealed(text: String, rawBytes: ByteArray): Boolean = text.length >= 24 && rawBytes.size > 12 + 16
 
         /**
          * [payload] as SMAZ2 text, or null when what it decodes to is not readable text: the

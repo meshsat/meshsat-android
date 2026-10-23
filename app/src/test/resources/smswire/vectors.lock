@@ -1,4 +1,4 @@
 file sms-wire-v2-vectors.json
-sha256 17b84abe64d67edb240ecb31f3c75268ca3a7623506b49eb823db62cf6a2efe5
-bridge_commit 6780eb95
+sha256 5b13787508ba5335459e2413cb2270aef911b8b9fec23af1326f6f8f06715e45
+bridge_commit a097f102
 generator meshsat internal/engine/sms_wire_v2_test.go (MESHSAT_WRITE_VECTORS=1)
