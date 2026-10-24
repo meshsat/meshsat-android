@@ -835,7 +835,8 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
                 var release by remember { mutableStateOf<ReleaseCheck>(ReleaseCheck.None) }
                 val nodeEnv = nodeInfo?.pioEnv.orEmpty()
                 val runningVersion = nodeMeta?.firmwareVersion.orEmpty()
-                // The newest release, asked only on this tap (MESHSAT-1672); the app is offline-first.
+                // The published release, asked only on this tap (MESHSAT-1672); the app is offline-first.
+                // Versions end in a commit hash, so they are only ever equal or different, never newer.
                 val checkRelease: () -> Unit = {
                     picked = null
                     refusal = null
@@ -906,7 +907,7 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
                     }
                 }
                 SectionCard("Node firmware") {
-                    InfoRow("Running", nodeMeta?.firmwareVersion?.ifBlank { null } ?: "unknown")
+                    InfoRow("On the node", nodeMeta?.firmwareVersion?.ifBlank { null } ?: "unknown")
                     InfoRow("Build", nodeEnv.ifBlank { "unknown" })
                     when (val st = updateState) {
                         net.meshsat.android.ble.NodeFirmwareUpdater.State.Idle -> {
@@ -914,7 +915,7 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
                             if (image == null) {
                                 when (val r = release) {
                                     ReleaseCheck.Checking -> {
-                                        Text("Asking for the newest firmware...", style = MaterialTheme.typography.bodySmall, color = OffWhite)
+                                        Text("Asking for the published firmware...", style = MaterialTheme.typography.bodySmall, color = OffWhite)
                                         androidx.compose.material3.LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                                     }
                                     is ReleaseCheck.Downloading -> {
@@ -932,7 +933,7 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
                                         }
                                     }
                                     is ReleaseCheck.UpToDate -> {
-                                        Text("The node runs the newest firmware (${r.version}).", style = MaterialTheme.typography.bodySmall, color = MeshSatTeal)
+                                        Text("The node already runs the published firmware (${r.version}).", style = MaterialTheme.typography.bodySmall, color = MeshSatTeal)
                                     }
                                     is ReleaseCheck.Refused -> {
                                         Text(r.reason, style = MaterialTheme.typography.bodySmall, color = MeshSatAmber)
@@ -967,7 +968,7 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
                             }
                             refusal?.let { Text(text = it, style = MaterialTheme.typography.bodySmall, color = MeshSatAmber) }
                             Text(
-                                text = "Check for update asks GitHub for the newest MeshSat release for this node. A file: pick firmware-$nodeEnv-<version>.bin " +
+                                text = "Check for update asks GitHub for the published MeshSat release for this node's build. A file: pick firmware-$nodeEnv-<version>.bin " +
                                     "(not the .factory.bin). The node restarts twice; keep the phone close. A few minutes.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MeshSatTextMuted,

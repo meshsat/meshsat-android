@@ -10,9 +10,9 @@ import java.net.URLEncoder
 import java.security.MessageDigest
 
 /**
- * The newest MeshSat node firmware, as meshsat-firmware publishes it on GitHub (MESHSAT-1672):
+ * The published MeshSat node firmware, as meshsat-firmware puts it on GitHub (MESHSAT-1672):
  * every release carries one app image per node build and a `manifest.json` that names them,
- * and the manifest of the newest release is always at [MANIFEST_URL]:
+ * and the manifest of the latest release is always at [MANIFEST_URL]:
  *
  *     {"schema": 1, "version": "2.8.0.4012de5", "tag": "meshsat-node-2.8.0.4012de5",
  *      "commit": "<sha>", "released_at": "<ISO 8601>",
@@ -103,7 +103,11 @@ object NodeFirmwareRelease {
         return null
     }
 
-    /** True when the node already runs [manifest]'s version ("2.8.0.4012de5" against "2.8.0.4012de5"). */
+    /**
+     * True when the node already runs [manifest]'s version ("2.8.0.4012de5" against "2.8.0.4012de5").
+     * The last part is the build's commit hash, so versions are only equal or different: a
+     * different one is offered as "available", never as newer.
+     */
     fun isCurrent(manifest: Manifest, running: String): Boolean = running.isNotBlank() && running.trim() == manifest.version
 
     /**
