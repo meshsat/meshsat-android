@@ -1,0 +1,1 @@
+Satellite messages through a RockBLOCK 9704 now retry within a minute when the modem saw no satellite, instead of waiting up to half an hour. The signal bars keep their last reading when the modem answers late, so they no longer drop to 0 while messages are being sent. Also: SMS wire v2, LXMF message ids, the Hub contact directory, and fixes in the 9704 driver and SMAZ2.
