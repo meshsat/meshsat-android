@@ -4,6 +4,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.withTimeoutOrNull
 
 /**
@@ -14,7 +15,9 @@ import kotlinx.coroutines.withTimeoutOrNull
  * on the node's connection goes through here. [enqueue] adds an operation, the GATT
  * callback of that operation calls [complete], and the next one starts. An operation
  * the stack refuses, or that does not complete within [timeoutMs], fails on its own
- * without holding up the ones behind it.
+ * without holding up the ones behind it. [enqueueUrgent] puts an operation ahead of every
+ * queued one (never ahead of the one in flight): the 9704's MO segment answer, which the
+ * modem waits for only about 360 ms (MESHSAT-1674).
  */
 class GattOpQueue(
     scope: CoroutineScope,
@@ -42,6 +45,7 @@ class GattOpQueue(
     }
 
     private val channel = Channel<Op>(Channel.UNLIMITED)
+    private val urgent = Channel<Op>(Channel.UNLIMITED)
 
     @Volatile private var current: Op? = null
 
@@ -49,14 +53,30 @@ class GattOpQueue(
 
     init {
         scope.launch {
-            for (op in channel) run(op)
+            while (true) {
+                // select prefers its first clause when both have an operation waiting.
+                val op = urgent.tryReceive().getOrNull() ?: select<Op?> {
+                    urgent.onReceiveCatching { it.getOrNull() }
+                    channel.onReceiveCatching { it.getOrNull() }
+                } ?: break
+                run(op)
+            }
+            // Closed: whatever is still queued fails rather than waiting for ever.
+            for (ch in listOf(urgent, channel)) {
+                while (true) ch.tryReceive().getOrNull()?.done?.complete(STATUS_CLOSED) ?: break
+            }
         }
     }
 
     /** Queue [start], which issues the operation and returns false if the stack refused it. */
-    fun enqueue(key: String, start: () -> Boolean): Op {
+    fun enqueue(key: String, start: () -> Boolean): Op = offer(channel, key, start)
+
+    /** As [enqueue], ahead of every operation still waiting. */
+    fun enqueueUrgent(key: String, start: () -> Boolean): Op = offer(urgent, key, start)
+
+    private fun offer(ch: Channel<Op>, key: String, start: () -> Boolean): Op {
         val op = Op(key, start)
-        if (closed || channel.trySend(op).isFailure) op.done.complete(STATUS_CLOSED)
+        if (closed || ch.trySend(op).isFailure) op.done.complete(STATUS_CLOSED)
         return op
     }
 
@@ -70,6 +90,7 @@ class GattOpQueue(
     fun close() {
         closed = true
         channel.close()
+        urgent.close()
         current?.done?.complete(STATUS_CLOSED)
     }
 

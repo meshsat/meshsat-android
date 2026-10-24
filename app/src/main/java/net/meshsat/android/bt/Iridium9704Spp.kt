@@ -11,6 +11,7 @@ import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -52,7 +53,19 @@ class Iridium9704Spp(private val context: Context) {
         private const val JSPR_TIMEOUT_MS = 10_000L
         // Through the node's Bluetooth pipe a constellationState answer can take longer than 2 s,
         // and a missed one used to read as 0 bars (MESHSAT-1670).
-        private const val SIGNAL_TIMEOUT_MS = 6_000L
+        private const val SIGNAL_TIMEOUT_MS = SignalFreshness.POLL_TIMEOUT_MS
+
+        // How often the driver looks whether a signal reading is due (MESHSAT-1670): it asks the
+        // modem only when no reading came for SignalFreshness.POLL_INTERVAL_MS and no send is under way.
+        private const val SIGNAL_CHECK_MS = 5_000L
+
+        // The poll loop's pause between looks at the link; shorter while a send is under way, as the
+        // modem gives up on its segment request after about 360 ms (MESHSAT-1674).
+        private const val POLL_PAUSE_MS = 50L
+        private const val POLL_PAUSE_SENDING_MS = 10L
+
+        // Before a command, a half-arrived line is given this long to finish (MESHSAT-1674).
+        private const val PARTIAL_LINE_GRACE_MS = 20L
         // An accepted message stays in the modem until it goes or is cancelled, so a send that
         // walks away on a timeout leaves it there and the retry queues a second copy (the Bridge's
         // 20 message soak of 21 Sep 2026: 7 duplicates, MESHSAT-1282). As the Bridge does
@@ -178,6 +191,24 @@ class Iridium9704Spp(private val context: Context) {
     private val _signal = MutableStateFlow(0)
     val signal: StateFlow<Int> = _signal
 
+    private val _reading = MutableStateFlow<SignalReading?>(null)
+
+    /** The last signal reading and its time, null until the modem gave one on this link (MESHSAT-1670). */
+    val reading: StateFlow<SignalReading?> = _reading
+
+    private val pollRoundTrips = ArrayDeque<Long>()
+    private var pollsAnswered = 0
+    private var pollsMissed = 0
+    private val _pollStats = MutableStateFlow(SignalPollStats())
+
+    /** The signal reads' round trips on this link, for the bench (MESHSAT-1670). */
+    val pollStats: StateFlow<SignalPollStats> = _pollStats
+
+    private val _segmentTiming = MutableStateFlow<SegmentTiming?>(null)
+
+    /** The last MO segment request and how fast this app answered it (MESHSAT-1674). */
+    val segmentTiming: StateFlow<SegmentTiming?> = _segmentTiming
+
     private val _error = MutableSharedFlow<String>(extraBufferCapacity = 8)
     val error: SharedFlow<String> = _error
 
@@ -197,6 +228,10 @@ class Iridium9704Spp(private val context: Context) {
 
     // --- MO state ---
     private var moPayload: ByteArray? = null
+    // The whole payload as one segment's data, encoded when the send starts, so the answer to the
+    // modem's usual single segment request is ready at once (MESHSAT-1674).
+    @Volatile private var moPayloadB64: String? = null
+    @Volatile private var moStartedAtNs: Long = 0
     private var moMessageId: Int = 0
     private var moTopicId: Int = RAW_TOPIC
     private var moRequestRef: Int = 0
@@ -222,6 +257,26 @@ class Iridium9704Spp(private val context: Context) {
 
     // Serializes all serial I/O (sendJspr + poll loop).
     private val serialLock = Any()
+
+    // The link's priority writer, when it has one: the node's pipe puts these writes ahead of
+    // the other Bluetooth operations of the connection (MESHSAT-1674).
+    private var urgentOutputStream: OutputStream? = null
+
+    // Unsolicited frames other than segment requests, handled one at a time in the order they
+    // came: an MT's notice, segments and status used to run as separate coroutines.
+    private val unsolicited = Channel<Triple<Int, String, JSONObject>>(Channel.UNLIMITED)
+
+    init {
+        scope.launch {
+            for ((code, target, json) in unsolicited) {
+                try {
+                    handleUnsolicitedResponse(code, target, json)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Unsolicited $target: ${e.message}")
+                }
+            }
+        }
+    }
 
     // ═══════════════════════════════════════════════════════════════
     // Connect / Disconnect
@@ -255,6 +310,8 @@ class Iridium9704Spp(private val context: Context) {
                 socket = s
                 inputStream = s.inputStream
                 outputStream = s.outputStream
+                urgentOutputStream = null
+                forgetReadings()
                 _state.value = State.Connected
 
                 initialize()
@@ -277,6 +334,7 @@ class Iridium9704Spp(private val context: Context) {
         socket = null
         inputStream = null
         outputStream = null
+        urgentOutputStream = null
         _state.value = State.Disconnected
     }
 
@@ -291,6 +349,8 @@ class Iridium9704Spp(private val context: Context) {
         link = newLink
         inputStream = newLink.input
         outputStream = newLink.output
+        urgentOutputStream = newLink.urgentOutput
+        forgetReadings()
         _state.value = State.Connected
         scope.launch { initialize() }
     }
@@ -317,7 +377,19 @@ class Iridium9704Spp(private val context: Context) {
         link = null
         inputStream = null
         outputStream = null
+        urgentOutputStream = null
         _state.value = State.Disconnected
+    }
+
+    /** A new link starts with no reading and no round trips (MESHSAT-1670). */
+    private fun forgetReadings() {
+        _reading.value = null
+        synchronized(pollRoundTrips) {
+            pollRoundTrips.clear()
+            pollsAnswered = 0
+            pollsMissed = 0
+        }
+        _pollStats.value = SignalPollStats()
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -404,6 +476,7 @@ class Iridium9704Spp(private val context: Context) {
 
             // Start poll loop
             startPollLoop()
+            startSignalWatch()
 
         } catch (e: Exception) {
             _error.emit("9704 init failed: ${e.message}")
@@ -426,7 +499,7 @@ class Iridium9704Spp(private val context: Context) {
         synchronized(serialLock) {
             val os = outputStream ?: throw IOException("Not connected")
 
-            drainInput()
+            clearBeforeCommand()
 
             val jsonStr = spacedJson(payload.toString())
             val frame = "$method $target $jsonStr\r"
@@ -444,9 +517,9 @@ class Iridium9704Spp(private val context: Context) {
                 val respTarget = resp.second
                 val json = resp.third
 
-                // Unsolicited — dispatch and keep reading
+                // Unsolicited: a segment request is answered here and now, the rest handed on
                 if (code == 299) {
-                    scope.launch { handleUnsolicitedResponse(code, respTarget, json) }
+                    dispatchUnsolicited(code, respTarget, json)
                     continue
                 }
 
@@ -540,6 +613,58 @@ class Iridium9704Spp(private val context: Context) {
         } catch (_: IOException) {}
     }
 
+    /**
+     * Before a command (MESHSAT-1674): whatever the link holds is read, every complete unsolicited
+     * frame is dispatched and the rest dropped (an answer that came too late, the node's reset
+     * text). A plain drain threw away a segment request that had just arrived, and the modem
+     * failed the send with segment_not_supplied. A half-arrived line gets [PARTIAL_LINE_GRACE_MS]
+     * to finish. The caller holds [serialLock].
+     */
+    private fun clearBeforeCommand() {
+        val input = inputStream ?: return
+        val buf = StringBuilder()
+        try {
+            var quietUntil = System.currentTimeMillis() + PARTIAL_LINE_GRACE_MS
+            while (true) {
+                if (input.available() > 0) {
+                    val b = input.read()
+                    if (b == -1) break
+                    quietUntil = System.currentTimeMillis() + PARTIAL_LINE_GRACE_MS
+                    if (b == 0x0D) {
+                        if (buf.isNotEmpty()) {
+                            val frame = parseJsprLine(buf.toString())
+                            if (frame != null && frame.first == 299) {
+                                dispatchUnsolicited(frame.first, frame.second, frame.third)
+                            } else {
+                                Log.d(TAG, "JSPR dropped before a command: $buf")
+                            }
+                            buf.setLength(0)
+                        }
+                        continue
+                    }
+                    if (buf.isEmpty() && (b < 0x20 || b > 0x7E)) continue
+                    buf.append(b.toChar())
+                } else {
+                    if (buf.isEmpty() || System.currentTimeMillis() >= quietUntil) break
+                    Thread.sleep(2)
+                }
+            }
+        } catch (_: IOException) {}
+    }
+
+    /**
+     * An unsolicited frame, from whichever reader holds [serialLock]: the modem's request for an MO
+     * segment is answered right here, ahead of anything else (MESHSAT-1674); every other frame is
+     * queued for [handleUnsolicitedResponse] in the order it came.
+     */
+    private fun dispatchUnsolicited(code: Int, target: String, json: JSONObject) {
+        if (target == "messageOriginateSegment") {
+            handleMoSegmentRequest(json, System.nanoTime())
+            return
+        }
+        unsolicited.trySend(Triple(code, target, json))
+    }
+
     // ═══════════════════════════════════════════════════════════════
     // Poll loop — process unsolicited 299 messages
     // ═══════════════════════════════════════════════════════════════
@@ -554,7 +679,7 @@ class Iridium9704Spp(private val context: Context) {
                         if (input != null && input.available() > 0) {
                             val resp = readJsprResponse(1000)
                             if (resp != null && resp.first == 299) {
-                                scope.launch { handleUnsolicitedResponse(resp.first, resp.second, resp.third) }
+                                dispatchUnsolicited(resp.first, resp.second, resp.third)
                             }
                         }
                     }
@@ -565,19 +690,41 @@ class Iridium9704Spp(private val context: Context) {
                     }
                     break
                 }
-                delay(50)
+                delay(if (_moStatus.value == MoStatus.Idle) POLL_PAUSE_MS else POLL_PAUSE_SENDING_MS)
             }
         }
+    }
+
+    /**
+     * Fill the gaps between the modem's own constellationState events (MESHSAT-1670): ask when no
+     * reading came for [SignalFreshness.POLL_INTERVAL_MS], never while a send is under way.
+     */
+    private fun startSignalWatch() {
+        scope.launch {
+            while (polling && isActive) {
+                delay(SIGNAL_CHECK_MS)
+                if (_state.value != State.Ready || _moStatus.value != MoStatus.Idle) continue
+                val last = _reading.value
+                if (last == null || System.currentTimeMillis() - last.atMs >= SignalFreshness.POLL_INTERVAL_MS) pollSignal()
+            }
+        }
+    }
+
+    /** A reading the modem gave, by answer or by event (MESHSAT-1670). */
+    private fun recordReading(bars: Int) {
+        val b = bars.coerceIn(0, 5)
+        _reading.value = SignalReading(b, System.currentTimeMillis())
+        _signal.value = b
     }
 
     private suspend fun handleUnsolicitedResponse(code: Int, target: String, json: JSONObject) {
         when (target) {
             "constellationState" -> {
-                _signal.value = json.optInt("signal_bars", 0)
-                Log.d(TAG, "Signal: ${_signal.value}/5")
-            }
-            "messageOriginateSegment" -> {
-                handleMoSegmentRequest(json)
+                // An event without the field is no reading, never 0 bars (MESHSAT-1670).
+                if (json.has("signal_bars")) {
+                    recordReading(json.optInt("signal_bars", 0))
+                    Log.d(TAG, "Signal: ${_signal.value}/5")
+                }
             }
             "messageOriginateStatus" -> {
                 handleMoStatus(json)
@@ -622,6 +769,8 @@ class Iridium9704Spp(private val context: Context) {
         payloadWithCrc[data.size + 1] = (crc and 0xFF).toByte()
 
         moPayload = payloadWithCrc
+        moPayloadB64 = jsprSegmentData(payloadWithCrc)
+        moStartedAtNs = System.nanoTime()
         moTopicId = topicId
         moRequestRef = nextRequestRef
         nextRequestRef = (nextRequestRef % 100) + 1
@@ -712,8 +861,15 @@ class Iridium9704Spp(private val context: Context) {
      * Handle modem requesting a segment of the MO payload.
      * Modem sends: 299 messageOriginateSegment {segment_start, segment_length, ...}
      * Host responds: PUT messageOriginateSegment {data: base64, ...}
+     *
+     * Called by the reader that holds [serialLock], the moment the request is read (MESHSAT-1674):
+     * the 9704 gives up after about 360 ms, and behind the node's pipe a request that waited for a
+     * signal read or an MT's handling failed the send with segment_not_supplied. The answer echoes
+     * the request's own topic and message id, as Ground Control's library does, so it never waits
+     * for the accept to be booked; it goes out on the link's priority writer. [readAtNs] is when
+     * the request was read.
      */
-    private fun handleMoSegmentRequest(json: JSONObject) {
+    private fun handleMoSegmentRequest(json: JSONObject, readAtNs: Long) {
         val payload = moPayload ?: return
         val segStart = json.optInt("segment_start", 0)
         val segLen = json.optInt("segment_length", 0)
@@ -724,24 +880,38 @@ class Iridium9704Spp(private val context: Context) {
             return
         }
 
-        val segment = payload.copyOfRange(segStart, segStart + segLen)
-        val b64 = jsprSegmentData(segment)
+        val whole = moPayloadB64
+        val b64 = if (segStart == 0 && segLen == payload.size && whole != null) {
+            whole
+        } else {
+            jsprSegmentData(payload.copyOfRange(segStart, segStart + segLen))
+        }
 
         val resp = JSONObject()
-            .put("topic_id", moTopicId)
-            .put("message_id", moMessageId)
+            .put("topic_id", if (json.has("topic_id")) json.optInt("topic_id") else moTopicId)
+            .put("message_id", if (json.has("message_id")) json.optInt("message_id") else moMessageId)
             .put("segment_length", segLen)
             .put("segment_start", segStart)
             .put("data", b64)
 
         try {
             synchronized(serialLock) {
-                val os = outputStream ?: return
+                val os = urgentOutputStream ?: outputStream ?: return
                 val frame = "PUT messageOriginateSegment ${spacedJson(resp.toString())}\r"
                 os.write(frame.toByteArray(Charsets.US_ASCII))
                 os.flush()
             }
-            Log.d(TAG, "MO segment sent: start=$segStart len=$segLen")
+            val timing = SegmentTiming(
+                askedAfterMs = (readAtNs - moStartedAtNs) / 1_000_000,
+                answeredInMs = (System.nanoTime() - readAtNs) / 1_000_000,
+                segmentLength = segLen,
+            )
+            _segmentTiming.value = timing
+            Log.d(
+                TAG,
+                "MO segment sent: start=$segStart len=$segLen, asked ${timing.askedAfterMs} ms after the send, " +
+                    "answered in ${timing.answeredInMs} ms",
+            )
         } catch (e: IOException) {
             Log.e(TAG, "Failed to send MO segment: ${e.message}")
         }
@@ -765,12 +935,14 @@ class Iridium9704Spp(private val context: Context) {
             _error.emit("MO failed: $status")
         }
         moPayload = null
+        moPayloadB64 = null
     }
 
     /** Reset MO state after handling completion. */
     fun resetMoStatus() {
         _moStatus.value = MoStatus.Idle
         moPayload = null
+        moPayloadB64 = null
         moFinalStatus = ""
     }
 
@@ -854,20 +1026,43 @@ class Iridium9704Spp(private val context: Context) {
     private fun isWireReady(): Boolean =
         _state.value in setOf(State.Connected, State.Initializing, State.Ready)
 
-    /** Poll signal strength. Returns 0-5. */
+    /**
+     * Poll signal strength. Returns 0-5: the answer, or the last reading when the modem did not
+     * answer (which then stays as old as it is, MESHSAT-1670). Each answered read's round trip
+     * goes into [pollStats].
+     */
     suspend fun pollSignal(): Int {
         if (!isWireReady()) return 0
         return try {
+            val startNs = System.nanoTime()
             val resp = sendJspr("GET", "constellationState", JSONObject(), SIGNAL_TIMEOUT_MS)
             val answered = resp?.takeIf { it.has("signal_bars") }?.optInt("signal_bars", 0)
-            if (answered == null) Log.d(TAG, "Signal: no answer in ${SIGNAL_TIMEOUT_MS / 1000} s, keeping ${_signal.value}/5")
-            val bars = signalAfterPoll(_signal.value, answered)
-            _signal.value = bars
-            bars
+            notePoll(if (answered == null) null else (System.nanoTime() - startNs) / 1_000_000)
+            if (answered == null) {
+                Log.d(TAG, "Signal: no answer in ${SIGNAL_TIMEOUT_MS / 1000} s, keeping ${_signal.value}/5")
+            } else {
+                recordReading(answered)
+            }
+            signalAfterPoll(_signal.value, answered)
         } catch (e: Exception) {
             _error.emit("9704 signal poll failed: ${e.message}")
             _signal.value
         }
+    }
+
+    private fun notePoll(roundTripMs: Long?) {
+        val stats = synchronized(pollRoundTrips) {
+            if (roundTripMs == null) {
+                pollsMissed++
+            } else {
+                pollsAnswered++
+                pollRoundTrips.addLast(roundTripMs)
+                while (pollRoundTrips.size > SignalPollStats.KEEP) pollRoundTrips.removeFirst()
+            }
+            SignalPollStats.of(pollRoundTrips.toList(), pollsAnswered, pollsMissed)
+        }
+        _pollStats.value = stats
+        if (roundTripMs != null) Log.d(TAG, "Signal read round trip $roundTripMs ms (${stats.describe()})")
     }
 
     /** Get SIM status. */

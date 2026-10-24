@@ -70,7 +70,17 @@ class IridiumBlePipe internal constructor(
     val output: OutputStream = PipeOutputStream(
         chunkSize = chunkSize,
         canWrite = { _owner.value == Owner.Phone },
-        sendChunk = ::writeChunkBlocking,
+        sendChunk = { writeChunkBlocking(it, urgent = false) },
+    )
+
+    /**
+     * The same line, for a write that must not wait behind the connection's other Bluetooth
+     * operations: the 9704's MO segment answer, due within about 360 ms (MESHSAT-1674).
+     */
+    val urgentOutput: OutputStream = PipeOutputStream(
+        chunkSize = chunkSize,
+        canWrite = { _owner.value == Owner.Phone },
+        sendChunk = { writeChunkBlocking(it, urgent = true) },
     )
 
     /** Sees every notified chunk too, for in-band lines such as SBDRING. */
@@ -225,15 +235,14 @@ class IridiumBlePipe internal constructor(
     @Volatile
     internal var refuseWrites = false
 
-    private fun writeChunkBlocking(chunk: ByteArray): Boolean {
+    private fun writeChunkBlocking(chunk: ByteArray, urgent: Boolean): Boolean {
         if (refuseWrites) {
             Log.w(TAG, "drill: write refused (${chunk.size} bytes)")
             return false
         }
         val rx = rx ?: return false
-        val op = queue.enqueue("w:${rx.uuid}") {
-            GattCompat.write(gatt, rx, chunk, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)
-        }
+        val start = { GattCompat.write(gatt, rx, chunk, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT) }
+        val op = if (urgent) queue.enqueueUrgent("w:${rx.uuid}", start) else queue.enqueue("w:${rx.uuid}", start)
         return runBlocking { op.await() } == GattOpQueue.STATUS_SUCCESS
     }
 
@@ -252,6 +261,9 @@ interface ModemLink {
     val input: InputStream
     val output: OutputStream
 
+    /** A writer that goes ahead of the link's other traffic where the link has one (MESHSAT-1674). */
+    val urgentOutput: OutputStream get() = output
+
     /** Also receive every chunk as it arrives, e.g. to spot unsolicited lines. */
     fun setReceiver(receiver: ((ByteArray) -> Unit)?)
 }
@@ -260,6 +272,7 @@ interface ModemLink {
 fun IridiumBlePipe.asModemLink(): ModemLink = object : ModemLink {
     override val input: InputStream get() = this@asModemLink.input
     override val output: OutputStream get() = this@asModemLink.output
+    override val urgentOutput: OutputStream get() = this@asModemLink.urgentOutput
     override fun setReceiver(receiver: ((ByteArray) -> Unit)?) {
         this@asModemLink.onReceive = receiver
     }

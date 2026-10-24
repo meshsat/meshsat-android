@@ -60,6 +60,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -309,8 +310,17 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
 
     // Iridium 9704 state
     val iridium9704State = GatewayService.iridium9704Spp?.state.collectOrNull()
-    val iridium9704Signal = GatewayService.iridium9704Spp?.signal.collectOrNull()
     val iridium9704ModemInfo = GatewayService.iridium9704Spp?.modemInfo.collectOrNull()
+    // A reading carries its time; the screen marks it stale as it ages (MESHSAT-1670).
+    val iridium9704Reading = GatewayService.iridium9704Spp?.reading.collectOrNull()
+    val iridium9704PollStats = GatewayService.iridium9704Spp?.pollStats.collectOrNull()
+    val iridium9704Segment = GatewayService.iridium9704Spp?.segmentTiming.collectOrNull()
+    val signalNow by produceState(System.currentTimeMillis()) {
+        while (true) {
+            kotlinx.coroutines.delay(5_000)
+            value = System.currentTimeMillis()
+        }
+    }
 
     // QR code scanner for key sync — handles both raw hex keys and meshsat://key/ URL bundles
     val qrScanLauncher = rememberLauncherForActivityResult(
@@ -581,8 +591,7 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
                     label = "Status",
                     connected = if (node9704) state9704 == net.meshsat.android.bt.Iridium9704Spp.State.Ready else state == IridiumSpp.State.Connected,
                     statusText = when {
-                        node9704 && state9704 == net.meshsat.android.bt.Iridium9704Spp.State.Ready ->
-                            "Connected (Signal: ${iridium9704Signal?.value ?: 0}/5)"
+                        node9704 && state9704 == net.meshsat.android.bt.Iridium9704Spp.State.Ready -> "Connected (9704)"
                         node9704 && state9704 == net.meshsat.android.bt.Iridium9704Spp.State.Initializing -> "Bringing the 9704 up..."
                         node9704 && state9704 != net.meshsat.android.bt.Iridium9704Spp.State.Disconnected -> "Checking the modem..."
                         node9704 -> pipeWords
@@ -594,6 +603,10 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
                     },
                     color = ColorIridium,
                 )
+                if (node9704 && state9704 == net.meshsat.android.bt.Iridium9704Spp.State.Ready) {
+                    SignalReadingRow(iridium9704Reading?.value, signalNow)
+                    Imt9704PipeTimings(iridium9704PollStats?.value, iridium9704Segment?.value)
+                }
 
                 SettingRow("Modem on the node") {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -934,10 +947,7 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
                     label = "Status",
                     connected = state9704 == net.meshsat.android.bt.Iridium9704Spp.State.Ready,
                     statusText = when (state9704) {
-                        net.meshsat.android.bt.Iridium9704Spp.State.Ready -> {
-                            val sig = iridium9704Signal?.value ?: 0
-                            "Ready (Signal: $sig/5)"
-                        }
+                        net.meshsat.android.bt.Iridium9704Spp.State.Ready -> "Ready"
                         net.meshsat.android.bt.Iridium9704Spp.State.Initializing -> "Initializing JSPR..."
                         net.meshsat.android.bt.Iridium9704Spp.State.Connected -> "Connected (init pending)"
                         net.meshsat.android.bt.Iridium9704Spp.State.Connecting -> "Connecting..."
@@ -947,6 +957,7 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
                 )
 
                 if (state9704 == net.meshsat.android.bt.Iridium9704Spp.State.Ready) {
+                    SignalReadingRow(iridium9704Reading?.value, signalNow)
                     iridium9704ModemInfo?.value?.let { info ->
                         if (info.imei.isNotBlank()) InfoRow("IMEI", info.imei)
                         if (info.serial.isNotBlank()) InfoRow("Serial", info.serial)
@@ -3043,14 +3054,37 @@ private fun ConnectionStatusRow(
 }
 
 @Composable
-private fun InfoRow(label: String, value: String) {
+private fun InfoRow(label: String, value: String, valueColor: androidx.compose.ui.graphics.Color = androidx.compose.ui.graphics.Color.Unspecified) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
         Text(text = label, style = MaterialTheme.typography.bodySmall, color = MeshSatTextMuted)
-        Text(text = value, style = MaterialTheme.typography.bodySmall)
+        Text(text = value, style = MaterialTheme.typography.bodySmall, color = valueColor)
     }
+}
+
+/**
+ * For the bench (MESHSAT-1670, MESHSAT-1674): the signal reads' round trips over the link and how
+ * fast the app answered the modem's last segment request. Nothing until the first of each.
+ */
+@Composable
+private fun Imt9704PipeTimings(stats: net.meshsat.android.bt.SignalPollStats?, segment: net.meshsat.android.bt.SegmentTiming?) {
+    stats?.describe()?.takeIf { it.isNotEmpty() }?.let { InfoRow("Signal read (min / median / max)", it) }
+    segment?.let {
+        InfoRow("Last segment request", "${it.askedAfterMs} ms after the send, answered in ${it.answeredInMs} ms")
+    }
+}
+
+/** The 9704's signal as the screens show it (MESHSAT-1670): the bars, their age once stale, "?" before the first reading. */
+@Composable
+private fun SignalReadingRow(reading: net.meshsat.android.bt.SignalReading?, nowMs: Long) {
+    val kind = net.meshsat.android.bt.SignalFreshness.kind(reading, nowMs)
+    InfoRow(
+        "Signal",
+        net.meshsat.android.bt.SignalFreshness.describe(reading, nowMs),
+        valueColor = if (kind == net.meshsat.android.bt.SignalFreshness.Kind.Fresh) androidx.compose.ui.graphics.Color.Unspecified else MeshSatTextMuted,
+    )
 }
 
 @Composable

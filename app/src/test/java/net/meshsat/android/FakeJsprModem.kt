@@ -35,6 +35,25 @@ internal class FakeJsprModem(private val imei: String, private val segment: Int 
     /** Ask for one malformed segment (negative start) before the real ones, as a faulty modem might. */
     @Volatile var badSegmentFirst = false
 
+    /** False: GET constellationState goes unanswered, as over a busy pipe (MESHSAT-1670). */
+    @Volatile var answerConstellation = true
+
+    /** The bars an answered GET constellationState reports. */
+    @Volatile var signalBars = 3
+
+    /** Ask for the segments this long after accepting the MO, from another thread (MESHSAT-1674). */
+    @Volatile var segmentDelayMs = 0L
+
+    /** Hand the phone this MT just before the delayed segment request, so it is being handled when the request comes. */
+    @Volatile var mtBeforeSegment: ByteArray? = null
+
+    /** When the last segment request went to the driver, and when its answer came back (System.nanoTime). */
+    @Volatile var segmentAskedAtNs = 0L
+    @Volatile var segmentAnsweredAtNs = 0L
+
+    /** The message_id of the last segment answer. */
+    @Volatile var lastSegmentMessageId = -1
+
     private var moLength = 0
     private var moId = 0
     private val moBytes = ByteArrayOutputStream()
@@ -54,19 +73,28 @@ internal class FakeJsprModem(private val imei: String, private val segment: Int 
             method == "GET" && target == "hwInfo" -> send("""200 hwInfo {"imei": "$imei", "serial_number": "TEST", "hw_version": "test", "board_temp": 20}""")
             method == "GET" && target == "firmware" && body.optString("slot") == "primary" ->
                 send("""200 firmware {"slot": "primary", "validity": 1, "version": {"major": 5, "minor": 2, "patch": 1, "build_info": "fake"}, "hash": "abc"}""")
-            method == "GET" && target == "constellationState" -> send("""200 constellationState {"constellation_visible": true, "signal_bars": 3}""")
+            method == "GET" && target == "constellationState" ->
+                if (answerConstellation) send("""200 constellationState {"constellation_visible": true, "signal_bars": $signalBars}""")
             method == "PUT" && target == "messageOriginate" -> {
                 moLength = body.getInt("message_length"); moId++; moBytes.reset()
                 send("""200 messageOriginate {"topic_id": ${body.getInt("topic_id")}, "message_response": "message_accepted", "message_id": $moId}""")
                 if (badSegmentFirst) send("""299 messageOriginateSegment {"topic_id": 244, "message_id": $moId, "segment_length": 4, "segment_start": -1}""")
-                var start = 0
-                while (start < moLength) {
-                    val len = minOf(segment, moLength - start)
-                    send("""299 messageOriginateSegment {"topic_id": 244, "message_id": $moId, "segment_length": $len, "segment_start": $start}""")
-                    start += len
+                val delayMs = segmentDelayMs
+                if (delayMs <= 0) {
+                    askSegments()
+                } else {
+                    Thread {
+                        Thread.sleep(delayMs)
+                        synchronized(this) {
+                            mtBeforeSegment?.let { deliverMt(it, id = 77) }
+                            askSegments()
+                        }
+                    }.start()
                 }
             }
             method == "PUT" && target == "messageOriginateSegment" -> {
+                segmentAnsweredAtNs = System.nanoTime()
+                lastSegmentMessageId = body.optInt("message_id", -1)
                 moBytes.write(Iridium9704Spp.jsprSegmentBytes(body.getString("data")))
                 if (moBytes.size() >= moLength) {
                     mos.put(moBytes.toByteArray())
@@ -74,6 +102,16 @@ internal class FakeJsprModem(private val imei: String, private val segment: Int 
                 }
             }
             else -> send("200 $target {}")
+        }
+    }
+
+    private fun askSegments() {
+        var start = 0
+        segmentAskedAtNs = System.nanoTime()
+        while (start < moLength) {
+            val len = minOf(segment, moLength - start)
+            send("""299 messageOriginateSegment {"topic_id": 244, "message_id": $moId, "segment_length": $len, "segment_start": $start}""")
+            start += len
         }
     }
 

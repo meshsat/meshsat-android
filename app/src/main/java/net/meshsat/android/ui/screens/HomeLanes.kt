@@ -152,7 +152,7 @@ fun HomeLanes(navigate: (String) -> Unit) {
     // A RockBLOCK 9704, on the node's pipe or an HC-05, has its own driver (MESHSAT-1507).
     val imt = GatewayService.iridium9704Spp
     val imtState = imt?.state?.value ?: net.meshsat.android.bt.Iridium9704Spp.State.Disconnected
-    val bars = if (imtState == net.meshsat.android.bt.Iridium9704Spp.State.Ready) imt?.signal?.value ?: 0 else spp?.signal?.value ?: 0
+    val bars = spp?.signal?.value ?: 0
     val silent = spp?.modemSilent?.value == true
     val owner = ble?.iridiumPipe?.value?.owner?.value
     val passes = GatewayService.passes.value
@@ -262,7 +262,13 @@ fun HomeLanes(navigate: (String) -> Unit) {
                 name = "Satellite",
                 color = ColorIridium,
                 state = satState,
-                metric = if (sppState == IridiumSpp.State.Connected) "$bars/5" else null,
+                metric = when {
+                    // The 9704's reading with its age once stale, "?" before the first (MESHSAT-1670).
+                    imtState == net.meshsat.android.bt.Iridium9704Spp.State.Ready ->
+                        net.meshsat.android.bt.SignalFreshness.compact(imt?.reading?.value, now)
+                    sppState == IridiumSpp.State.Connected -> "$bars/5"
+                    else -> null
+                },
                 detail = satDetail,
                 inFlight = iridiumQueue > 0,
                 onClick = { navigate(if (sppState == IridiumSpp.State.Connected) "passes" else "setup/satellite") },
