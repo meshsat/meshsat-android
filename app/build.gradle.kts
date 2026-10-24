@@ -30,8 +30,8 @@ android {
         targetSdk = 36
         // Keep these literal: F-Droid's checkupdates reads them out of this file with a
         // regex that only matches a number, and falls back to an older tag otherwise.
-        versionCode = 137
-        versionName = "2.22.4"
+        versionCode = 138
+        versionName = "2.22.5"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

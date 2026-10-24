@@ -1,0 +1,1 @@
+New on the node page: switch the MeshSat node's status light and screen on and off, and update the node's firmware from a file over Bluetooth. Satellite sends through a RockBLOCK 9704 retry within a minute, and the signal bars no longer drop to 0 while messages are being sent.
