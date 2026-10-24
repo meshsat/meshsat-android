@@ -249,7 +249,10 @@ class NodeOtaTransport(private val context: Context, private val adapter: Blueto
     private suspend fun writeAndWait(gatt: BluetoothGatt, c: BluetoothGattCharacteristic, value: ByteArray, type: Int): Boolean {
         repeat(WRITE_BUSY_RETRIES) {
             if (GattCompat.write(gatt, c, value, type)) {
-                val done = awaitEvent<Event.Written>(OP_TIMEOUT_MS)
+                // Not every stack reports a write without response; the loader's ACK is the flow
+                // control, so such a report is only waited for briefly.
+                val waitMs = if (type == BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE) NO_RESPONSE_REPORT_MS else OP_TIMEOUT_MS
+                val done = awaitEvent<Event.Written>(waitMs)
                 // A write without response is reported once handed to the controller; a missing
                 // report is not a failure, the loader's answer decides.
                 return done == null || done.status == BluetoothGatt.GATT_SUCCESS
@@ -317,6 +320,7 @@ class NodeOtaTransport(private val context: Context, private val adapter: Blueto
         private const val SETTLE_MS = 600L
         private const val WRITE_BUSY_RETRIES = 50
         private const val WRITE_BUSY_PAUSE_MS = 20L
+        private const val NO_RESPONSE_REPORT_MS = 300L
 
         fun otaCommand(size: Int, sha256Hex: String): String = "OTA $size ${sha256Hex.lowercase()}\n"
 
