@@ -660,9 +660,13 @@ class MeshtasticBle(private val context: Context) {
             // STATS this costs one extra discovery per connect and nothing else.
             g.getService(IridiumBlePipe.SERVICE_UUID)?.let { pipeService ->
                 val statsMissing = pipeService.getCharacteristic(UUID.fromString(IridiumPipeContract.STATS_UUID)) == null
-                if (statsMissing && !gattCacheRefreshed && refreshGattCache(g)) {
+                // The same for CONTROL (MESHSAT-1671): after the first Bluetooth update of unit 0001
+                // on 24 Oct 2026 the phone kept the pre-update table and the switches said the
+                // firmware had none.
+                val controlMissing = pipeService.getCharacteristic(UUID.fromString(IridiumPipeContract.CONTROL_UUID)) == null
+                if ((statsMissing || controlMissing) && !gattCacheRefreshed && refreshGattCache(g)) {
                     gattCacheRefreshed = true
-                    Log.i(TAG, "The cached GATT table has the Iridium pipe without STATS; refreshing Android's cache and discovering again")
+                    Log.i(TAG, "The cached GATT table has the Iridium pipe without ${if (statsMissing) "STATS" else "CONTROL"}; refreshing Android's cache and discovering again")
                     scope.launch {
                         delay(GATT_REFRESH_PAUSE_MS)
                         g.discoverServices()
