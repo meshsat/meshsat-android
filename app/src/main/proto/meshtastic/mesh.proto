@@ -287,6 +287,9 @@ message MyNodeInfo {
   uint32 my_node_num = 1;
   uint32 reboot_count = 8;
   uint32 min_app_version = 11;
+  bytes device_id = 12;
+  // The PlatformIO env the node's firmware was built for, e.g. meshsat-tbeam-s3-rockblock9704 (MESHSAT-1672).
+  string pio_env = 13;
 }
 
 message LogRecord {

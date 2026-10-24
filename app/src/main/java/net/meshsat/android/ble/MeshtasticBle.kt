@@ -151,6 +151,21 @@ class MeshtasticBle(private val context: Context) {
     private val _channels = MutableStateFlow<List<MeshtasticProtocol.MeshChannel>>(emptyList())
     val channels: StateFlow<List<MeshtasticProtocol.MeshChannel>> = _channels
 
+    private val _clientNotifications = kotlinx.coroutines.flow.MutableSharedFlow<String>(extraBufferCapacity = 16)
+
+    /** The node's ClientNotification texts as they arrive (MESHSAT-1672: the OTA handover answers here). */
+    val clientNotifications: kotlinx.coroutines.flow.SharedFlow<String> = _clientNotifications
+
+    fun noteClientNotification(text: String) {
+        _clientNotifications.tryEmit(text)
+    }
+
+    /**
+     * While a firmware update runs (MESHSAT-1672) the node is the OTA loader's, and the loader takes
+     * one connection: no connect or reconnect from here until the update lets go.
+     */
+    @Volatile var heldForFirmwareUpdate: Boolean = false
+
     private val _deviceMetadata = MutableStateFlow<MeshtasticProtocol.MeshDeviceMetadata?>(null)
     val deviceMetadata: StateFlow<MeshtasticProtocol.MeshDeviceMetadata?> = _deviceMetadata
 
@@ -389,6 +404,10 @@ class MeshtasticBle(private val context: Context) {
     // --- BLE Connect ---
 
     fun connect(device: BluetoothDevice) {
+        if (heldForFirmwareUpdate) {
+            Log.i(TAG, "Not connecting: a firmware update holds the node")
+            return
+        }
         // With Bluetooth switched off there is nothing to connect with, and saying "Connecting"
         // would stay on the screen for ever (MESHSAT-615). Off is a state, not an error.
         if (adapter?.isEnabled != true) {
@@ -408,6 +427,10 @@ class MeshtasticBle(private val context: Context) {
      */
     @Synchronized
     fun connect(address: String) {
+        if (heldForFirmwareUpdate) {
+            Log.i(TAG, "Not connecting to $address: a firmware update holds the node")
+            return
+        }
         if (gatt != null && address == lastAddress) return
         if (gatt != null) disconnect()
         lastAddress = address

@@ -11,6 +11,11 @@ import "meshtastic/module_config.proto";
 import "meshtastic/mesh.proto";
 
 message AdminMessage {
+  message OTAEvent {
+    OTAMode reboot_ota_mode = 1;
+    bytes ota_hash = 2;
+  }
+
   enum ConfigType {
     DEVICE_CONFIG = 0;
     POSITION_CONFIG = 1;
@@ -86,6 +91,9 @@ message AdminMessage {
     int32 shutdown_seconds = 98;
     int32 factory_reset_config = 99;
     int32 nodedb_reset = 100;
+    // Reboot into the ESP32 OTA loader in app1 for a firmware update over BLE or WiFi, with the
+    // image's SHA-256 (upstream protobufs, admin.proto; MESHSAT-1672).
+    OTAEvent ota_request = 102;
   }
 
   bytes session_passkey = 101;
@@ -141,4 +149,11 @@ message StoreAndForward {
     Heartbeat heartbeat = 4;
     bytes text = 5;
   }
+}
+
+// Firmware update mode for OTA updates (upstream protobufs, admin.proto; MESHSAT-1672).
+enum OTAMode {
+  NO_REBOOT_OTA = 0;
+  OTA_BLE = 1;
+  OTA_WIFI = 2;
 }

@@ -3784,6 +3784,13 @@ class GatewayService : Service() {
                         return@collect
                     }
 
+                    // --- ClientNotification (MESHSAT-1672: the node's OTA handover answers here) ---
+                    result.clientNotification?.let { text ->
+                        Log.i("MeshSat", "Node notification: $text")
+                        ble.noteClientNotification(text)
+                        return@collect
+                    }
+
                     // --- Device metadata ---
                     result.deviceMetadata?.let { md ->
                         ble.setDeviceMetadata(md)

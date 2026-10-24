@@ -132,6 +132,7 @@ object MeshtasticProtoAdapter {
             firmwareVersion = "",  // firmware_version removed from MyNodeInfo in recent protos; comes via DeviceMetadata
             rebootCount = mi.rebootCount,
             minAppVersion = mi.minAppVersion,
+            pioEnv = mi.pioEnv,
         )
     }
 
@@ -596,6 +597,23 @@ object MeshtasticProtoAdapter {
     // ═══════════════════════════════════════════════════════════════
     // Admin message encoding — radio config + device admin commands
     // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * Ask the node to reboot into its OTA loader for a firmware update over Bluetooth, naming the
+     * image's SHA-256 (AdminMessage.ota_request, field 102; MESHSAT-1672). The node answers with a
+     * ClientNotification "Rebooting to BLE OTA", or a warning saying why it will not.
+     */
+    fun buildAdminOtaRequest(myNodeNum: Long, sha256: ByteArray): ByteArray {
+        val admin = AdminProtos.AdminMessage.newBuilder()
+            .setOtaRequest(
+                AdminProtos.AdminMessage.OTAEvent.newBuilder()
+                    .setRebootOtaMode(AdminProtos.OTAMode.OTA_BLE)
+                    .setOtaHash(com.google.protobuf.ByteString.copyFrom(sha256))
+                    .build(),
+            )
+            .build()
+        return wrapAdminToRadio(myNodeNum, myNodeNum, admin)
+    }
 
     /** Build a ToRadio admin message requesting a config section. */
     fun buildAdminGetConfig(myNodeNum: Long, configType: Int): ByteArray {

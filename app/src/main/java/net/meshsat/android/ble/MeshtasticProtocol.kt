@@ -104,6 +104,8 @@ object MeshtasticProtocol {
         val firmwareVersion: String = "",
         val rebootCount: Int = 0,
         val minAppVersion: Int = 0,
+        /** The PlatformIO env the node's firmware was built for (MESHSAT-1672); empty on old firmware. */
+        val pioEnv: String = "",
     )
 
     /** Device metadata (firmware version, capabilities). */
@@ -279,6 +281,8 @@ object MeshtasticProtocol {
         val deviceMetadata: MeshDeviceMetadata? = null,
         val configCompleteId: Int? = null,
         val config: ConfigProtos.Config? = null,
+        /** A ClientNotification's text, e.g. "Rebooting to BLE OTA" (MESHSAT-1672). */
+        val clientNotification: String? = null,
     )
 
     /**
@@ -306,6 +310,9 @@ object MeshtasticProtocol {
         }
         if (fromRadio.hasConfigCompleteId()) {
             return FromRadioResult(configCompleteId = fromRadio.configCompleteId)
+        }
+        if (fromRadio.hasClientNotification()) {
+            return FromRadioResult(clientNotification = fromRadio.clientNotification.message)
         }
 
         // Packet variants — dispatch by portnum

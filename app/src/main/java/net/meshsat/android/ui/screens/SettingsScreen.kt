@@ -812,6 +812,107 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
                     }
                 }
             }
+            // The node's firmware, updated from a file over Bluetooth (MESHSAT-1672).
+            if (pipe != null) {
+                val nodeInfo = GatewayService.meshtasticBle?.myInfo.collectOrNull()?.value
+                val nodeMeta = GatewayService.meshtasticBle?.deviceMetadata.collectOrNull()?.value
+                val updateState by net.meshsat.android.ble.NodeFirmwareUpdater.state.collectAsState()
+                var picked by remember { mutableStateOf<net.meshsat.android.ble.NodeFirmwareImage?>(null) }
+                var refusal by remember { mutableStateOf<String?>(null) }
+                val nodeEnv = nodeInfo?.pioEnv.orEmpty()
+                val pickFirmware = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+                    if (uri == null) return@rememberLauncherForActivityResult
+                    scope.launch {
+                        val bytes = withContext(Dispatchers.IO) {
+                            try {
+                                context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                            } catch (e: Exception) {
+                                null
+                            }
+                        }
+                        picked = null
+                        refusal = null
+                        when (val c = if (bytes == null) null else net.meshsat.android.ble.NodeFirmwareImage.check(bytes, nodeEnv)) {
+                            null -> refusal = "The file could not be read."
+                            is net.meshsat.android.ble.NodeFirmwareImage.Check.Refused -> refusal = c.reason
+                            is net.meshsat.android.ble.NodeFirmwareImage.Check.Ok -> picked = c.image
+                        }
+                    }
+                }
+                SectionCard("Node firmware") {
+                    InfoRow("Running", nodeMeta?.firmwareVersion?.ifBlank { null } ?: "unknown")
+                    InfoRow("Build", nodeEnv.ifBlank { "unknown" })
+                    when (val st = updateState) {
+                        net.meshsat.android.ble.NodeFirmwareUpdater.State.Idle -> {
+                            val image = picked
+                            if (image == null) {
+                                OutlinedButton(onClick = { pickFirmware.launch(arrayOf("*/*")) }, modifier = Modifier.fillMaxWidth()) {
+                                    Text("Update from a file...", style = MaterialTheme.typography.bodySmall)
+                                }
+                            } else {
+                                InfoRow("New firmware", image.version.ifBlank { "unnamed" })
+                                InfoRow("Size", "${image.size / 1024} KB, SHA-256 ${image.sha256Hex.take(8)}")
+                                Button(
+                                    onClick = {
+                                        GatewayService.meshtasticBle?.let { ble ->
+                                            net.meshsat.android.ble.NodeFirmwareUpdater.start(context.applicationContext, ble, image)
+                                        }
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = MeshSatTeal),
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) {
+                                    Text("Update the node now", style = MaterialTheme.typography.bodySmall)
+                                }
+                                OutlinedButton(onClick = { picked = null }, modifier = Modifier.fillMaxWidth()) {
+                                    Text("Choose another file", style = MaterialTheme.typography.bodySmall)
+                                }
+                            }
+                            refusal?.let { Text(text = it, style = MaterialTheme.typography.bodySmall, color = MeshSatAmber) }
+                            Text(
+                                text = "Pick the file firmware-$nodeEnv-<version>.bin (not the .factory.bin). The node restarts twice; keep the phone close. A few minutes.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MeshSatTextMuted,
+                            )
+                        }
+                        net.meshsat.android.ble.NodeFirmwareUpdater.State.AskingNode -> {
+                            Text("Asking the node to get ready...", style = MaterialTheme.typography.bodySmall, color = OffWhite)
+                            androidx.compose.material3.LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                        }
+                        is net.meshsat.android.ble.NodeFirmwareUpdater.State.Working -> {
+                            Text(st.text, style = MaterialTheme.typography.bodySmall, color = OffWhite)
+                            val f = st.fraction
+                            if (f == null) {
+                                androidx.compose.material3.LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                            } else {
+                                androidx.compose.material3.LinearProgressIndicator(progress = { f }, modifier = Modifier.fillMaxWidth())
+                            }
+                        }
+                        is net.meshsat.android.ble.NodeFirmwareUpdater.State.Done -> {
+                            Text("Updated to ${st.version}.", style = MaterialTheme.typography.bodySmall, color = MeshSatTeal)
+                            OutlinedButton(onClick = { picked = null; net.meshsat.android.ble.NodeFirmwareUpdater.reset() }, modifier = Modifier.fillMaxWidth()) {
+                                Text("Done", style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                        is net.meshsat.android.ble.NodeFirmwareUpdater.State.Failed -> {
+                            Text(st.reason, style = MaterialTheme.typography.bodySmall, color = MeshSatAmber)
+                            if (st.canRetry) {
+                                Button(
+                                    onClick = {
+                                        GatewayService.meshtasticBle?.let { ble -> net.meshsat.android.ble.NodeFirmwareUpdater.retry(context.applicationContext, ble) }
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = MeshSatTeal),
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) {
+                                    Text("Retry with the same file", style = MaterialTheme.typography.bodySmall)
+                                }
+                            }
+                            OutlinedButton(onClick = { net.meshsat.android.ble.NodeFirmwareUpdater.reset() }, modifier = Modifier.fillMaxWidth()) {
+                                Text("Close", style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         // --- Iridium RockBLOCK 9704 (JSPR/IMT) Section ---
