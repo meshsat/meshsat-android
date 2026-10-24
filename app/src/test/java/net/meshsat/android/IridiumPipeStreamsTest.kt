@@ -198,4 +198,15 @@ class IridiumPipeStreamsTest {
         watcher.feed("+SBDRING: no\r\nSBDRIN\r\n".toByteArray())
         assertEquals(2, rings)
     }
+
+    @Test
+    fun `STATUS bits 5 and 6 are the owner's LED and screen switches, and CONTROL writes switch-value pairs`() {
+        val off = IridiumPipeContract.StatusFlags.of(0x10 or 0x20 or 0x40)
+        org.junit.Assert.assertTrue(off.modemIsJspr && off.ledOff && off.screenOff)
+        val on = IridiumPipeContract.StatusFlags.of(0x10)
+        org.junit.Assert.assertFalse(on.ledOff || on.screenOff)
+        assertArrayEquals(byteArrayOf(0x01, 0x01), IridiumPipeContract.encodeControl(IridiumPipeContract.CONTROL_LED, off = true))
+        assertArrayEquals(byteArrayOf(0x02, 0x00), IridiumPipeContract.encodeControl(IridiumPipeContract.CONTROL_SCREEN, off = false))
+        assertEquals("d6a8a903-6af1-4530-ab3d-49c39b636e04", IridiumPipeContract.CONTROL_UUID)
+    }
 }

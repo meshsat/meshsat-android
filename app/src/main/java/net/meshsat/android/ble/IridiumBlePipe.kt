@@ -39,6 +39,10 @@ class IridiumBlePipe internal constructor(
     private val statusChar: BluetoothGattCharacteristic? = service.getCharacteristic(UUID.fromString(IridiumPipeContract.STATUS_UUID))
     private val statsChar: BluetoothGattCharacteristic? = service.getCharacteristic(UUID.fromString(IridiumPipeContract.STATS_UUID))
     private val passChar: BluetoothGattCharacteristic? = service.getCharacteristic(UUID.fromString(IridiumPipeContract.PASS_UUID))
+    private val controlChar: BluetoothGattCharacteristic? = service.getCharacteristic(UUID.fromString(IridiumPipeContract.CONTROL_UUID))
+
+    /** The node takes the owner's LED and screen switches (MESHSAT-1671); firmware before 24 Oct 2026 does not. */
+    val hasControl: Boolean = controlChar != null
 
     /** False when the service lacks RX or TX: nothing here can be used. */
     val usable: Boolean = rx != null && tx != null
@@ -160,6 +164,21 @@ class IridiumBlePipe internal constructor(
         }
         val result = op.await()
         if (result != GattOpQueue.STATUS_SUCCESS) Log.w(TAG, "Iridium pipe: PASS write of ${windows.size} windows failed, status $result")
+        return result == GattOpQueue.STATUS_SUCCESS
+    }
+
+    /**
+     * Switch the node's status LED or screen on or off (MESHSAT-1671): one write with response.
+     * The node keeps the switch across restarts and reports it in STATUS bits 5 and 6, which is
+     * where the screen reads it back. False when the node has no CONTROL or the write failed.
+     */
+    suspend fun writeControl(switch: Int, off: Boolean): Boolean {
+        val c = controlChar ?: return false
+        val op = queue.enqueue("w:${c.uuid}") {
+            GattCompat.write(gatt, c, IridiumPipeContract.encodeControl(switch, off), BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)
+        }
+        val result = op.await()
+        if (result != GattOpQueue.STATUS_SUCCESS) Log.w(TAG, "Iridium pipe: CONTROL write $switch=${if (off) "off" else "on"} failed, status $result")
         return result == GattOpQueue.STATUS_SUCCESS
     }
 

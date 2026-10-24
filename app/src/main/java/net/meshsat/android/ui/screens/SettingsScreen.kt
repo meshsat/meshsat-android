@@ -778,6 +778,40 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
                     }
                 }
             }
+            // The owner's switches for the node's light and screen (MESHSAT-1671).
+            if (pipe != null) {
+                val nodeStatus by pipe.status.collectAsState()
+                val flags = nodeStatus?.flags
+                SectionCard("Node light and screen") {
+                    if (!pipe.hasControl) {
+                        Text(
+                            text = "This node's firmware has no switches for its light and screen. Update the node's firmware to use them.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MeshSatTextMuted,
+                        )
+                    } else {
+                        SettingRow("Status LED") {
+                            Switch(
+                                checked = flags?.ledOff != true,
+                                onCheckedChange = { on -> scope.launch { pipe.writeControl(IridiumPipeContract.CONTROL_LED, off = !on) } },
+                                colors = SwitchDefaults.colors(checkedTrackColor = MeshSatTeal),
+                            )
+                        }
+                        SettingRow("Screen") {
+                            Switch(
+                                checked = flags?.screenOff != true,
+                                onCheckedChange = { on -> scope.launch { pipe.writeControl(IridiumPipeContract.CONTROL_SCREEN, off = !on) } },
+                                colors = SwitchDefaults.colors(checkedTrackColor = MeshSatTeal),
+                            )
+                        }
+                        Text(
+                            text = "The node keeps these after a restart. A press on the node's button always brings the screen back.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MeshSatTextMuted,
+                        )
+                    }
+                }
+            }
         }
 
         // --- Iridium RockBLOCK 9704 (JSPR/IMT) Section ---

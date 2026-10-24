@@ -49,6 +49,18 @@ object IridiumPipeContract {
     const val PASS_VERSION = 1
     const val PASS_MAX_WINDOWS = 8
 
+    /**
+     * MESHSAT-1671 (24 Oct 2026): the owner's switches for the node itself, write with response:
+     * pairs [switch][value], switch [CONTROL_LED] or [CONTROL_SCREEN], value 0 on, 1 off. The node
+     * keeps them across restarts and reports them in STATUS flags bits 5 and 6. Firmware before
+     * 24 Oct 2026 has no CONTROL characteristic.
+     */
+    const val CONTROL_UUID = "d6a8a903-6af1-4530-ab3d-49c39b636e04"
+    const val CONTROL_LED = 0x01
+    const val CONTROL_SCREEN = 0x02
+
+    fun encodeControl(switch: Int, off: Boolean): ByteArray = byteArrayOf(switch.toByte(), if (off) 1 else 0)
+
     /** The node keeps 1024 bytes from the phone; writes go out acknowledged, in chunks. */
     const val NODE_INBOUND_BYTES = 1024
 
@@ -65,6 +77,10 @@ object IridiumPipeContract {
         val bufferCongested: Boolean,
         /** Bit 4 (8 Oct 2026): the modem speaks JSPR, a RockBLOCK 9704; clear on a 9603 and on an older node. */
         val modemIsJspr: Boolean = false,
+        /** Bit 5 (MESHSAT-1671): the owner switched the node's status LED off. */
+        val ledOff: Boolean = false,
+        /** Bit 6 (MESHSAT-1671): the owner switched the node's screen off. */
+        val screenOff: Boolean = false,
     ) {
         companion object {
             fun of(b: Int) = StatusFlags(
@@ -73,6 +89,8 @@ object IridiumPipeContract {
                 modemAnswers = b and 0x04 != 0,
                 bufferCongested = b and 0x08 != 0,
                 modemIsJspr = b and 0x10 != 0,
+                ledOff = b and 0x20 != 0,
+                screenOff = b and 0x40 != 0,
             )
         }
     }
