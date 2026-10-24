@@ -279,4 +279,63 @@ class SatelliteChainTest {
             assertTrue("$mode, wrong key: unopened", SatelliteChain.inbound(legacy, mode) { otherKey } is SatelliteChain.Mt.Unopened)
         }
     }
+
+    // --- MESHSAT-1675: a plain text behind the version byte, as the Hub's routes sent one ---
+
+    private val hubText = "Test from the Hub, reply when you read this"
+    private fun versioned(text: String) = byteArrayOf(SatelliteChain.PROTOCOL_VERSION) + text.toByteArray(Charsets.UTF_8)
+    private val plainModes = listOf(null, SatelliteChain.MODE_UNDECLARED, SatelliteChain.MODE_PLAIN)
+    private val sealingModes = listOf(SatelliteChain.MODE_SEALED, SatelliteChain.MODE_LEGACY)
+
+    @Test
+    fun `on a setting that seals nothing a plain text behind the version byte reads as plain text`() = kotlinx.coroutines.runBlocking {
+        val texts = listOf(hubText, "Καλημέρα from Leiden 16:20", "two lines\nand a tab\there", "ok")
+        for (mode in plainModes) for (t in texts) for (k in listOf(key, otherKey, null)) {
+            assertEquals("$mode, key $k: $t", SatelliteChain.Mt.Text(t, sealed = false), SatelliteChain.inbound(versioned(t), mode) { k })
+        }
+    }
+
+    @Test
+    fun `on a setting that seals it stays unopened, as a Bridge's sealed link drops it`() = kotlinx.coroutines.runBlocking {
+        for (mode in sealingModes) {
+            assertTrue("$mode", SatelliteChain.inbound(versioned(hubText), mode) { key } is SatelliteChain.Mt.Unopened)
+        }
+    }
+
+    @Test
+    fun `a sealed message under a wrong key or none never reads as a plain text`() = kotlinx.coroutines.runBlocking {
+        val rnd = java.util.Random(1675)
+        repeat(300) { i ->
+            val n = 1 + rnd.nextInt(120)
+            val text = ByteArray(n) { (0x20 + rnd.nextInt(0x5f)).toByte() }
+            val h = SatelliteChain.seal(text, key)
+            val legacy = SatelliteChain.seal(text, key, chain = SatelliteChain.Chain.LEGACY)
+            for (mode in plainModes) for (k in listOf(otherKey, null)) {
+                assertTrue("H $i, $mode, key $k", SatelliteChain.inbound(h, mode) { k } is SatelliteChain.Mt.Unopened)
+                assertTrue("legacy $i, $mode, key $k", SatelliteChain.inbound(legacy, mode) { k } is SatelliteChain.Mt.Unopened)
+            }
+        }
+        // Noise of every sealed length: never a text.
+        repeat(20_000) { i ->
+            val body = ByteArray(30 + rnd.nextInt(91)).also { rnd.nextBytes(it) }
+            val mt = SatelliteChain.readMt(byteArrayOf(SatelliteChain.PROTOCOL_VERSION) + body, otherKey, readsPlain = true)
+            assertTrue("noise $i read as $mt", mt is SatelliteChain.Mt.Unopened)
+        }
+    }
+
+    @Test
+    fun `the Hub's compressed form, a legacy-shaped text and the version byte alone stay unopened`() {
+        // What the Hub's send API wrote before MESHSAT-1675, from its own compressor:
+        // version byte, then SMAZ2 on the Meshtastic table.
+        val hubSmaz2 = hexBytes("01" + "5487740883208165204875622c2083f279089120df7508ac0881")
+        val legacyShaped = versioned("QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVphYmNk")
+        for (wire in listOf(hubSmaz2, legacyShaped, byteArrayOf(SatelliteChain.PROTOCOL_VERSION))) {
+            val mt = SatelliteChain.readMt(wire, key, readsPlain = true)
+            assertTrue("${wire.size} bytes read as $mt", mt is SatelliteChain.Mt.Unopened)
+        }
+        // A text without the version byte reads as before on every setting.
+        assertEquals(SatelliteChain.Mt.Text(hubText, sealed = false), SatelliteChain.readMt(hubText.toByteArray(), key))
+    }
+
+    private fun hexBytes(h: String) = ByteArray(h.length / 2) { h.substring(2 * it, 2 * it + 2).toInt(16).toByte() }
 }

@@ -141,10 +141,16 @@ object SatelliteChain {
 
     /**
      * What the service makes of one IMT payload on setting [mode]: [readMt] with the chain the
-     * setting picks first (H when it picks none). The key is read only for a versioned payload.
+     * setting picks first (H when it picks none), and a plain text behind the version byte read
+     * only when the setting seals nothing. The key is read only for a versioned payload.
      */
     suspend fun inbound(payload: ByteArray, mode: String?, key: suspend () -> String?): Mt =
-        readMt(payload, if (payload.firstOrNull() == PROTOCOL_VERSION) key() else null, preferred = chainOf(mode) ?: Chain.H)
+        readMt(
+            payload,
+            if (payload.firstOrNull() == PROTOCOL_VERSION) key() else null,
+            preferred = chainOf(mode) ?: Chain.H,
+            readsPlain = chainOf(mode) == null,
+        )
 
     /** What an IMT message from the satellite is, once it is not a Reticulum packet. */
     sealed interface Mt {
@@ -159,14 +165,18 @@ object SatelliteChain {
      * Reads one IMT payload. One that starts with the version byte is MeshSat's: it is opened with
      * [preferred], the chain this phone is set to, and while the two ends switch chains with the
      * other one, each authenticated by its AES-GCM tag, so nothing that did not come from the key's
-     * holder ever reads as text. One that opens with neither is [Mt.Unopened]. Anything else is a
-     * plain text as before (a typed text never starts with byte 0x01).
+     * holder ever reads as text. One that opens with neither is [Mt.Unopened], unless [readsPlain]
+     * (a phone whose setting seals nothing) and it is a plain text behind the version byte
+     * ([versionedPlainText]), which reads as a plain text, never as sealed. A phone set to seal
+     * keeps it unopened, as a Bridge's sealed link drops what does not authenticate. Anything
+     * else is a plain text as before (a typed text never starts with byte 0x01).
      */
     fun readMt(
         payload: ByteArray,
         keyHex: String?,
         pipeline: TransformPipeline = TransformPipeline(),
         preferred: Chain = Chain.H,
+        readsPlain: Boolean = false,
     ): Mt {
         if (payload.isEmpty() || payload[0] != PROTOCOL_VERSION) {
             return Mt.Text(payload.toString(Charsets.UTF_8), sealed = false)
@@ -179,9 +189,31 @@ object SatelliteChain {
         return try {
             Mt.Text(open(payload, keyHex, pipeline, preferred.other).toString(Charsets.UTF_8), sealed = true, chain = preferred.other)
         } catch (e: TransformException) {
-            Mt.Unopened(first.message ?: "does not open")
+            (if (readsPlain) versionedPlainText(payload) else null)?.let { Mt.Text(it, sealed = false) }
+                ?: Mt.Unopened(first.message ?: "does not open")
         }
     }
+
+    /**
+     * The text of a plain message behind the version byte: the version byte, then the text's UTF-8
+     * bytes, as the Hub's routes sent a text to a 9704 until MESHSAT-1675. Read only once neither
+     * sealed chain opens it, and only when the rest is printable UTF-8 not shaped like a legacy
+     * wire (base64 of at least a nonce, one byte and a tag), so a sealed message under a wrong key
+     * never reads as text: the 30 random bytes of the shortest sealed wire pass as printable UTF-8
+     * about once in 10^10, 40 once in 10^13. The Hub's compressed form (version byte, SMAZ2) is not
+     * read: noise passes for it once in 60 at that length. Null otherwise. [MESHSAT-1675]
+     */
+    fun versionedPlainText(payload: ByteArray): String? {
+        if (payload.size < 2 || payload[0] != PROTOCOL_VERSION) return null
+        val text = utf8(payload.copyOfRange(1, payload.size)) ?: return null
+        if (text.any { it.isISOControl() && it != '\n' && it != '\r' && it != '\t' }) return null
+        if (text.length >= LEGACY_MIN_WIRE_CHARS && text.length % 4 == 0 && BASE64_TEXT.matches(text)) return null
+        return text
+    }
+
+    /** A legacy wire's shortest base64: 12-byte nonce, one byte, 16-byte tag. */
+    private const val LEGACY_MIN_WIRE_CHARS = 40
+    private val BASE64_TEXT = Regex("^[A-Za-z0-9+/_-]+={0,2}$")
 
     /**
      * Whether a delivery goes through the chain: a text. An SOS or a burst is a frame the Hub reads
@@ -191,14 +223,17 @@ object SatelliteChain {
     fun sealsDelivery(msgRef: String, payload: ByteArray): Boolean =
         !msgRef.startsWith("sos:") && !msgRef.startsWith("burst:") && isUtf8(payload)
 
-    private fun isUtf8(b: ByteArray): Boolean = try {
+    private fun isUtf8(b: ByteArray): Boolean = utf8(b) != null
+
+    /** [b] as UTF-8, or null when it is not UTF-8. */
+    private fun utf8(b: ByteArray): String? = try {
         Charsets.UTF_8.newDecoder()
             .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
             .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
             .decode(java.nio.ByteBuffer.wrap(b))
-        true
+            .toString()
     } catch (e: java.nio.charset.CharacterCodingException) {
-        false
+        null
     }
 
     /**

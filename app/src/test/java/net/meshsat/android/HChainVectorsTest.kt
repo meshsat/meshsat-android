@@ -247,4 +247,25 @@ class HChainVectorsTest {
             }
         }
     }
+
+    /**
+     * On a phone whose setting seals nothing, a plain text behind the version byte reads as a
+     * plain text (MESHSAT-1675). Of the Bridge's refused wires only "not_base64" is one, and it
+     * reads as the words it carries, never as sealed; every other stays unopened.
+     */
+    @Test
+    fun `on a setting that seals nothing only a plain text behind the version byte reads, never sealed`() {
+        for (section in listOf("envelope_reject", "legacy_reject")) {
+            for (x in rows(section)) {
+                val name = x.getString("name")
+                val bytes = hex(x.getString("bytes_hex"))
+                val mt = SatelliteChain.readMt(bytes, x.getString("key_hex"), readsPlain = true)
+                if (section == "legacy_reject" && name == "not_base64") {
+                    assertEquals("$name", SatelliteChain.Mt.Text("not base64 at all!", sealed = false), mt)
+                } else {
+                    assertTrue("$section $name read as $mt", mt is SatelliteChain.Mt.Unopened)
+                }
+            }
+        }
+    }
 }
