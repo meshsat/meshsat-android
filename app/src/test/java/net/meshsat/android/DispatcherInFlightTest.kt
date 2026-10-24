@@ -17,6 +17,7 @@ import net.meshsat.android.engine.Dispatcher
 import net.meshsat.android.engine.InterfaceState
 import net.meshsat.android.rules.AccessEvaluator
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.lang.reflect.ParameterizedType
 import java.lang.reflect.Proxy
@@ -170,6 +171,44 @@ class DispatcherInFlightTest {
             delay(300)
             assertEquals(listOf("old"), attempts.toList())
             assertEquals(listOf("defer:1"), calls.toList())
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun `a 9704 send that saw no satellite is retried within a minute and never used up`() = runBlocking {
+        // retries already past maxRetries: a 9603 failure would be dropped here (MESHSAT-1670).
+        val row = MessageDeliveryEntity(id = 11, msgRef = "msg:11", channel = "iridium_0", textPreview = "x", maxRetries = 3, retries = 5)
+        val retried = Collections.synchronizedList(mutableListOf<Long>())
+        val dropped = Collections.synchronizedList(mutableListOf<Long>())
+        var served = false
+        val dao = fake<MessageDeliveryDao> { name, args ->
+            when (name) {
+                "getPending" -> if (served) emptyList<MessageDeliveryEntity>() else { served = true; listOf(row) }
+                "getById" -> row
+                "claimForSend" -> 1
+                "scheduleRetry" -> { retried.add(args[2] as Long); 1 }
+                "finishSend" -> { dropped.add(args[0] as Long); 1 }
+                else -> NONE
+            }
+        }
+        val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+        val dispatcher = Dispatcher(
+            deliveryDao = dao,
+            accessEvaluator = AccessEvaluator(fake<AccessRuleDao>(), fake<ObjectGroupDao>(), scope),
+            failoverResolver = null,
+            registry = ChannelRegistry(),
+            deliveryCallback = { _, _, _, _, _, _ -> "9704 MO failed: cancelled" },
+            scope = scope,
+        )
+        try {
+            val before = System.currentTimeMillis()
+            dispatcher.startWorker("iridium_0")
+            withTimeout(10_000) { while (retried.isEmpty() && dropped.isEmpty()) delay(10) }
+            assertTrue("a 9704 miss must not be dropped by the retry limit", dropped.isEmpty())
+            val waitMs = retried.first() - before
+            assertTrue("retry in about a minute, was $waitMs ms", waitMs in 55_000L..65_000L)
         } finally {
             scope.cancel()
         }

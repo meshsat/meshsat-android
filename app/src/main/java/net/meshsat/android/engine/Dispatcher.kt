@@ -552,7 +552,10 @@ class Dispatcher(
         }
 
         val newRetries = del.retries + 1
-        if (del.maxRetries > 0 && newRetries >= del.maxRetries) {
+        // A 9704 attempt that found no satellite is not used up against the retry limit: the
+        // delivery's lifetime bounds it, and it comes back within a minute (see imtRetryAt).
+        val imtMiss = isImtMiss(error)
+        if (!imtMiss && del.maxRetries > 0 && newRetries >= del.maxRetries) {
             if (deliveryDao.finishSend(del.id, "dead", error) == 0) return confirmedMeanwhile(channelId, del, error)
             audit("drop", channelId, del, error.take(80))
             Log.w(TAG, "Delivery ${del.id} exhausted retries ($newRetries): $error")
@@ -560,7 +563,11 @@ class Dispatcher(
         }
 
         // Schedule retry with backoff
-        val nextRetry = calculateNextRetry(channelId, newRetries, del.priority, moStatusOf(error))
+        val nextRetry = if (imtMiss) {
+            imtRetryAt(System.currentTimeMillis(), newRetries)
+        } else {
+            calculateNextRetry(channelId, newRetries, del.priority, moStatusOf(error))
+        }
         if (deliveryDao.scheduleRetry(del.id, newRetries, nextRetry, error) == 0) return confirmedMeanwhile(channelId, del, error)
         Log.w(TAG, "Delivery ${del.id} retry $newRetries scheduled for $channelId: $error")
     }
@@ -714,6 +721,28 @@ class Dispatcher(
         }
 
         /** The +SBDIX MO status in a satellite delivery's error ("Not sent: status 32, ..."), or null. */
+        /**
+         * A send through a RockBLOCK 9704 (IMT) that did not go out in its attempt, as
+         * GatewayService.sendVia9704 words it: "9704 MO failed: ...", "9704 not ready", "9704 not
+         * available". A sealing or chain error never starts that way and keeps its own handling.
+         */
+        fun isImtMiss(error: String): Boolean = error.startsWith("9704 ")
+
+        /**
+         * When to try a 9704 send again: 15 s, 30 s, then every 60 s. The 9704 is not the 9603:
+         * there is no 3-minute registration rule, the modem itself waits for a satellite while it
+         * holds the message (150 s per attempt, Iridium9704Spp.MO_BUDGET_MS), and Ground Control's
+         * guidance is to retry quickly. Under the 9603's schedule (3 minutes doubling to 30) a
+         * message waited up to half an hour behind passes it could have taken (MSC-2 unit 0001,
+         * 24 Oct 2026, MESHSAT-1670). A send that works, or a bar from the modem, still drains
+         * the queue at once.
+         */
+        fun imtRetryAt(nowMs: Long, retries: Int): Long = nowMs + when {
+            retries <= 1 -> 15_000L
+            retries == 2 -> 30_000L
+            else -> 60_000L
+        }
+
         fun moStatusOf(error: String): Int? =
             Regex("\\bstatus (\\d{1,3})\\b").find(error)?.groupValues?.get(1)?.toIntOrNull()
 

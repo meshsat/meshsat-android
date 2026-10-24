@@ -198,4 +198,15 @@ class Iridium9704Test {
         assertEquals(sbd.retryConfig.maxRetries, imt.retryConfig.maxRetries)
         assertEquals(sbd.retryConfig.initialWait, imt.retryConfig.initialWait)
     }
+
+    @Test
+    fun signal_anUnansweredReadKeepsTheLastReading() {
+        // An unanswered constellationState read set 0 bars, so the app showed 0/5 while the modem
+        // sent messages (MESHSAT-1670).
+        assertEquals(3, Iridium9704Spp.signalAfterPoll(3, null))
+        assertEquals(0, Iridium9704Spp.signalAfterPoll(3, 0))
+        assertEquals(4, Iridium9704Spp.signalAfterPoll(0, 4))
+        assertEquals(5, Iridium9704Spp.signalAfterPoll(2, 9))
+        assertEquals(0, Iridium9704Spp.signalAfterPoll(2, -1))
+    }
 }

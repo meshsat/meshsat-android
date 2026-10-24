@@ -2,7 +2,9 @@ package net.meshsat.android
 
 import net.meshsat.android.engine.Dispatcher
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
@@ -39,6 +41,23 @@ class SatelliteRetryTest {
         assertEquals(now + 12 * 60_000, Dispatcher.satelliteRetryAt(now, 2, null, initial, max))
         assertEquals(now + 30 * 60_000, Dispatcher.satelliteRetryAt(now, 4, null, initial, max))
         assertEquals(now + 30 * 60_000, Dispatcher.satelliteRetryAt(now, 40, 13, initial, max))
+    }
+
+    @Test
+    fun `a 9704 send that saw no satellite comes back within a minute, not on the 9603 schedule`() {
+        assertEquals(now + 15_000, Dispatcher.imtRetryAt(now, 1))
+        assertEquals(now + 30_000, Dispatcher.imtRetryAt(now, 2))
+        for (retries in listOf(3, 4, 10, 40)) assertEquals(now + 60_000, Dispatcher.imtRetryAt(now, retries))
+    }
+
+    @Test
+    fun `only the 9704's own send failures count as a 9704 miss`() {
+        assertTrue(Dispatcher.isImtMiss("9704 MO failed: cancelled"))
+        assertTrue(Dispatcher.isImtMiss("9704 MO failed: timeout"))
+        assertTrue(Dispatcher.isImtMiss("9704 not ready"))
+        assertFalse(Dispatcher.isImtMiss("${Dispatcher.NEVER} Not sent: no key"))
+        assertFalse(Dispatcher.isImtMiss("${Dispatcher.UNCONFIRMED} the 9704 did not answer the cancel of a message it held"))
+        assertFalse(Dispatcher.isImtMiss("Not sent: status 32, no network service, MOMSN 228"))
     }
 
     @Test

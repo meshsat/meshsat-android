@@ -50,7 +50,9 @@ class Iridium9704Spp(private val context: Context) {
         private const val TAG = "Iridium9704"
 
         private const val JSPR_TIMEOUT_MS = 10_000L
-        private const val SIGNAL_TIMEOUT_MS = 2_000L
+        // Through the node's Bluetooth pipe a constellationState answer can take longer than 2 s,
+        // and a missed one used to read as 0 bars (MESHSAT-1670).
+        private const val SIGNAL_TIMEOUT_MS = 6_000L
         // An accepted message stays in the modem until it goes or is cancelled, so a send that
         // walks away on a timeout leaves it there and the retry queues a second copy (the Bridge's
         // 20 message soak of 21 Sep 2026: 7 duplicates, MESHSAT-1282). As the Bridge does
@@ -63,6 +65,14 @@ class Iridium9704Spp(private val context: Context) {
 
         /** A send's answer when the modem never settled its cancel: the message may still go out. */
         const val MO_CANCEL_UNANSWERED = "cancel_unanswered"
+
+        /**
+         * The bars after a signal read: the modem's answer, or the last reading when it did not
+         * answer in time. An unanswered read used to set 0, so the app showed 0/5 while the modem
+         * was sending (MSC-2 unit 0001, 24 Oct 2026, MESHSAT-1670); the Bridge keeps its last
+         * reading the same way (internal/transport/direct_imt.go GetSignal and GetSignalFast).
+         */
+        fun signalAfterPoll(previous: Int, answeredBars: Int?): Int = answeredBars?.coerceIn(0, 5) ?: previous
 
         /**
          * True when a messageOriginateStatus naming [statusId] settles the send in flight as
@@ -849,12 +859,14 @@ class Iridium9704Spp(private val context: Context) {
         if (!isWireReady()) return 0
         return try {
             val resp = sendJspr("GET", "constellationState", JSONObject(), SIGNAL_TIMEOUT_MS)
-            val bars = resp?.optInt("signal_bars", 0) ?: 0
+            val answered = resp?.takeIf { it.has("signal_bars") }?.optInt("signal_bars", 0)
+            if (answered == null) Log.d(TAG, "Signal: no answer in ${SIGNAL_TIMEOUT_MS / 1000} s, keeping ${_signal.value}/5")
+            val bars = signalAfterPoll(_signal.value, answered)
             _signal.value = bars
             bars
         } catch (e: Exception) {
             _error.emit("9704 signal poll failed: ${e.message}")
-            0
+            _signal.value
         }
     }
 
