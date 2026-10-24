@@ -20,6 +20,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * The phone's side of Meshtastic's ESP32 OTA loader protocol over Bluetooth (MESHSAT-1672),
@@ -104,7 +105,7 @@ class NodeOtaTransport(private val context: Context, private val adapter: Blueto
     }
 
     /**
-     * Update the node at [address] (the loader keeps the node's address) with [image]. [onStep]
+     * Update the node at [address] with [image]; its loader is found by scan ([connectToLoader]). [onStep]
      * reports progress. The node must already have rebooted into its loader with this image's hash.
      */
     suspend fun update(address: String, image: NodeFirmwareImage, onStep: (Step) -> Unit): Outcome {
@@ -193,16 +194,22 @@ class NodeOtaTransport(private val context: Context, private val adapter: Blueto
         }
     }
 
-    /** The loader keeps the node's address: connect directly, and scan for its service if that fails. */
+    /**
+     * Find the loader by its service first. On MSC-2 unit 0001 (24 Oct 2026) the loader did not
+     * answer on the node's own address: four direct connects cost about 55 s before the scan
+     * found it. A direct connect to [address] is the fallback when the scan finds nothing, then
+     * one more scan, as the loader may still be starting.
+     */
     private suspend fun connectToLoader(address: String): BluetoothGatt? {
-        for (attempt in 1..CONNECT_ATTEMPTS) {
-            val device = adapter.getRemoteDevice(address)
-            tryConnect(device)?.let { return it }
-            Log.w(TAG, "OTA: connect attempt $attempt to $address failed")
-            delay(RETRY_PAUSE_MS)
+        scanForLoader(address, SCAN_TIMEOUT_MS)?.let { found ->
+            tryConnect(found)?.let { return it }
+            Log.w(TAG, "OTA: the loader found by scan (${found.address}) did not take the connection")
         }
-        val found = scanForLoader() ?: return null
-        return tryConnect(found)
+        Log.w(TAG, "OTA: no loader in the scan; trying the node's address $address")
+        tryConnect(adapter.getRemoteDevice(address))?.let { return it }
+        delay(RETRY_PAUSE_MS)
+        val again = scanForLoader(address, SECOND_SCAN_TIMEOUT_MS) ?: return null
+        return tryConnect(again)
     }
 
     private suspend fun tryConnect(device: BluetoothDevice): BluetoothGatt? {
@@ -228,19 +235,38 @@ class NodeOtaTransport(private val context: Context, private val adapter: Blueto
         return null
     }
 
-    private suspend fun scanForLoader(): BluetoothDevice? {
+    /**
+     * The first device advertising the loader's service within [timeoutMs]. A loader on [address]
+     * or the address after it (where the board's loader may advertise) is taken at once; another
+     * loader only after [OTHER_LOADER_WAIT_MS] with no better one, as two nodes updating side by
+     * side are rare.
+     */
+    private suspend fun scanForLoader(address: String, timeoutMs: Long): BluetoothDevice? {
         val scanner = adapter.bluetoothLeScanner ?: return null
         val found = CompletableDeferred<BluetoothDevice>()
+        val expected = setOf(address.uppercase(), nextAddress(address))
+        val other = AtomicReference<BluetoothDevice?>(null)
         val cb = object : ScanCallback() {
             override fun onScanResult(callbackType: Int, result: ScanResult) {
-                found.complete(result.device)
+                if (result.device.address.uppercase() in expected) found.complete(result.device) else other.compareAndSet(null, result.device)
             }
         }
         val filter = ScanFilter.Builder().setServiceUuid(ParcelUuid(UUID.fromString(SERVICE_UUID))).build()
         val settings = ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build()
         scanner.startScan(listOf(filter), settings, cb)
         return try {
-            withTimeoutOrNull(SCAN_TIMEOUT_MS) { found.await() }
+            withTimeoutOrNull(timeoutMs) {
+                var otherSince = 0L
+                while (!found.isCompleted) {
+                    val o = other.get()
+                    if (o != null) {
+                        if (otherSince == 0L) otherSince = System.currentTimeMillis()
+                        if (System.currentTimeMillis() - otherSince >= OTHER_LOADER_WAIT_MS) return@withTimeoutOrNull o
+                    }
+                    delay(100)
+                }
+                found.await()
+            }?.also { Log.i(TAG, "OTA: the loader advertises as ${it.address} (node $address)") }
         } finally {
             scanner.stopScan(cb)
         }
@@ -307,7 +333,6 @@ class NodeOtaTransport(private val context: Context, private val adapter: Blueto
         const val REQUEST_MTU = 517
         const val MAX_CHUNK = 512
 
-        private const val CONNECT_ATTEMPTS = 4
         private const val CONNECT_TIMEOUT_MS = 15_000L
         private const val DISCOVER_TIMEOUT_MS = 10_000L
         private const val MTU_TIMEOUT_MS = 5_000L
@@ -315,7 +340,9 @@ class NodeOtaTransport(private val context: Context, private val adapter: Blueto
         private const val ERASE_TIMEOUT_MS = 60_000L
         private const val ACK_TIMEOUT_MS = 10_000L
         private const val VERIFY_TIMEOUT_MS = 30_000L
-        private const val SCAN_TIMEOUT_MS = 30_000L
+        private const val SCAN_TIMEOUT_MS = 45_000L
+        private const val SECOND_SCAN_TIMEOUT_MS = 30_000L
+        private const val OTHER_LOADER_WAIT_MS = 3_000L
         private const val RETRY_PAUSE_MS = 3_000L
         private const val SETTLE_MS = 600L
         private const val WRITE_BUSY_RETRIES = 50
@@ -323,6 +350,15 @@ class NodeOtaTransport(private val context: Context, private val adapter: Blueto
         private const val NO_RESPONSE_REPORT_MS = 300L
 
         fun otaCommand(size: Int, sha256Hex: String): String = "OTA $size ${sha256Hex.lowercase()}\n"
+
+        /** The Bluetooth address one above [address] ("44:1B:F6:F9:41:7D" -> "44:1B:F6:F9:41:7E"), or "" if it is not one. */
+        fun nextAddress(address: String): String {
+            val parts = address.split(":")
+            if (parts.size != 6) return ""
+            val value = parts.joinToString("").toLongOrNull(16) ?: return ""
+            val next = (value + 1) and 0xFFFFFFFFFFFFL
+            return (0 until 6).joinToString(":") { i -> "%02X".format((next shr (8 * (5 - i))) and 0xFF) }
+        }
 
         /** One GATT write per chunk, at most MTU-3 bytes and 512. */
         fun chunkSize(mtu: Int): Int = (mtu - 3).coerceIn(20, MAX_CHUNK)

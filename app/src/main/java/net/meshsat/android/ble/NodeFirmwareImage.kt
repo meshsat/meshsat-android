@@ -56,7 +56,7 @@ class NodeFirmwareImage private constructor(
             if (nodeEnv.isBlank()) {
                 return Check.Refused("The node did not say which firmware build it runs; reconnect to the node and try again.")
             }
-            if (!contains(bytes, nodeEnv.toByteArray(Charsets.US_ASCII))) {
+            if (!containsName(bytes, nodeEnv.toByteArray(Charsets.US_ASCII))) {
                 return Check.Refused("This firmware was not built for this node ($nodeEnv). Pick the file named firmware-$nodeEnv-….bin.")
             }
             val sha = MessageDigest.getInstance("SHA-256").digest(bytes)
@@ -79,6 +79,22 @@ class NodeFirmwareImage private constructor(
             var end = at
             while (end < at + max && b[end].toInt() != 0) end++
             return String(b, at, end - at, Charsets.US_ASCII).trim()
+        }
+
+        /**
+         * [name] as a whole name: not followed by another name character, so the 9603 build's
+         * env never matches inside the 9704 build's ("meshsat-tbeam-s3-rockblock" is the start
+         * of "meshsat-tbeam-s3-rockblock9704").
+         */
+        internal fun containsName(haystack: ByteArray, name: ByteArray): Boolean {
+            if (name.isEmpty() || name.size > haystack.size) return false
+            outer@ for (i in 0..haystack.size - name.size) {
+                for (j in name.indices) if (haystack[i + j] != name[j]) continue@outer
+                val next = if (i + name.size < haystack.size) haystack[i + name.size].toInt().toChar() else '\u0000'
+                if (next.isLetterOrDigit() || next == '-' || next == '_') continue@outer
+                return true
+            }
+            return false
         }
 
         internal fun contains(haystack: ByteArray, needle: ByteArray): Boolean {

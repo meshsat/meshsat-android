@@ -832,7 +832,60 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
                 val updateState by net.meshsat.android.ble.NodeFirmwareUpdater.state.collectAsState()
                 var picked by remember { mutableStateOf<net.meshsat.android.ble.NodeFirmwareImage?>(null) }
                 var refusal by remember { mutableStateOf<String?>(null) }
+                var release by remember { mutableStateOf<ReleaseCheck>(ReleaseCheck.None) }
                 val nodeEnv = nodeInfo?.pioEnv.orEmpty()
+                val runningVersion = nodeMeta?.firmwareVersion.orEmpty()
+                // The newest release, asked only on this tap (MESHSAT-1672); the app is offline-first.
+                val checkRelease: () -> Unit = {
+                    picked = null
+                    refusal = null
+                    release = ReleaseCheck.Checking
+                    scope.launch {
+                        val fetcher = net.meshsat.android.ble.NodeFirmwareRelease.Fetcher()
+                        val parsed = withContext(Dispatchers.IO) { fetcher.manifest() }
+                        release = when (parsed) {
+                            is net.meshsat.android.ble.NodeFirmwareRelease.Parsed.Refused -> ReleaseCheck.Refused(parsed.reason)
+                            is net.meshsat.android.ble.NodeFirmwareRelease.Parsed.Ok ->
+                                when (val pick = net.meshsat.android.ble.NodeFirmwareRelease.pick(parsed.manifest, nodeEnv)) {
+                                    is net.meshsat.android.ble.NodeFirmwareRelease.Pick.Refused -> ReleaseCheck.Refused(pick.reason)
+                                    is net.meshsat.android.ble.NodeFirmwareRelease.Pick.Found ->
+                                        if (net.meshsat.android.ble.NodeFirmwareRelease.isCurrent(pick.manifest, runningVersion)) {
+                                            ReleaseCheck.UpToDate(pick.manifest.version)
+                                        } else {
+                                            ReleaseCheck.Available(pick.manifest, pick.image)
+                                        }
+                                }
+                        }
+                    }
+                }
+                val downloadRelease: (net.meshsat.android.ble.NodeFirmwareRelease.Manifest, net.meshsat.android.ble.NodeFirmwareRelease.Image) -> Unit = { manifest, image ->
+                    release = ReleaseCheck.Downloading(0f)
+                    scope.launch {
+                        val result = withContext(Dispatchers.IO) {
+                            try {
+                                val bytes = net.meshsat.android.ble.NodeFirmwareRelease.Fetcher().download(manifest, image) { f ->
+                                    release = ReleaseCheck.Downloading(f.coerceIn(0f, 1f))
+                                }
+                                net.meshsat.android.ble.NodeFirmwareRelease.verify(bytes, image)?.let { Result.failure(Exception(it)) }
+                                    ?: Result.success(bytes)
+                            } catch (e: java.io.IOException) {
+                                Result.failure(Exception("The download failed: ${e.message ?: "no answer"}."))
+                            }
+                        }
+                        val bytes = result.getOrNull()
+                        if (bytes == null) {
+                            release = ReleaseCheck.Refused(result.exceptionOrNull()?.message ?: "The download failed.")
+                            return@launch
+                        }
+                        when (val c = net.meshsat.android.ble.NodeFirmwareImage.check(bytes, nodeEnv)) {
+                            is net.meshsat.android.ble.NodeFirmwareImage.Check.Refused -> release = ReleaseCheck.Refused(c.reason)
+                            is net.meshsat.android.ble.NodeFirmwareImage.Check.Ok -> {
+                                release = ReleaseCheck.None
+                                picked = c.image
+                            }
+                        }
+                    }
+                }
                 val pickFirmware = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
                     if (uri == null) return@rememberLauncherForActivityResult
                     scope.launch {
@@ -859,8 +912,40 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
                         net.meshsat.android.ble.NodeFirmwareUpdater.State.Idle -> {
                             val image = picked
                             if (image == null) {
-                                OutlinedButton(onClick = { pickFirmware.launch(arrayOf("*/*")) }, modifier = Modifier.fillMaxWidth()) {
-                                    Text("Update from a file...", style = MaterialTheme.typography.bodySmall)
+                                when (val r = release) {
+                                    ReleaseCheck.Checking -> {
+                                        Text("Asking for the newest firmware...", style = MaterialTheme.typography.bodySmall, color = OffWhite)
+                                        androidx.compose.material3.LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                                    }
+                                    is ReleaseCheck.Downloading -> {
+                                        Text("Downloading the firmware: ${(r.fraction * 100).toInt()} %", style = MaterialTheme.typography.bodySmall, color = OffWhite)
+                                        androidx.compose.material3.LinearProgressIndicator(progress = { r.fraction }, modifier = Modifier.fillMaxWidth())
+                                    }
+                                    is ReleaseCheck.Available -> {
+                                        InfoRow("Available", r.manifest.version)
+                                        Button(
+                                            onClick = { downloadRelease(r.manifest, r.image) },
+                                            colors = ButtonDefaults.buttonColors(containerColor = MeshSatTeal),
+                                            modifier = Modifier.fillMaxWidth(),
+                                        ) {
+                                            Text("Download ${r.manifest.version} (${r.image.size / 1024} KB)", style = MaterialTheme.typography.bodySmall)
+                                        }
+                                    }
+                                    is ReleaseCheck.UpToDate -> {
+                                        Text("The node runs the newest firmware (${r.version}).", style = MaterialTheme.typography.bodySmall, color = MeshSatTeal)
+                                    }
+                                    is ReleaseCheck.Refused -> {
+                                        Text(r.reason, style = MaterialTheme.typography.bodySmall, color = MeshSatAmber)
+                                    }
+                                    ReleaseCheck.None -> {}
+                                }
+                                if (release != ReleaseCheck.Checking && release !is ReleaseCheck.Downloading) {
+                                    OutlinedButton(onClick = checkRelease, modifier = Modifier.fillMaxWidth()) {
+                                        Text("Check for update", style = MaterialTheme.typography.bodySmall)
+                                    }
+                                    OutlinedButton(onClick = { pickFirmware.launch(arrayOf("*/*")) }, modifier = Modifier.fillMaxWidth()) {
+                                        Text("Update from a file...", style = MaterialTheme.typography.bodySmall)
+                                    }
                                 }
                             } else {
                                 InfoRow("New firmware", image.version.ifBlank { "unnamed" })
@@ -882,7 +967,8 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
                             }
                             refusal?.let { Text(text = it, style = MaterialTheme.typography.bodySmall, color = MeshSatAmber) }
                             Text(
-                                text = "Pick the file firmware-$nodeEnv-<version>.bin (not the .factory.bin). The node restarts twice; keep the phone close. A few minutes.",
+                                text = "Check for update asks GitHub for the newest MeshSat release for this node. A file: pick firmware-$nodeEnv-<version>.bin " +
+                                    "(not the .factory.bin). The node restarts twice; keep the phone close. A few minutes.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MeshSatTextMuted,
                             )
@@ -3085,6 +3171,19 @@ private fun SignalReadingRow(reading: net.meshsat.android.bt.SignalReading?, now
         net.meshsat.android.bt.SignalFreshness.describe(reading, nowMs),
         valueColor = if (kind == net.meshsat.android.bt.SignalFreshness.Kind.Fresh) androidx.compose.ui.graphics.Color.Unspecified else MeshSatTextMuted,
     )
+}
+
+/** Where the Node firmware card's "Check for update" stands (MESHSAT-1672). */
+private sealed class ReleaseCheck {
+    object None : ReleaseCheck()
+    object Checking : ReleaseCheck()
+    data class Available(
+        val manifest: net.meshsat.android.ble.NodeFirmwareRelease.Manifest,
+        val image: net.meshsat.android.ble.NodeFirmwareRelease.Image,
+    ) : ReleaseCheck()
+    data class UpToDate(val version: String) : ReleaseCheck()
+    data class Downloading(val fraction: Float) : ReleaseCheck()
+    data class Refused(val reason: String) : ReleaseCheck()
 }
 
 @Composable

@@ -29,7 +29,8 @@ import kotlinx.coroutines.withTimeoutOrNull
 object NodeFirmwareUpdater {
     private const val TAG = "NodeFirmwareUpdater"
     private const val HANDOVER_TIMEOUT_MS = 8_000L
-    private const val RESTART_INTO_LOADER_MS = 6_000L
+    // The loader is found by scanning for its service, which simply waits while the node restarts.
+    private const val RESTART_INTO_LOADER_MS = 2_000L
     private const val RESTART_INTO_FIRMWARE_MS = 8_000L
 
     sealed class State {
