@@ -1,0 +1,1 @@
+A text the Hub sent with the protocol version byte in front now opens as a plain message on a phone whose satellite setting seals nothing, instead of showing that it cannot be opened.
