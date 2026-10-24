@@ -2,6 +2,7 @@ package net.meshsat.android
 
 import kotlinx.coroutines.runBlocking
 import net.meshsat.android.ble.NodeFirmwareImage
+import net.meshsat.android.ble.NodeFirmwareKnown
 import net.meshsat.android.ble.NodeFirmwareUpdater
 import net.meshsat.android.ble.NodeOtaTransport
 import net.meshsat.android.ble.NodeOtaTransport.Outcome
@@ -136,16 +137,18 @@ class NodeOtaInterruptionTest {
     }
 
     @Test
-    fun `after the handover the image is kept and every failure offers a retry, saying what the node is left with`() {
+    fun `after the handover every failure offers a retry, and the words follow what the session knows`() {
         for (stage in Stage.values()) {
-            val st = NodeFirmwareUpdater.failedInUpdater(Outcome.Failed("x.", stage))
+            val st = NodeFirmwareUpdater.failedInUpdater(Outcome.Failed("x.", stage), NodeFirmwareKnown.of(stage))
             assertTrue("$stage offers a retry", st.canRetry)
             assertTrue("$stage leaves the node in its updater", st.inUpdater)
         }
-        assertTrue(NodeFirmwareUpdater.failedInUpdater(Outcome.Failed("x.", Stage.EraseUncertain)).reason.contains("may have erased"))
-        assertTrue(NodeFirmwareUpdater.failedInUpdater(Outcome.Failed("x.", Stage.Erased)).reason.contains("erased its firmware"))
-        assertTrue(NodeFirmwareUpdater.failedInUpdater(Outcome.Failed("x.", Stage.NotCommanded)).reason.contains("still on it"))
-        assertTrue(NodeFirmwareUpdater.failedInUpdater(Outcome.Failed("x.", Stage.Refused)).reason.contains("still on it"))
+        assertTrue(NodeFirmwareUpdater.failedInUpdater(Outcome.Failed("x.", Stage.EraseUncertain), NodeFirmwareKnown.MayBeErased).reason.contains("may have erased"))
+        assertTrue(NodeFirmwareUpdater.failedInUpdater(Outcome.Failed("x.", Stage.Erased), NodeFirmwareKnown.Erased).reason.contains("erased its firmware"))
+        assertTrue(NodeFirmwareUpdater.failedInUpdater(Outcome.Failed("x.", Stage.NotCommanded), NodeFirmwareKnown.Intact).reason.contains("still on it"))
+        assertTrue(NodeFirmwareUpdater.failedInUpdater(Outcome.Failed("x.", Stage.Refused), NodeFirmwareKnown.Intact).reason.contains("still on it"))
+        // This attempt failed before its command, but the session knows an earlier one erased.
+        assertFalse(NodeFirmwareUpdater.failedInUpdater(Outcome.Failed("x.", Stage.NotCommanded), NodeFirmwareKnown.Erased).reason.contains("still on it"))
     }
 
     @Test
