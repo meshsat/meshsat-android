@@ -825,11 +825,17 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
                     }
                 }
             }
-            // The node's firmware, updated from a file over Bluetooth (MESHSAT-1672).
-            if (pipe != null) {
+            // The node's firmware, updated from a file over Bluetooth (MESHSAT-1672). Shown also
+            // while no node is connected but one is saved, or an update is under way or kept: a node
+            // left in its updater runs no Meshtastic and must still be reachable here (MESHSAT-1684).
+            val updateState by net.meshsat.android.ble.NodeFirmwareUpdater.state.collectAsState()
+            val savedNodeAddress by settings.meshtasticBleAddress.collectAsState(initial = "")
+            val nodeConnected = GatewayService.meshtasticBle?.state.collectOrNull()?.value == net.meshsat.android.ble.MeshtasticBle.State.Connected
+            if (pipe != null || updateState != net.meshsat.android.ble.NodeFirmwareUpdater.State.Idle ||
+                net.meshsat.android.ble.NodeFirmwareUpdater.hasPending || (!nodeConnected && savedNodeAddress.isNotBlank())
+            ) {
                 val nodeInfo = GatewayService.meshtasticBle?.myInfo.collectOrNull()?.value
                 val nodeMeta = GatewayService.meshtasticBle?.deviceMetadata.collectOrNull()?.value
-                val updateState by net.meshsat.android.ble.NodeFirmwareUpdater.state.collectAsState()
                 var picked by remember { mutableStateOf<net.meshsat.android.ble.NodeFirmwareImage?>(null) }
                 var refusal by remember { mutableStateOf<String?>(null) }
                 var release by remember { mutableStateOf<ReleaseCheck>(ReleaseCheck.None) }
@@ -899,7 +905,16 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
                         }
                         picked = null
                         refusal = null
-                        when (val c = if (bytes == null) null else net.meshsat.android.ble.NodeFirmwareImage.check(bytes, nodeEnv)) {
+                        // With no node connected the file goes to a waiting updater, which takes only the
+                        // image whose SHA-256 the node was handed: the loader is the build check then.
+                        val check = if (bytes == null) {
+                            null
+                        } else if (nodeConnected || nodeEnv.isNotBlank()) {
+                            net.meshsat.android.ble.NodeFirmwareImage.check(bytes, nodeEnv)
+                        } else {
+                            net.meshsat.android.ble.NodeFirmwareImage.checkForWaitingUpdater(bytes)
+                        }
+                        when (val c = check) {
                             null -> refusal = "The file could not be read."
                             is net.meshsat.android.ble.NodeFirmwareImage.Check.Refused -> refusal = c.reason
                             is net.meshsat.android.ble.NodeFirmwareImage.Check.Ok -> picked = c.image
@@ -951,16 +966,38 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
                             } else {
                                 InfoRow("New firmware", image.version.ifBlank { "unnamed" })
                                 InfoRow("Size", "${image.size / 1024} KB, SHA-256 ${image.sha256Hex.take(8)}")
-                                Button(
-                                    onClick = {
-                                        GatewayService.meshtasticBle?.let { ble ->
-                                            net.meshsat.android.ble.NodeFirmwareUpdater.start(context.applicationContext, ble, image)
-                                        }
-                                    },
-                                    colors = ButtonDefaults.buttonColors(containerColor = MeshSatTeal),
-                                    modifier = Modifier.fillMaxWidth(),
-                                ) {
-                                    Text("Update the node now", style = MaterialTheme.typography.bodySmall)
+                                if (nodeConnected) {
+                                    Button(
+                                        onClick = {
+                                            GatewayService.meshtasticBle?.let { ble ->
+                                                net.meshsat.android.ble.NodeFirmwareUpdater.start(context.applicationContext, ble, image)
+                                            }
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = MeshSatTeal),
+                                        modifier = Modifier.fillMaxWidth(),
+                                    ) {
+                                        Text("Update the node now", style = MaterialTheme.typography.bodySmall)
+                                    }
+                                } else {
+                                    // A node left in its updater runs no Meshtastic, so it is not connected (MESHSAT-1684).
+                                    Button(
+                                        onClick = {
+                                            net.meshsat.android.ble.NodeFirmwareUpdater.sendToUpdater(
+                                                context.applicationContext, GatewayService.meshtasticBle,
+                                                GatewayService.meshtasticBle?.lastAddress ?: savedNodeAddress.ifBlank { null }, image,
+                                            )
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = MeshSatTeal),
+                                        modifier = Modifier.fillMaxWidth(),
+                                    ) {
+                                        Text("Send it to the node's updater", style = MaterialTheme.typography.bodySmall)
+                                    }
+                                    Text(
+                                        text = "The node is not connected. If an update stopped and the node waits in its updater, " +
+                                            "send it the same file that update started with.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MeshSatTextMuted,
+                                    )
                                 }
                                 OutlinedButton(onClick = { picked = null }, modifier = Modifier.fillMaxWidth()) {
                                     Text("Choose another file", style = MaterialTheme.typography.bodySmall)
@@ -995,10 +1032,10 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
                         }
                         is net.meshsat.android.ble.NodeFirmwareUpdater.State.Failed -> {
                             Text(st.reason, style = MaterialTheme.typography.bodySmall, color = MeshSatAmber)
-                            if (st.canRetry) {
+                            if (st.canRetry && net.meshsat.android.ble.NodeFirmwareUpdater.hasPending) {
                                 Button(
                                     onClick = {
-                                        GatewayService.meshtasticBle?.let { ble -> net.meshsat.android.ble.NodeFirmwareUpdater.retry(context.applicationContext, ble) }
+                                        net.meshsat.android.ble.NodeFirmwareUpdater.retry(context.applicationContext, GatewayService.meshtasticBle)
                                     },
                                     colors = ButtonDefaults.buttonColors(containerColor = MeshSatTeal),
                                     modifier = Modifier.fillMaxWidth(),
@@ -1006,8 +1043,15 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
                                     Text("Retry with the same file", style = MaterialTheme.typography.bodySmall)
                                 }
                             }
-                            OutlinedButton(onClick = { net.meshsat.android.ble.NodeFirmwareUpdater.reset() }, modifier = Modifier.fillMaxWidth()) {
-                                Text("Close", style = MaterialTheme.typography.bodySmall)
+                            if (st.inUpdater) {
+                                // Back to the card with no file: picking the same one sends it to the updater.
+                                OutlinedButton(onClick = { picked = null; net.meshsat.android.ble.NodeFirmwareUpdater.reset() }, modifier = Modifier.fillMaxWidth()) {
+                                    Text("Choose the file again", style = MaterialTheme.typography.bodySmall)
+                                }
+                            } else {
+                                OutlinedButton(onClick = { net.meshsat.android.ble.NodeFirmwareUpdater.reset() }, modifier = Modifier.fillMaxWidth()) {
+                                    Text("Close", style = MaterialTheme.typography.bodySmall)
+                                }
                             }
                         }
                     }

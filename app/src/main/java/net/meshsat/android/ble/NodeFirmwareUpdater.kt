@@ -23,8 +23,12 @@ import kotlinx.coroutines.withTimeoutOrNull
  * 3. send the image to the loader ([NodeOtaTransport]), which checks the SHA-256, installs it and
  *    restarts into it;
  * 4. connect to the node again.
- * After a failure once the loader has erased the old firmware, the node stays in its loader until
- * the same image is sent again: the image is kept and [retry] sends it without step 1.
+ * Once the node has gone to its loader (step 1 answered, or the link dropped after the request) it
+ * boots only the loader until an update with this image's SHA-256 completes, and from the update
+ * command on its old firmware may be erased (MESHSAT-1684). So the image and the node's address are
+ * kept from then on, and every failure of steps 2 to 4 offers [retry] with the same image, without
+ * step 1. A node left in its loader when the kept image is gone (the app restarted) gets the same
+ * file again through [sendToUpdater]: the scan finds the loader by its service.
  */
 object NodeFirmwareUpdater {
     private const val TAG = "NodeFirmwareUpdater"
@@ -38,7 +42,8 @@ object NodeFirmwareUpdater {
         object AskingNode : State()
         data class Working(val text: String, val fraction: Float?) : State()
         data class Done(val version: String) : State()
-        data class Failed(val reason: String, val canRetry: Boolean) : State()
+        /** [inUpdater]: the node waits in its loader and needs this update finished. */
+        data class Failed(val reason: String, val canRetry: Boolean, val inUpdater: Boolean = false) : State()
     }
 
     private val _state = MutableStateFlow<State>(State.Idle)
@@ -70,47 +75,71 @@ object NodeFirmwareUpdater {
             delay(200)
             ble.sendToRadio(MeshtasticProtoAdapter.buildAdminOtaRequest(me, image.sha256))
             val said = answer.await()
-            when {
-                said != null && said.startsWith("Rebooting to") && said.contains("BLE") -> Log.i(TAG, "Node: $said")
-                said != null -> {
+            when (handover(said, ble.state.value == MeshtasticBle.State.Connected)) {
+                Handover.Accepted -> Log.i(TAG, "Node: $said")
+                Handover.Refused -> {
                     _state.value = State.Failed("The node will not update: $said", canRetry = false)
                     return@launch
                 }
-                ble.state.value == MeshtasticBle.State.Connected -> {
+                Handover.NoAnswer -> {
                     _state.value = State.Failed(
                         "The node did not answer the update request. Its firmware may be too old to update this way.", canRetry = false,
                     )
                     return@launch
                 }
-                else -> Log.w(TAG, "No handover answer, but the node dropped the link: going on")
+                Handover.LinkDropped -> Log.w(TAG, "No handover answer, but the node dropped the link: going on")
             }
+            // The node is going to its loader: from here only a finished update brings it back.
+            keep(image, address)
             transfer(context, ble, address, image)
         }
     }
 
+    /**
+     * Send [image] to a node already waiting in its loader (an update that did not finish and whose
+     * image this app no longer holds): no handover, straight to the scan. The loader takes only the
+     * image whose SHA-256 the node was handed, so it must be the same file. [address] may be null
+     * when the node's is not known; the scan then takes any loader.
+     */
+    fun sendToUpdater(context: Context, ble: MeshtasticBle?, address: String?, image: NodeFirmwareImage) {
+        if (running) return
+        val a = address ?: ble?.lastAddress ?: ""
+        keep(image, a)
+        job = scope.launch { transfer(context, ble, a, image) }
+    }
+
+    private fun keep(image: NodeFirmwareImage, address: String) {
+        pending = image
+        pendingAddress = address
+    }
+
     /** Send the kept image to a node that stayed in its loader after a failed transfer. */
-    fun retry(context: Context, ble: MeshtasticBle) {
+    fun retry(context: Context, ble: MeshtasticBle?) {
         if (running) return
         val image = pending ?: return
-        val address = pendingAddress ?: ble.lastAddress ?: return
+        val address = pendingAddress ?: ble?.lastAddress ?: ""
         job = scope.launch { transfer(context, ble, address, image) }
     }
+
+    /** True while an image is kept for a node in its loader. */
+    val hasPending: Boolean get() = pending != null
 
     fun reset() {
         if (!running) _state.value = State.Idle
     }
 
-    private suspend fun transfer(context: Context, ble: MeshtasticBle, address: String, image: NodeFirmwareImage) {
-        ble.heldForFirmwareUpdate = true
+    private suspend fun transfer(context: Context, ble: MeshtasticBle?, address: String, image: NodeFirmwareImage) {
+        ble?.heldForFirmwareUpdate = true
         try {
-            ble.disconnect()
+            ble?.disconnect()
             _state.value = State.Working("The node is restarting into its updater...", null)
             delay(RESTART_INTO_LOADER_MS)
             val adapter = context.getSystemService(BluetoothManager::class.java)?.adapter
             if (adapter == null || !adapter.isEnabled) {
-                _state.value = State.Failed("Bluetooth is off.", canRetry = true)
-                pending = image
-                pendingAddress = address
+                _state.value = State.Failed(
+                    "Bluetooth is off. The node waits in its updater: switch Bluetooth on and retry with the same file.",
+                    canRetry = true, inUpdater = true,
+                )
                 return
             }
             val outcome = NodeOtaTransport(context, adapter).update(address, image) { step ->
@@ -130,22 +159,57 @@ object NodeFirmwareUpdater {
                     delay(RESTART_INTO_FIRMWARE_MS)
                     _state.value = State.Done(image.version.ifBlank { "the new firmware" })
                 }
-                is NodeOtaTransport.Outcome.Failed -> {
-                    if (outcome.loaderHasImage) {
-                        pending = image
-                        pendingAddress = address
-                    }
-                    _state.value = State.Failed(
-                        outcome.reason + if (outcome.loaderHasImage) " The node waits in its updater: retry with the same file." else "",
-                        canRetry = outcome.loaderHasImage,
-                    )
-                }
+                is NodeOtaTransport.Outcome.Failed -> _state.value = failedInUpdater(outcome)
             }
         } finally {
-            ble.heldForFirmwareUpdate = false
-            ble.connect(address)
+            ble?.heldForFirmwareUpdate = false
+            if (ble != null && address.isNotEmpty()) ble.connect(address)
         }
     }
+
+    /**
+     * What the screen says after a failed transfer (MESHSAT-1684). The node went to its loader
+     * before the transfer started, so every failure leaves it there and offers a retry with the
+     * kept image; the words say whether its old firmware may be gone.
+     */
+    internal fun failedInUpdater(outcome: NodeOtaTransport.Outcome.Failed): State.Failed {
+        val after = when (outcome.stage) {
+            NodeOtaTransport.Stage.NotCommanded ->
+                " The node waits in its updater with its firmware still on it and starts it only after an update: retry with the same file."
+            NodeOtaTransport.Stage.Refused ->
+                " The node waits in its updater with its firmware still on it: retry with the file this update started with."
+            NodeOtaTransport.Stage.EraseUncertain ->
+                " The node may have erased its firmware and waits in its updater: retry with the same file."
+            NodeOtaTransport.Stage.Erased ->
+                " The node erased its firmware and waits in its updater: retry with the same file."
+        }
+        return State.Failed(outcome.reason + after, canRetry = true, inUpdater = true)
+    }
+
+    /** What the node did with the update request (MESHSAT-1684). */
+    internal enum class Handover {
+        /** "Rebooting to BLE OTA": it goes to its loader. */
+        Accepted,
+
+        /** It answered why not; it keeps running its firmware. */
+        Refused,
+
+        /** No answer and the link is still up: it keeps running its firmware. */
+        NoAnswer,
+
+        /** No answer, but the link dropped: it most likely went to its loader. */
+        LinkDropped,
+    }
+
+    internal fun handover(said: String?, linkUp: Boolean): Handover = when {
+        said != null && said.startsWith("Rebooting to") && said.contains("BLE") -> Handover.Accepted
+        said != null -> Handover.Refused
+        linkUp -> Handover.NoAnswer
+        else -> Handover.LinkDropped
+    }
+
+    /** True when the node may now be in its loader, so the image and its address must be kept for a retry. */
+    internal fun keepsImage(h: Handover): Boolean = h == Handover.Accepted || h == Handover.LinkDropped
 
     /** The node's answers to ota_request (AdminModule.cpp, firmware 2.8.0). */
     internal fun isHandoverAnswer(text: String): Boolean =

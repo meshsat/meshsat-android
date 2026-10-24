@@ -37,6 +37,14 @@ import java.util.concurrent.atomic.AtomicReference
  *    does not fit), the last one "OK" after the loader checked the SHA-256 and set app0 to boot.
  *    It restarts into the new firmware about 2 s later.
  * 3. Any "ERR ..." ends the update. There is no PIN on the loader and one connection at a time.
+ *
+ * What a failure leaves on the node (esp32-unified-ota v1.0.1, ota_processor.cpp handleOtaStart):
+ * the loader checks the command (format, hash, the hash the node was handed, the partition) and
+ * answers "ERR ..." without touching app0; then it sets itself as the boot partition, sends
+ * "ERASING" and erases app0 in esp_ota_begin before its "OK". So from the moment the command is
+ * written the old firmware may be gone, and an answer that never comes says nothing either way
+ * ([Stage]). A dropped link resets the loader, which advertises again and waits; the node boots
+ * only its loader until an update with the same hash completes, so a retry is always the way out.
  */
 @SuppressLint("MissingPermission")
 class NodeOtaTransport(private val context: Context, private val adapter: BluetoothAdapter) {
@@ -48,10 +56,27 @@ class NodeOtaTransport(private val context: Context, private val adapter: Blueto
         object Verifying : Step()
     }
 
+    /** How far an update got before it failed, which says what the node is left with (MESHSAT-1684). */
+    enum class Stage {
+        /** Nothing was written to the updater: it was not reached, or not ready for the command. */
+        NotCommanded,
+
+        /** The updater refused the command before erasing ("ERR ..." before "ERASING"): its firmware is still there. */
+        Refused,
+
+        /** The command was written and nothing settled it, or "ERASING" came and then no "OK": the firmware may be erased. */
+        EraseUncertain,
+
+        /** The updater erased the firmware ("OK" after "ERASING") and the transfer stopped: the node has no firmware. */
+        Erased,
+    }
+
     sealed class Outcome {
         object Done : Outcome()
-        /** [loaderHasImage] true once the loader accepted the OTA command: app0 is erased, retry with the same file. */
-        data class Failed(val reason: String, val loaderHasImage: Boolean) : Outcome()
+        data class Failed(val reason: String, val stage: Stage) : Outcome() {
+            /** True from the moment the update command was written, unless the updater refused it before erasing. */
+            val mayBeErased: Boolean get() = stage == Stage.EraseUncertain || stage == Stage.Erased
+        }
     }
 
     private val events = Channel<Event>(Channel.UNLIMITED)
@@ -68,7 +93,10 @@ class NodeOtaTransport(private val context: Context, private val adapter: Blueto
 
     private val callback = object : BluetoothGattCallback() {
         override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
-            events.trySend(Event.Connection(newState == BluetoothProfile.STATE_CONNECTED, status))
+            val connected = newState == BluetoothProfile.STATE_CONNECTED
+            events.trySend(Event.Connection(connected, status))
+            // A reader waiting for the updater's next line learns at once that none will come.
+            if (!connected) lines.trySend(OtaProtocol.LINK_LOST)
         }
 
         override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
@@ -111,17 +139,17 @@ class NodeOtaTransport(private val context: Context, private val adapter: Blueto
     suspend fun update(address: String, image: NodeFirmwareImage, onStep: (Step) -> Unit): Outcome {
         onStep(Step.Connecting)
         var gatt: BluetoothGatt? = null
-        var accepted = false
+        var stage = Stage.NotCommanded
         try {
             gatt = connectToLoader(address) ?: return Outcome.Failed(
-                "The node's updater did not answer over Bluetooth. Keep the phone close to the node and try again.", false,
+                "The node's updater did not answer over Bluetooth. Keep the phone close to the node and try again.", stage,
             )
             val service = gatt.getService(UUID.fromString(SERVICE_UUID))
-                ?: return Outcome.Failed("The node's updater was not found on the node.", false)
+                ?: return Outcome.Failed("The node's updater was not found on the node.", stage)
             val write = service.getCharacteristic(UUID.fromString(WRITE_UUID))
-                ?: return Outcome.Failed("The node's updater has no data characteristic.", false)
+                ?: return Outcome.Failed("The node's updater has no data characteristic.", stage)
             val notify = service.getCharacteristic(UUID.fromString(NOTIFY_UUID))
-                ?: return Outcome.Failed("The node's updater has no answer characteristic.", false)
+                ?: return Outcome.Failed("The node's updater has no answer characteristic.", stage)
 
             var mtu = 23
             if (gatt.requestMtu(REQUEST_MTU)) {
@@ -131,59 +159,26 @@ class NodeOtaTransport(private val context: Context, private val adapter: Blueto
             Log.i(TAG, "OTA: link MTU $mtu, chunks of $chunk bytes")
 
             val cccd = notify.getDescriptor(GattCompat.CCC_DESCRIPTOR)
-                ?: return Outcome.Failed("The node's updater cannot send answers.", false)
+                ?: return Outcome.Failed("The node's updater cannot send answers.", stage)
             if (!gatt.setCharacteristicNotification(notify, true) ||
                 !GattCompat.writeDescriptor(gatt, cccd, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE) ||
                 awaitEvent<Event.DescriptorWritten>(OP_TIMEOUT_MS)?.status != BluetoothGatt.GATT_SUCCESS
             ) {
-                return Outcome.Failed("Could not subscribe to the node's updater.", false)
+                return Outcome.Failed("Could not subscribe to the node's updater.", stage)
             }
 
-            drainLines()
-            if (!writeAndWait(gatt, write, otaCommand(image.size, image.sha256Hex).toByteArray(Charsets.US_ASCII), BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)) {
-                return Outcome.Failed("The node's updater did not take the update command.", false)
+            val g: BluetoothGatt = gatt
+            val link = object : OtaProtocol.Link {
+                override fun drain() = drainLines()
+                override suspend fun write(bytes: ByteArray, withResponse: Boolean): Boolean = writeAndWait(
+                    g, write, bytes,
+                    if (withResponse) BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT else BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE,
+                )
+                override suspend fun nextLine(timeoutMs: Long): String? = this@NodeOtaTransport.nextLine(timeoutMs)
             }
-            // ERASING, then OK once app0 is erased (several seconds for 3.3 MB).
-            while (true) {
-                val line = nextLine(ERASE_TIMEOUT_MS) ?: return Outcome.Failed("The node's updater did not finish erasing.", false)
-                when (val r = parseReply(line)) {
-                    Reply.Erasing -> onStep(Step.Erasing)
-                    Reply.Ok -> break
-                    is Reply.Error -> return Outcome.Failed("The node refused the update: ${r.text}", false)
-                    else -> Log.d(TAG, "OTA: '$line' while erasing")
-                }
-            }
-            accepted = true
-
-            var sent = 0
-            val total = image.size
-            var lastPercent = -1
-            while (sent < total) {
-                val end = minOf(sent + chunk, total)
-                val part = image.bytes.copyOfRange(sent, end)
-                if (!writeAndWait(gatt, write, part, BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE)) {
-                    return Outcome.Failed("A piece of the firmware could not be sent at byte $sent.", true)
-                }
-                val last = end == total
-                if (last) onStep(Step.Verifying)
-                val line = nextLine(if (last) VERIFY_TIMEOUT_MS else ACK_TIMEOUT_MS)
-                    ?: return Outcome.Failed("The node's updater stopped answering at byte $end.", true)
-                when (val r = parseReply(line)) {
-                    Reply.Ack -> if (last) return Outcome.Failed("The node's updater wanted more than the whole image.", true)
-                    Reply.Ok -> if (!last) return Outcome.Failed("The node's updater ended the transfer early at byte $end.", true)
-                    is Reply.Error -> return Outcome.Failed("The node's updater refused the firmware: ${r.text}", true)
-                    else -> return Outcome.Failed("The node's updater answered '$line' at byte $end.", true)
-                }
-                sent = end
-                val percent = (sent * 100L / total).toInt()
-                if (percent != lastPercent) {
-                    lastPercent = percent
-                    onStep(Step.Sending(sent, total))
-                }
-            }
-            return Outcome.Done
+            return OtaProtocol.run(link, image.bytes, image.sha256Hex, chunk, OtaProtocol.Timeouts(), onStep) { stage = it }
         } catch (e: SecurityException) {
-            return Outcome.Failed("Bluetooth permission is missing: ${e.message}", accepted)
+            return Outcome.Failed("Bluetooth permission is missing: ${e.message}", stage)
         } finally {
             gatt?.let {
                 // The loader's attribute table must not stay cached for the node's address.
@@ -205,8 +200,10 @@ class NodeOtaTransport(private val context: Context, private val adapter: Blueto
             tryConnect(found)?.let { return it }
             Log.w(TAG, "OTA: the loader found by scan (${found.address}) did not take the connection")
         }
-        Log.w(TAG, "OTA: no loader in the scan; trying the node's address $address")
-        tryConnect(adapter.getRemoteDevice(address))?.let { return it }
+        if (BluetoothAdapter.checkBluetoothAddress(address)) {
+            Log.w(TAG, "OTA: no loader in the scan; trying the node's address $address")
+            tryConnect(adapter.getRemoteDevice(address))?.let { return it }
+        }
         delay(RETRY_PAUSE_MS)
         val again = scanForLoader(address, SECOND_SCAN_TIMEOUT_MS) ?: return null
         return tryConnect(again)
@@ -244,7 +241,8 @@ class NodeOtaTransport(private val context: Context, private val adapter: Blueto
     private suspend fun scanForLoader(address: String, timeoutMs: Long): BluetoothDevice? {
         val scanner = adapter.bluetoothLeScanner ?: return null
         val found = CompletableDeferred<BluetoothDevice>()
-        val expected = setOf(address.uppercase(), nextAddress(address))
+        // A blank address (the node's is not known) takes any loader, after the short wait.
+        val expected = setOf(address.uppercase(), nextAddress(address)).filter { it.isNotEmpty() }.toSet()
         val other = AtomicReference<BluetoothDevice?>(null)
         val cb = object : ScanCallback() {
             override fun onScanResult(callbackType: Int, result: ScanResult) {
@@ -337,9 +335,6 @@ class NodeOtaTransport(private val context: Context, private val adapter: Blueto
         private const val DISCOVER_TIMEOUT_MS = 10_000L
         private const val MTU_TIMEOUT_MS = 5_000L
         private const val OP_TIMEOUT_MS = 5_000L
-        private const val ERASE_TIMEOUT_MS = 60_000L
-        private const val ACK_TIMEOUT_MS = 10_000L
-        private const val VERIFY_TIMEOUT_MS = 30_000L
         private const val SCAN_TIMEOUT_MS = 45_000L
         private const val SECOND_SCAN_TIMEOUT_MS = 30_000L
         private const val OTHER_LOADER_WAIT_MS = 3_000L

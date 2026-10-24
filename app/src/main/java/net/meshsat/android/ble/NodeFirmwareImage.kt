@@ -42,7 +42,17 @@ class NodeFirmwareImage private constructor(
         private const val APP_DESC_PROJECT_OFFSET = APP_DESC_OFFSET + 48
 
         /** The checks, in order; [nodeEnv] is the node's pio_env (blank: the node did not say). */
-        fun check(bytes: ByteArray, nodeEnv: String): Check {
+        fun check(bytes: ByteArray, nodeEnv: String): Check = check(bytes, nodeEnv, requireEnv = true)
+
+        /**
+         * The checks for a node waiting in its updater with no Meshtastic link, so no pio_env to
+         * compare (MESHSAT-1684): the image must still be an app image that fits, and the updater
+         * itself refuses, before erasing anything, every image but the one whose SHA-256 the node
+         * was handed when the update began.
+         */
+        fun checkForWaitingUpdater(bytes: ByteArray): Check = check(bytes, "", requireEnv = false)
+
+        private fun check(bytes: ByteArray, nodeEnv: String, requireEnv: Boolean): Check {
             if (bytes.size < MIN_IMAGE_BYTES) return Check.Refused("The file is too small to be firmware (${bytes.size} bytes).")
             if (bytes.size > APP_SLOT_BYTES) {
                 return Check.Refused(
@@ -53,11 +63,13 @@ class NodeFirmwareImage private constructor(
             if (le32(bytes, APP_DESC_OFFSET) != APP_DESC_MAGIC) {
                 return Check.Refused("The file is not an app image. A .factory.bin is for a cable flash; pick the plain firmware-….bin.")
             }
-            if (nodeEnv.isBlank()) {
-                return Check.Refused("The node did not say which firmware build it runs; reconnect to the node and try again.")
-            }
-            if (!containsName(bytes, nodeEnv.toByteArray(Charsets.US_ASCII))) {
-                return Check.Refused("This firmware was not built for this node ($nodeEnv). Pick the file named firmware-$nodeEnv-….bin.")
+            if (requireEnv) {
+                if (nodeEnv.isBlank()) {
+                    return Check.Refused("The node did not say which firmware build it runs; reconnect to the node and try again.")
+                }
+                if (!containsName(bytes, nodeEnv.toByteArray(Charsets.US_ASCII))) {
+                    return Check.Refused("This firmware was not built for this node ($nodeEnv). Pick the file named firmware-$nodeEnv-….bin.")
+                }
             }
             val sha = MessageDigest.getInstance("SHA-256").digest(bytes)
             return Check.Ok(
