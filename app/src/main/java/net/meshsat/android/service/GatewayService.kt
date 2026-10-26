@@ -106,6 +106,8 @@ class GatewayService : Service() {
         const val ACTION_SEND_LXMF = "net.meshsat.android.SEND_LXMF"
         /** A text through the Hub to a MeshSat app, EXTRA_RECIPIENT "bridge:<id>" (hub_msg, MESHSAT-1584). */
         const val ACTION_SEND_HUB = "net.meshsat.android.SEND_HUB"
+        /** A reply to a TAK contact, EXTRA_RECIPIENT "tak:<uid>#<callsign>" (MESHSAT-1707). */
+        const val ACTION_SEND_TAK = "net.meshsat.android.SEND_TAK"
         /** "direct", "opportunistic" or absent for auto (MESHSAT-1553). */
         const val EXTRA_LXMF_METHOD = "lxmf_method"
         const val EXTRA_ADDRESS = "address"
@@ -275,6 +277,9 @@ class GatewayService : Service() {
         /** A message the phone sent by LXMF: the row's forwardedTo carries the state. */
         const val LXMF_QUEUED = "lxmf:queued"
         const val LXMF_SENT = "lxmf:sent"
+        /** A reply to a TAK contact went out on the Hub session, or could not (MESHSAT-1707). */
+        const val TAK_SENT = "tak:sent"
+        const val TAK_NOT_SENT = "tak:not_sent"
         const val LXMF_DELIVERED = "lxmf:delivered"
         const val LXMF_FAILED = "lxmf:failed"
         /** A propagated message the node took: as far as the sender ever sees it go. */
@@ -503,6 +508,11 @@ class GatewayService : Service() {
                 val text = intent.getStringExtra(EXTRA_TEXT) ?: return START_STICKY
                 val recipient = intent.getStringExtra(EXTRA_RECIPIENT) ?: return START_STICKY
                 scope.launch { sendHub(recipient, text) }
+            }
+            ACTION_SEND_TAK -> {
+                val text = intent.getStringExtra(EXTRA_TEXT) ?: return START_STICKY
+                val recipient = intent.getStringExtra(EXTRA_RECIPIENT) ?: return START_STICKY
+                scope.launch { sendTakChat(recipient, text) }
             }
             ACTION_SEND_LXMF -> {
                 val text = intent.getStringExtra(EXTRA_TEXT) ?: return START_STICKY
@@ -1054,6 +1064,8 @@ class GatewayService : Service() {
                     handleHubCommand(cmd)
                 }
                 // TAK CoT broadcast: parse and store positions in Room DB for map display
+                // A chat a dispatcher addressed to this phone, on its own tak/cot/in (MESHSAT-1707).
+                reporter.onTakChat = { cotXml -> scope.launch { onTakChatIn(cotXml) } }
                 reporter.onTakCot = { cotXml ->
                     scope.launch {
                         try {
@@ -2450,6 +2462,46 @@ class GatewayService : Service() {
         }
         hubMsgRoute = route
         Log.i("MeshSat", "hub_msg: route on as ${reporter.principal}")
+    }
+
+    /** Message ids of the TAK chats already shown: the Hub delivers at least once. */
+    private val takChatsSeen = java.util.Collections.synchronizedSet(LinkedHashSet<String>())
+
+    /**
+     * A chat a dispatcher on TAK, or an operator on the Hub's map, wrote to this phone
+     * (MESHSAT-1707): a message in its conversation and a notification. Anything else on the topic,
+     * or a chat seen already, is dropped.
+     */
+    private suspend fun onTakChatIn(cotXml: String) {
+        val tak = takIntegration ?: return
+        val ev = tak.parseInbound(cotXml) ?: return
+        val chat = tak.chatFor(ev) ?: return
+        val id = ev.detail?.chat?.messageId?.ifEmpty { null } ?: ev.uid
+        synchronized(takChatsSeen) {
+            if (!takChatsSeen.add(id)) return
+            while (takChatsSeen.size > 256) takChatsSeen.remove(takChatsSeen.first())
+        }
+        val peer = net.meshsat.android.ui.Peers.takPeer(chat.fromUid, chat.fromCallsign)
+        db.messageDao().insert(
+            Message(transport = "tak", direction = "rx", sender = peer, recipient = tak.uid,
+                text = chat.text, timestamp = System.currentTimeMillis())
+        )
+        postMessageNotification(chat.fromCallsign.ifEmpty { "TAK" }, chat.text)
+        Log.i("MeshSat", "TAK chat from ${chat.fromCallsign} stored")
+    }
+
+    /** Answer a TAK contact: a GeoChat to it on the Hub session (MESHSAT-1707). */
+    private suspend fun sendTakChat(recipient: String, text: String) {
+        val tak = takIntegration
+        val uid = net.meshsat.android.ui.Peers.takUid(recipient)
+        val sent = tak != null && tak.canExport && uid.isNotEmpty() && hubReporter?.isConnected == true
+        if (sent) tak!!.sendChatTo(uid, net.meshsat.android.ui.Peers.takCallsign(recipient), text)
+        else Log.w("MeshSat", "TAK reply not sent: TAK export off or no Hub session")
+        db.messageDao().insert(
+            Message(transport = "tak", direction = "tx", sender = tak?.uid.orEmpty(), recipient = recipient,
+                text = text, timestamp = System.currentTimeMillis(), forwarded = sent,
+                forwardedTo = if (sent) TAK_SENT else TAK_NOT_SENT)
+        )
     }
 
     /** A text through the Hub; a refused one is still shown in the chat, marked not sent. */

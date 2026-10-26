@@ -603,10 +603,11 @@ class HubReporter(
             arrayOf(topics.msg(config.bridgeId, "in"), topics.msg(config.bridgeId, "status")) else emptyArray()
         val sos = (if (onHubCaps != null) arrayOf(topics.hubCaps(config.bridgeId)) else emptyArray()) +
             (if (onSosAck != null) arrayOf(topics.sos(config.bridgeId, "ack")) else emptyArray())
+        val chat = if (onTakChat != null) arrayOf(topics.takCotInFor(config.bridgeId)) else emptyArray()
         val filters = arrayOf(
             topics.bridgeCmd(config.bridgeId),
             topics.bridgeMOAck(config.bridgeId),
-        ) + topics.takCotInFilters() + msg + sos
+        ) + topics.takCotInFilters() + chat + msg + sos
         val token = c.subscribeWithResponse(filters, IntArray(filters.size) { QOS_AT_LEAST_ONCE })
         if (!SessionReadiness.allGranted(filters.size, token.grantedQos)) {
             throw MqttException(MqttException.REASON_CODE_SUBSCRIBE_FAILED.toInt())
@@ -785,7 +786,16 @@ class HubReporter(
     /** External handler for TAK CoT XML received via Hub broadcast. */
     var onTakCot: ((String) -> Unit)? = null
 
+    /** A chat the Hub routed to this phone alone, on its own tak/cot/in (MESHSAT-1707). */
+    var onTakChat: ((String) -> Unit)? = null
+
     private fun handleInbound(topic: String, payload: String) {
+        // A chat addressed to this phone: its own subtree, before the broadcast below, whose test
+        // this topic would also pass.
+        if (topic == topics.takCotInFor(config.bridgeId)) {
+            onTakChat?.invoke(payload)
+            return
+        }
         // TAK from the Hub: an event from the tenant's TAK servers, or one another bridge of the
         // tenant exported. What this bridge exported itself comes back on the topic that names it as
         // the sender, and is dropped by that topic (MESHSAT-1463).

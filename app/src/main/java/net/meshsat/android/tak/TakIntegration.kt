@@ -39,8 +39,20 @@ class TakIntegration(
         private const val ATAK_MIL_PACKAGE = "com.atakmap.app"
     }
 
-    private val uid = "MESHSAT-$deviceId"
+    /** Whether what this integration builds reaches the Hub: "Enable TAK" and the Hub export on. */
+    val canExport: Boolean get() = enabled && mqttExportEnabled
+
+    /** This phone's own uid on TAK, the one a chat to it is addressed to. */
+    val uid = "MESHSAT-$deviceId"
     val callsign: String = CotBuilder.callsign(deviceId, callsignPrefix)
+
+    /** The chat [ev] is, when a dispatcher addressed it to this phone (MESHSAT-1707). */
+    fun chatFor(ev: CotEvent): TakChats.Chat? = TakChats.chatFor(ev, uid, callsign)
+
+    /** Write [text] to one TAK contact, as a GeoChat it can answer (MESHSAT-1707). */
+    fun sendChatTo(toUid: String, toCallsign: String, text: String) {
+        emit(CotBuilder.geoChat(uid, callsign, toUid, toCallsign, text))
+    }
 
     /** Send a position update as CoT PLI. */
     fun sendPosition(

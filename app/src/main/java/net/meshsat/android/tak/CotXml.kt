@@ -34,6 +34,7 @@ object CotXml {
             d.contact?.let {
                 sb.append("<contact")
                 sb.attr("callsign", it.callsign)
+                if (it.endpoint.isNotEmpty()) sb.attr("endpoint", it.endpoint)
                 sb.append("></contact>")
             }
 
@@ -74,12 +75,48 @@ object CotXml {
                 sb.append("</emergency>")
             }
 
+            d.chat?.let {
+                sb.append("<__chat")
+                sb.attr("parent", it.parent)
+                sb.attr("groupOwner", it.groupOwner)
+                if (it.messageId.isNotEmpty()) sb.attr("messageId", it.messageId)
+                sb.attr("chatroom", it.chatroom)
+                sb.attr("id", it.id)
+                sb.attr("senderCallsign", it.senderCallsign)
+                sb.append("><chatgrp")
+                sb.attr("uid0", it.uid0)
+                sb.attr("uid1", it.uid1)
+                sb.attr("id", it.id)
+                sb.append("></chatgrp></__chat>")
+            }
+
+            d.link?.let {
+                sb.append("<link")
+                sb.attr("uid", it.uid)
+                sb.attr("type", it.type)
+                sb.attr("relation", it.relation)
+                sb.append("></link>")
+            }
+
             d.remarks?.let {
                 sb.append("<remarks")
                 if (it.source.isNotEmpty()) sb.attr("source", it.source)
+                if (it.to.isNotEmpty()) sb.attr("to", it.to)
+                if (it.time.isNotEmpty()) sb.attr("time", it.time)
                 sb.append(">")
                 sb.append(escapeXml(it.text))
                 sb.append("</remarks>")
+            }
+
+            if (d.marti.isNotEmpty()) {
+                sb.append("<marti>")
+                d.marti.forEach {
+                    sb.append("<dest")
+                    if (it.uid.isNotEmpty()) sb.attr("uid", it.uid)
+                    if (it.callsign.isNotEmpty()) sb.attr("callsign", it.callsign)
+                    sb.append("></dest>")
+                }
+                sb.append("</marti>")
             }
 
             sb.append("</detail>")
@@ -130,12 +167,15 @@ object CotXml {
         var status: CotStatus? = null
         var emergency: CotEmergency? = null
         var remarks: CotRemarks? = null
+        var chat: CotChat? = null
+        var link: CotLink? = null
+        val marti = mutableListOf<CotDest>()
 
         val children = node.childNodes
         for (i in 0 until children.length) {
             val child = children.item(i) ?: continue
             when (child.nodeName) {
-                "contact" -> contact = CotContact(child.attr("callsign") ?: "")
+                "contact" -> contact = CotContact(child.attr("callsign") ?: "", child.attr("endpoint") ?: "")
                 "__group" -> group = CotGroup(
                     name = child.attr("name") ?: "Cyan",
                     role = child.attr("role") ?: "Team Member",
@@ -156,11 +196,50 @@ object CotXml {
                 "remarks" -> remarks = CotRemarks(
                     source = child.attr("source") ?: "",
                     text = child.textContent ?: "",
+                    to = child.attr("to") ?: "",
+                    time = child.attr("time") ?: "",
                 )
+                "__chat" -> {
+                    var uid0 = ""
+                    var uid1 = ""
+                    val inner = child.childNodes
+                    for (j in 0 until inner.length) {
+                        val g = inner.item(j) ?: continue
+                        if (g.nodeName == "chatgrp") {
+                            uid0 = g.attr("uid0") ?: ""
+                            uid1 = g.attr("uid1") ?: ""
+                        }
+                    }
+                    chat = CotChat(
+                        id = child.attr("id") ?: "",
+                        chatroom = child.attr("chatroom") ?: "",
+                        senderCallsign = child.attr("senderCallsign") ?: "",
+                        messageId = child.attr("messageId") ?: "",
+                        parent = child.attr("parent") ?: "RootContactGroup",
+                        groupOwner = child.attr("groupOwner") ?: "false",
+                        uid0 = uid0,
+                        uid1 = uid1,
+                    )
+                }
+                // The first link: on a GeoChat, the sender.
+                "link" -> if (link == null) link = CotLink(
+                    uid = child.attr("uid") ?: "",
+                    type = child.attr("type") ?: "",
+                    relation = child.attr("relation") ?: "",
+                )
+                "marti" -> {
+                    val dests = child.childNodes
+                    for (j in 0 until dests.length) {
+                        val dn = dests.item(j) ?: continue
+                        if (dn.nodeName != "dest" || !(dn.attr("mission") ?: "").isEmpty()) continue
+                        val d = CotDest(uid = dn.attr("uid") ?: "", callsign = dn.attr("callsign") ?: "")
+                        if (d.uid.isNotEmpty() || d.callsign.isNotEmpty()) marti += d
+                    }
+                }
             }
         }
 
-        return CotDetail(contact, group, precision, track, status, emergency, remarks)
+        return CotDetail(contact, group, precision, track, status, emergency, remarks, chat, link, marti)
     }
 
     private fun org.w3c.dom.Node.attr(name: String): String? {

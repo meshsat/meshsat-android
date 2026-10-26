@@ -592,6 +592,8 @@ fun ConversationChatView(
             val fitsTheLink = when (sendTransport) {
                 "iridium" -> SatelliteLimits.fits(composeBytes)
                 "hub" -> composeBytes <= net.meshsat.android.hubmsg.HubMsgWire.MAX_BODY
+                // A dispatcher's own radio may be a mesh node: keep to what one text carries.
+                "tak" -> composeBytes <= TAK_REPLY_MAX
                 else -> true
             }
             val send = {
@@ -626,6 +628,7 @@ fun ConversationChatView(
                                 "iridium" -> "Message by satellite"
                                 "lxmf" -> "Message by Reticulum"
                                 "hub" -> "Message through the Hub"
+                                "tak" -> "Answer on TAK"
                                 "mesh" -> if (peer == Peers.MESH_ALL) "Message everyone on the mesh" else "Message on the mesh"
                                 else -> "Text message"
                             },
@@ -664,6 +667,9 @@ fun ConversationChatView(
     }
 }
 
+/** The most a TAK answer may be: a dispatcher's own radio may be a mesh node (MESHSAT-1707). */
+private const val TAK_REPLY_MAX = 200
+
 /**
  * The line under the message box: how this message goes, and for a satellite message its size and
  * cost before it is sent (Rock7 bills up to 50 bytes per credit; the satellite limit is 340 bytes).
@@ -691,6 +697,11 @@ private fun composeHint(transport: String, text: String, peer: String, meshUp: B
             GatewayService.hubReporter?.isConnected != true -> "Through the Hub to its MeshSat app, once this phone is back on the Hub."
             else -> "Through the Hub to its MeshSat app. Two checks once that app has it."
         }
+        "tak" -> when {
+            bytes > TAK_REPLY_MAX -> "Too long: $bytes bytes, the limit is $TAK_REPLY_MAX."
+            GatewayService.hubReporter?.isConnected != true -> "On TAK through the Hub, once this phone is back on the Hub."
+            else -> "On TAK through the Hub, to ${Peers.displayName(peer)}."
+        }
         "mesh" -> when {
             !meshUp -> "On the mesh, when your node is connected."
             peer == Peers.MESH_ALL -> "To everyone on the mesh channel."
@@ -710,6 +721,15 @@ private fun sendMessage(
     lxmfMethod: String = "direct",
 ) {
     when (transport) {
+        "tak" -> {
+            // An answer to a dispatcher on TAK or an operator on the Hub map (MESHSAT-1707).
+            context.startService(
+                Intent(context, GatewayService::class.java)
+                    .setAction(GatewayService.ACTION_SEND_TAK)
+                    .putExtra(GatewayService.EXTRA_TEXT, text)
+                    .putExtra(GatewayService.EXTRA_RECIPIENT, peer)
+            )
+        }
         "hub" -> {
             // Through the Hub to the contact's MeshSat app; the row shows what the Hub reports (MESHSAT-1584).
             context.startService(
@@ -788,7 +808,8 @@ private fun hubLabel(s: String): String = when {
 
 private fun otherLabel(forwardedTo: String): String = when (forwardedTo) {
     GatewayService.IRIDIUM_QUEUED, GatewayService.LXMF_QUEUED -> "Queued"
-    GatewayService.LXMF_SENT -> "Sent"
+    GatewayService.LXMF_SENT, GatewayService.TAK_SENT -> "Sent"
+    GatewayService.TAK_NOT_SENT -> "Not sent"
     GatewayService.LXMF_DELIVERED -> "Delivered"
     GatewayService.LXMF_PROPAGATED -> "At the propagation node"
     GatewayService.LXMF_FAILED -> "Failed"
@@ -814,6 +835,7 @@ private fun DeliveryMark(forwardedTo: String) {
         GatewayService.IRIDIUM_QUEUED, GatewayService.LXMF_QUEUED, net.meshsat.android.sms.SmsStatusReceiver.SENDING ->
             Triple(Icons.Default.Schedule, MeshSatTextMuted, "Queued")
         GatewayService.LXMF_FAILED -> Triple(Icons.Default.ErrorOutline, MeshSatRed, "Failed")
+        GatewayService.TAK_NOT_SENT -> Triple(Icons.Default.ErrorOutline, MeshSatRed, "Not sent")
         // Two checks only on the peer's proof, as LXMF clients show it.
         GatewayService.LXMF_DELIVERED -> Triple(Icons.Default.DoneAll, MeshSatTeal, "Delivered")
         // One check: the propagation node holds it for the peer's next sync.

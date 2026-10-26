@@ -38,11 +38,27 @@ object Peers {
 
     const val HUB_PREFIX = "bridge:"
 
+    /**
+     * A dispatcher on TAK, or an operator on the Hub's map, who wrote to this phone (MESHSAT-1707):
+     * "tak:<uid>#<callsign>". The callsign is in the key so the conversation can be named; a TAK
+     * uid has no "#".
+     */
+    const val TAK_PREFIX = "tak:"
+
+    fun isTak(peer: String): Boolean = peer.startsWith(TAK_PREFIX) && takUid(peer).isNotEmpty()
+
+    fun takPeer(uid: String, callsign: String): String = "$TAK_PREFIX$uid#$callsign"
+
+    fun takUid(peer: String): String = peer.removePrefix(TAK_PREFIX).substringBefore('#')
+
+    fun takCallsign(peer: String): String = peer.removePrefix(TAK_PREFIX).substringAfter('#', "")
+
     /** The node number of a mesh peer, or null. */
     fun nodeNum(peer: String): Long? = if (isMeshNode(peer)) peer.drop(1).toLongOrNull(16) else null
 
     /** How a reply goes by default: the way this kind of peer is reached. */
     fun defaultTransport(peer: String): String = when {
+        isTak(peer) -> "tak"
         isHub(peer) -> "hub"
         isLxmf(peer) -> "lxmf"
         isMesh(peer) -> "mesh"
@@ -52,6 +68,7 @@ object Peers {
 
     /** The ways a message to this peer can go. */
     fun transportsFor(peer: String): List<String> = when {
+        isTak(peer) -> listOf("tak")
         isHub(peer) -> listOf("hub")
         isLxmf(peer) -> listOf("lxmf")
         isMesh(peer) -> listOf("mesh")
@@ -68,6 +85,7 @@ object Peers {
         peer == LEGACY_SELF -> "Sent from this phone"
         isLxmf(peer) -> lxmfName(peer) ?: "Reticulum ${peer.take(8)}"
         isHub(peer) -> peer.removePrefix(HUB_PREFIX)
+        isTak(peer) -> takCallsign(peer).ifEmpty { takUid(peer) }
         else -> peer
     }
 
@@ -83,6 +101,7 @@ object Peers {
         isMeshNode(peer) -> peer
         isLxmf(peer) -> "By Reticulum (LXMF), $peer"
         isHub(peer) -> "Through the Hub to its MeshSat app"
+        isTak(peer) -> "On TAK, through the Hub"
         isSatellite(peer) -> "By satellite, through Rock7 to the Hub"
         peer == MESH_ALL -> "The mesh channel"
         else -> null

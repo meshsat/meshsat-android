@@ -48,9 +48,35 @@ data class CotDetail(
     val status: CotStatus? = null,
     val emergency: CotEmergency? = null,
     val remarks: CotRemarks? = null,
+    /** A GeoChat's routing, as ATAK writes it (MESHSAT-1707). */
+    val chat: CotChat? = null,
+    val link: CotLink? = null,
+    val marti: List<CotDest> = emptyList(),
 )
 
-data class CotContact(val callsign: String)
+/**
+ * [endpoint] "*:-1:stcp" says the contact is reached through the server it came from, which is
+ * what lets a TAK client offer chat with it (MESHSAT-1707).
+ */
+data class CotContact(val callsign: String, val endpoint: String = "")
+
+/** A GeoChat's __chat: [chatroom] and [id] name the recipient, [senderCallsign] the sender. */
+data class CotChat(
+    val id: String,
+    val chatroom: String,
+    val senderCallsign: String,
+    val messageId: String = "",
+    val parent: String = "RootContactGroup",
+    val groupOwner: String = "false",
+    val uid0: String = "",
+    val uid1: String = "",
+)
+
+/** A link to another event; on a GeoChat, the sender. */
+data class CotLink(val uid: String, val type: String = "", val relation: String = "")
+
+/** One recipient a server routes to: by uid (iTAK) or callsign (ATAK, WinTAK). */
+data class CotDest(val uid: String = "", val callsign: String = "")
 
 data class CotGroup(val name: String = "Cyan", val role: String = "Team Member")
 
@@ -62,7 +88,7 @@ data class CotStatus(val battery: String = "")
 
 data class CotEmergency(val type: String, val text: String)
 
-data class CotRemarks(val source: String = "", val text: String)
+data class CotRemarks(val source: String = "", val text: String, val to: String = "", val time: String = "")
 
 /** CoT event type constants — must match Bridge/Hub exactly. */
 object CotType {

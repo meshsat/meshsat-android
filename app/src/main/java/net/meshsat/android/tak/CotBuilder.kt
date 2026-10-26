@@ -16,6 +16,15 @@ object CotBuilder {
     private const val COT_TIME_FORMAT = "yyyy-MM-dd'T'HH:mm:ss'Z'"
     private const val DEFAULT_STALE_SEC = 300
 
+    /** A contact reached through its server: what lets a TAK client offer chat with it (MESHSAT-1707). */
+    const val TAK_ENDPOINT = "*:-1:stcp"
+
+    /** ATAK's name and id for the room every contact is in. */
+    const val CHAT_ROOM = "All Chat Rooms"
+
+    /** A GeoChat lives a day, as ATAK writes it. */
+    private const val CHAT_STALE_SEC = 86_400
+
     private fun nowUtc(): Date = Date()
 
     private fun formatTime(date: Date): String {
@@ -60,7 +69,7 @@ object CotBuilder {
             stale = staleTime(now, staleSec),
             point = CotPoint(lat = lat, lon = lon, hae = alt, ce = 10.0, le = 10.0),
             detail = CotDetail(
-                contact = CotContact(callsign = callsign),
+                contact = CotContact(callsign = callsign, endpoint = TAK_ENDPOINT),
                 group = CotGroup(),
                 precision = CotPrecision(),
                 track = CotTrack(course = course, speed = speed),
@@ -146,6 +155,41 @@ object CotBuilder {
             detail = CotDetail(
                 contact = CotContact(callsign = callsign),
                 remarks = CotRemarks(source = callsign, text = text),
+            ),
+        )
+    }
+
+    /**
+     * A GeoChat from one contact to another in the form ATAK writes it (MESHSAT-1707): __chat and
+     * chatgrp name both ends, link the sender, remarks the words and the recipient, and a dest asks
+     * the server to deliver it to the recipient only. Same shape as the Bridge's BuildGeoChat.
+     */
+    fun geoChat(
+        fromUid: String,
+        fromCallsign: String,
+        toUid: String,
+        toCallsign: String,
+        text: String,
+        messageId: String = java.util.UUID.randomUUID().toString(),
+    ): CotEvent {
+        val now = nowUtc()
+        val ts = formatTime(now)
+        return CotEvent(
+            uid = "GeoChat.$fromUid.$toUid.$messageId",
+            type = CotType.CHAT,
+            how = CotHow.HUMAN_GEOCHAT,
+            time = ts,
+            start = ts,
+            stale = staleTime(now, CHAT_STALE_SEC),
+            point = CotPoint(lat = 0.0, lon = 0.0, hae = 9999999.0, ce = 9999999.0, le = 9999999.0),
+            detail = CotDetail(
+                chat = CotChat(
+                    id = toUid, chatroom = toCallsign, senderCallsign = fromCallsign, messageId = messageId,
+                    uid0 = fromUid, uid1 = toUid,
+                ),
+                link = CotLink(uid = fromUid, type = CotType.POSITION, relation = "p-p"),
+                remarks = CotRemarks(source = "BAO.F.ATAK.$fromUid", text = text, to = toUid, time = ts),
+                marti = listOf(CotDest(uid = toUid, callsign = toCallsign)),
             ),
         )
     }

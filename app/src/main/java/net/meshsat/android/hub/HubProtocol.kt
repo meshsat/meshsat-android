@@ -80,6 +80,12 @@ class HubTopics private constructor(val root: String) {
     fun takCotOut(bridgeID: String) = "$root/bridge/${segment(bridgeID)}/tak/cot/out"
 
     /**
+     * A chat a dispatcher addressed to this phone, delivered by the Hub to this phone alone, on its
+     * own subtree; only the Hub may publish it (meshsat-hub MESHSAT-1706).
+     */
+    fun takCotInFor(bridgeID: String) = "$root/bridge/${segment(bridgeID)}/tak/cot/in"
+
+    /**
      * The Hub app route hub_msg (MESHSAT-1584): this phone publishes its own msg/out and msg/ack;
      * the Hub publishes msg/in and msg/status to it. The phone is a bridge principal (C4.1).
      */
