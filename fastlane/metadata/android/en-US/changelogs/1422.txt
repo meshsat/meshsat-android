@@ -1,0 +1,1 @@
+TAK: a dispatcher on TAK, or an operator on the Hub's map, can now write to this phone. The message arrives as a chat with a notification, and your answer goes back to them through the Hub. Your position on TAK now offers chat with you.
