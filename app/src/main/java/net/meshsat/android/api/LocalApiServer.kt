@@ -59,9 +59,11 @@ class LocalApiServer(
     private val configManager: ConfigManager?,
     private val restartCallback: (() -> Unit)? = null,
     private val smsSendCallback: ((to: String, text: String) -> Unit)? = null,
-    /** LXMF send (MESHSAT-1553): destination hex, content, method (null = auto); returns the message hash. */
-    private val lxmfSendCallback: ((dest: String, content: String, method: net.meshsat.android.lxmf.LxMethod?) -> String)? = null,
+    /** LXMF send (MESHSAT-1553): destination hex, content, method (null = auto), attachments (MESHSAT-1735); returns the message hash. */
+    private val lxmfSendCallback: ((dest: String, content: String, method: net.meshsat.android.lxmf.LxMethod?, attachments: List<net.meshsat.android.lxmf.LxAttachment>) -> String)? = null,
     private val lxmfMessagesCallback: ((limit: Int) -> List<net.meshsat.android.data.Message>)? = null,
+    /** The voice note and photo kept with a message row (MESHSAT-1735). */
+    private val lxmfAttachmentsCallback: ((messageId: Long) -> List<net.meshsat.android.data.MessageAttachmentEntity>)? = null,
     /** RNode settings (rnode_enabled, rnode_port, rnode_preset, rnode_custom_params, rnode_airtime_limits), persisted and applied. */
     private val rnodeCallback: ((Map<String, String>) -> Unit)? = null,
     /** The propagation node choice ("", "none" or 32 hex; null keeps) and the sync interval in minutes (null keeps), persisted. */
@@ -198,6 +200,7 @@ class LocalApiServer(
             method == Method.POST && uri == "/api/lxmf/announce" -> handleLxmfAnnounce()
             method == Method.POST && uri == "/api/lxmf/send" -> handleLxmfSend(session)
             method == Method.GET && uri == "/api/lxmf/messages" -> handleLxmfMessages(session)
+            method == Method.GET && uri.startsWith("/api/lxmf/messages/") -> handleLxmfAttachments(uri)
             method == Method.GET && uri == "/api/lxmf/propagation" -> handleLxmfPropagation()
             method == Method.POST && uri == "/api/lxmf/propagation" -> handleLxmfPropagationSet(session)
             method == Method.POST && uri == "/api/lxmf/sync" -> handleLxmfSync(session)
@@ -551,7 +554,11 @@ class LocalApiServer(
         return jsonOk(JSONObject().put("sent", st.announce()).put("address", st.lxmfAddress))
     }
 
-    /** {"dest": 32 hex, "content": text, "title"?: text, "method"?: "auto"|"direct"|"opportunistic"} */
+    /**
+     * {"dest": 32 hex, "content": text, "title"?: text, "method"?: "auto"|"direct"|"opportunistic",
+     *  "audio"?: {"mode": n, "data_b64": ...}, "image"?: {"format": "webp", "data_b64": ...}}, as the
+     * Bridge's route takes them (MESHSAT-1735); content may be empty when the message carries one.
+     */
     private fun handleLxmfSend(session: IHTTPSession): Response {
         val body = readBody(session) ?: return jsonError(Response.Status.BAD_REQUEST, "empty body")
         val json = try { JSONObject(body) } catch (e: Exception) { return jsonError(Response.Status.BAD_REQUEST, "bad json") }
@@ -564,12 +571,60 @@ class LocalApiServer(
             "propagated" -> net.meshsat.android.lxmf.LxMethod.PROPAGATED
             else -> null
         }
+        val atts = ArrayList<net.meshsat.android.lxmf.LxAttachment>(2)
+        try {
+            json.optJSONObject("image")?.let { o ->
+                atts.add(net.meshsat.android.lxmf.LxAttachment.image(o.optString("format", net.meshsat.android.lxmf.LxAttachments.IMAGE_WEBP), java.util.Base64.getDecoder().decode(o.optString("data_b64", ""))))
+            }
+            json.optJSONObject("audio")?.let { o ->
+                atts.add(net.meshsat.android.lxmf.LxAttachment.audio(o.optInt("mode", net.meshsat.android.lxmf.LxAttachments.AUDIO_OPUS_OGG), java.util.Base64.getDecoder().decode(o.optString("data_b64", ""))))
+            }
+        } catch (e: Exception) {
+            return jsonError(Response.Status.BAD_REQUEST, "attachment: ${e.message}")
+        }
+        if (net.meshsat.android.lxmf.LxAttachments.totalBytes(atts) > net.meshsat.android.lxmf.LxAttachments.MAX_BYTES) {
+            return jsonError(Response.Status.PAYLOAD_TOO_LARGE, "attachments exceed ${net.meshsat.android.lxmf.LxAttachments.MAX_BYTES} bytes")
+        }
+        for (a in atts) a.validate()?.let { return jsonError(Response.Status.BAD_REQUEST, it) }
+        if (content.isEmpty() && atts.isEmpty()) return jsonError(Response.Status.BAD_REQUEST, "nothing to send")
         val svc = lxmfSendCallback ?: return jsonError(Response.Status.SERVICE_UNAVAILABLE, "no sender")
         return try {
-            jsonOk(JSONObject().put("hash", svc(dest, content, method)))
+            jsonOk(JSONObject().put("hash", svc(dest, content, method, atts)))
         } catch (e: Exception) {
             jsonError(Response.Status.SERVICE_UNAVAILABLE, e.message ?: "send failed")
         }
+    }
+
+    /**
+     * GET /api/lxmf/messages/{id}/attachments lists a row's attachments in order (the image
+     * first), each with kind, mode or format, size, content_type and url; .../attachments/{n}
+     * is the bytes (Codec2 frames as audio/codec2 with X-LXMF-Audio-Mode, an Opus note as
+     * audio/ogg, a photo as image/webp), the Bridge's routes (MESHSAT-1735).
+     */
+    private fun handleLxmfAttachments(uri: String): Response {
+        val parts = uri.removePrefix("/api/lxmf/messages/").split('/')
+        val id = parts.getOrNull(0)?.toLongOrNull() ?: return jsonError(Response.Status.BAD_REQUEST, "message id must be a row id")
+        if (parts.getOrNull(1) != "attachments") return jsonError(Response.Status.NOT_FOUND, "not found")
+        val cb = lxmfAttachmentsCallback ?: return jsonError(Response.Status.SERVICE_UNAVAILABLE, "no store")
+        val rows = cb(id)
+        if (parts.size == 2) {
+            return jsonOk(JSONObject().put("message_id", id).put("attachments", JSONArray().apply {
+                rows.forEachIndexed { n, r ->
+                    val a = r.toAttachment()
+                    put(JSONObject().apply {
+                        put("n", n); put("kind", r.kind); put("size", r.size); put("content_type", a.contentType)
+                        put("url", "/api/lxmf/messages/$id/attachments/$n")
+                        if (a.isAudio) put("mode", r.mode) else put("format", r.format)
+                    })
+                }
+            }))
+        }
+        val n = parts.getOrNull(2)?.toIntOrNull() ?: return jsonError(Response.Status.NOT_FOUND, "not found")
+        val row = rows.getOrNull(n) ?: return jsonError(Response.Status.NOT_FOUND, "no attachment $n")
+        val a = row.toAttachment()
+        val resp = newFixedLengthResponse(Response.Status.OK, a.contentType, java.io.ByteArrayInputStream(row.data), row.data.size.toLong())
+        if (a.isAudio) resp.addHeader("X-LXMF-Audio-Mode", row.mode.toString())
+        return resp
     }
 
     private fun propagationJson(st: net.meshsat.android.rns.RnsStack): JSONObject = JSONObject().apply {

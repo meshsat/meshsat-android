@@ -35,8 +35,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         HubOpMissingEntity::class,
         HubInboxEntity::class,
         LxmfMidEntity::class,
+        MessageAttachmentEntity::class,
     ],
-    version = 22,
+    version = 23,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -62,6 +63,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun smsPartReportDao(): SmsPartReportDao
     abstract fun hubMsgDao(): HubMsgDao
     abstract fun lxmfMidDao(): LxmfMidDao
+    abstract fun messageAttachmentDao(): MessageAttachmentDao
 
     companion object {
         @Volatile
@@ -320,6 +322,22 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * Voice notes and photos kept with their messages (MESHSAT-1735). Room's own CREATE
+         * statements for MessageAttachmentEntity, as for contacts below; nothing else changes.
+         */
+        val MIGRATION_22_23 = object : Migration(22, 23) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `message_attachments` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`message_id` INTEGER NOT NULL, `kind` TEXT NOT NULL, `mode` INTEGER NOT NULL, `format` TEXT NOT NULL, " +
+                        "`size` INTEGER NOT NULL, `data` BLOB NOT NULL, `created_at` INTEGER NOT NULL)"
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_message_attachments_message_id` ON `message_attachments` (`message_id`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_message_attachments_created_at` ON `message_attachments` (`created_at`)")
+            }
+        }
+
         /** Cards handed over by QR code (MESHSAT-566, 575); nothing else changes. */
         val MIGRATION_16_17 = object : Migration(16, 17) {
             override fun migrate(db: SupportSQLiteDatabase) {
@@ -352,7 +370,7 @@ abstract class AppDatabase : RoomDatabase() {
                     MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13,
                     MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16,
                     MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20,
-                    MIGRATION_20_21, MIGRATION_21_22,
+                    MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23,
                 )
                 .fallbackToDestructiveMigration()
                 .build()

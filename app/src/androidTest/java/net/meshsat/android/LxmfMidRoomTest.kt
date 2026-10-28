@@ -106,7 +106,7 @@ class LxmfMidRoomTest {
             it.version = 21
         }
         db = AppDatabase.build(context, name)
-        assertEquals(22, db.openHelper.readableDatabase.version)
+        assertEquals(23, db.openHelper.readableDatabase.version)
         assertEquals(1, count("SELECT COUNT(*) FROM messages WHERE text = 'before the upgrade'"))
         assertNotNull(db.insertLxmfOnce("aa", "m1", now, msg("after")))
         assertNull(db.insertLxmfOnce("aa", "m1", now, msg("after, again")))

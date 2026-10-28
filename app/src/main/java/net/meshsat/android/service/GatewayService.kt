@@ -36,6 +36,7 @@ import net.meshsat.android.crypto.MsvqscEncoder
 import net.meshsat.android.data.AppDatabase
 import net.meshsat.android.data.ForwardingRuleEntity
 import net.meshsat.android.data.Message
+import net.meshsat.android.data.insertAttachments
 import net.meshsat.android.data.insertLxmfOnce
 import net.meshsat.android.data.NodePosition
 import net.meshsat.android.data.SettingsRepository
@@ -110,6 +111,15 @@ class GatewayService : Service() {
         const val ACTION_SEND_TAK = "net.meshsat.android.SEND_TAK"
         /** "direct", "opportunistic" or absent for auto (MESHSAT-1553). */
         const val EXTRA_LXMF_METHOD = "lxmf_method"
+        /**
+         * With [ACTION_SEND_LXMF]: a voice note (an Ogg Opus stream, or Codec2 frames with their
+         * mode) and a photo (WebP) riding in the message's LXMF fields (MESHSAT-1735). Only a
+         * Reticulum send takes them; every other action carries text alone.
+         */
+        const val EXTRA_AUDIO = "audio"
+        const val EXTRA_AUDIO_MODE = "audio_mode"
+        const val EXTRA_IMAGE = "image"
+        const val EXTRA_IMAGE_FORMAT = "image_format"
         const val EXTRA_ADDRESS = "address"
         const val EXTRA_TEXT = "text"
         const val EXTRA_RECIPIENT = "recipient"
@@ -523,8 +533,15 @@ class GatewayService : Service() {
                     "propagated" -> net.meshsat.android.lxmf.LxMethod.PROPAGATED
                     else -> null
                 }
+                val attachments = ArrayList<net.meshsat.android.lxmf.LxAttachment>(2)
+                intent.getByteArrayExtra(EXTRA_IMAGE)?.takeIf { it.isNotEmpty() }?.let {
+                    attachments.add(net.meshsat.android.lxmf.LxAttachment.image(intent.getStringExtra(EXTRA_IMAGE_FORMAT) ?: net.meshsat.android.lxmf.LxAttachments.IMAGE_WEBP, it))
+                }
+                intent.getByteArrayExtra(EXTRA_AUDIO)?.takeIf { it.isNotEmpty() }?.let {
+                    attachments.add(net.meshsat.android.lxmf.LxAttachment.audio(intent.getIntExtra(EXTRA_AUDIO_MODE, net.meshsat.android.lxmf.LxAttachments.AUDIO_OPUS_OGG), it))
+                }
                 try {
-                    sendLxmf(recipient, text, method)
+                    sendLxmf(recipient, text, method, attachments)
                 } catch (e: Exception) {
                     Log.w("MeshSat", "LXMF send to ${recipient.take(8)} refused: ${e.message}")
                     scope.launch {
@@ -787,7 +804,8 @@ class GatewayService : Service() {
                         }
                     },
                     smsSendCallback = smsSend,
-                    lxmfSendCallback = { dest, content, method -> sendLxmf(dest, content, method) },
+                    lxmfSendCallback = { dest, content, method, atts -> sendLxmf(dest, content, method, atts) },
+                    lxmfAttachmentsCallback = { messageId -> runBlocking { db.messageAttachmentDao().forMessageOnce(messageId) } },
                     rnodeCallback = { m -> scope.launch { if (applyRnodeSettings(m)) restartRnode() } },
                     lxmfPropagationCallback = { node, syncMin ->
                         scope.launch {
@@ -2344,8 +2362,18 @@ class GatewayService : Service() {
                         Log.i("MeshSat", "LXMF: a repeat of a message already taken from ${m.sourceHex.take(8)}, dropped")
                         return@launch
                     }
+                    // A voice note or a photo in the fields is kept with the row (MESHSAT-1735); over
+                    // the cap the text stays and the bytes go, as the Bridge does.
+                    val atts = net.meshsat.android.lxmf.LxAttachments.attachmentsOf(m.fields)
+                    if (atts.isNotEmpty()) {
+                        if (net.meshsat.android.lxmf.LxAttachments.totalBytes(atts) > net.meshsat.android.lxmf.LxAttachments.MAX_BYTES) {
+                            Log.w("MeshSat", "LXMF: attachments of a message from ${m.sourceHex.take(8)} dropped, ${net.meshsat.android.lxmf.LxAttachments.describe(atts)} is over the cap")
+                        } else {
+                            try { db.insertAttachments(id, atts) } catch (e: Exception) { Log.w("MeshSat", "LXMF: keeping the attachments of $id failed: ${e.message}") }
+                        }
+                    }
                     val from = GatewayService.rnsStack?.lxmf?.peerInfo(m.source)?.displayName ?: m.sourceHex.take(8)
-                    postMessageNotification("Reticulum: $from", m.contentString)
+                    postMessageNotification("Reticulum: $from", m.contentString.ifBlank { atts.joinToString(" and ") { if (it.isAudio) "Voice note" else "Photo" } })
                     interfaceManager?.recordActivity(m.iface)
                 }
             },
@@ -2402,14 +2430,22 @@ class GatewayService : Service() {
 
     /**
      * Sends an LXMF message to a 32-hex delivery address and records it in the conversation;
-     * [method] null is auto (direct across the satellite). Returns the message hash.
+     * [method] null is auto (direct across the satellite). A voice note or a photo in
+     * [attachments] rides in the message's fields (MESHSAT-1735) and is kept with the row;
+     * a message that outgrows one packet goes as a resource on the link, as the router does.
+     * Returns the message hash.
      */
-    fun sendLxmf(destHex: String, text: String, method: net.meshsat.android.lxmf.LxMethod? = null): String {
+    fun sendLxmf(destHex: String, text: String, method: net.meshsat.android.lxmf.LxMethod? = null, attachments: List<net.meshsat.android.lxmf.LxAttachment> = emptyList()): String {
         val stack = rnsStack ?: throw IllegalStateException("Reticulum node not running")
         val dest = ByteArray(16) { i -> destHex.substring(2 * i, 2 * i + 2).toInt(16).toByte() }
+        if (text.isBlank() && attachments.isEmpty()) throw IllegalArgumentException("nothing to send")
         // Each message this phone writes carries its own mid (UUIDv7); the router's retries resend
         // the same message, so the same mid. [MESHSAT-1641]
-        val o = stack.send(dest, text, method = method, fields = net.meshsat.android.lxmf.LxMid.fields(net.meshsat.android.lxmf.LxMid.newMid()))
+        val fields = net.meshsat.android.lxmf.LxAttachments.withAttachments(
+            net.meshsat.android.lxmf.LxMid.fields(net.meshsat.android.lxmf.LxMid.newMid()), attachments,
+        )
+        val o = stack.send(dest, text, method = method, fields = fields)
+        val preview = net.meshsat.android.lxmf.LxAttachments.preview(text, attachments)
         scope.launch {
             val id = db.messageDao().insert(
                 Message(
@@ -2417,11 +2453,14 @@ class GatewayService : Service() {
                     text = text, encrypted = false, timestamp = System.currentTimeMillis(), forwarded = true, forwardedTo = LXMF_QUEUED,
                 )
             )
+            if (attachments.isNotEmpty()) {
+                try { db.insertAttachments(id, attachments) } catch (e: Exception) { Log.w("MeshSat", "LXMF: keeping the attachments of $id failed: ${e.message}") }
+            }
             lxmfRows[o.hashHex] = id
             val ledgerId = db.messageDeliveryDao().insert(
                 net.meshsat.android.data.MessageDeliveryEntity(
                     msgRef = "lxmf:${o.hashHex}", channel = LXMF_CHANNEL, status = ledgerStatus(o.state),
-                    payload = text.toByteArray(Charsets.UTF_8), textPreview = text.take(80), maxRetries = 0, recipient = destHex,
+                    payload = text.toByteArray(Charsets.UTF_8), textPreview = preview.take(80), maxRetries = 0, recipient = destHex,
                 )
             )
             lxmfLedger[o.hashHex] = ledgerId

@@ -80,6 +80,21 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import net.meshsat.android.ui.components.goToSettingsText
 import net.meshsat.android.ui.components.rememberPermissionAsk
+import net.meshsat.android.ui.components.PendingAttachments
+import net.meshsat.android.ui.components.PhotoCard
+import net.meshsat.android.ui.components.RecordNoteButton
+import net.meshsat.android.ui.components.TranscriptProposal
+import net.meshsat.android.ui.components.VoiceNoteCard
+import net.meshsat.android.lxmf.AttachmentPolicy
+import net.meshsat.android.lxmf.LxAttachments
+import net.meshsat.android.media.PhotoShrinker
+import net.meshsat.android.data.MessageAttachmentEntity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material.icons.filled.AddPhotoAlternate
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import net.meshsat.android.ble.MeshtasticBle
 import net.meshsat.android.bt.IridiumSpp
 import net.meshsat.android.crypto.AesGcmCrypto
@@ -496,6 +511,21 @@ fun ConversationChatView(
     // choose (Auto: opportunistic off the satellite), Opportunistic (one packet, no link), or
     // Propagated (parked at a propagation node until the peer syncs). Direct is the safe default (MESHSAT-1553).
     var lxmfMethod by remember { mutableStateOf("direct") }
+    // A voice note or a photo waiting to go with the next message (MESHSAT-1735); only a
+    // Reticulum message takes them along, the policy line under the box says what happens.
+    var pendingAudio by remember { mutableStateOf<ByteArray?>(null) }
+    var pendingAudioMs by remember { mutableStateOf(0L) }
+    var pendingImage by remember { mutableStateOf<ByteArray?>(null) }
+    var transcript by remember { mutableStateOf<String?>(null) }
+    val attachments by db.messageAttachmentDao().forConversation(peer).collectAsState(initial = emptyList())
+    val pickPhoto = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) scope.launch {
+            val budget = LxAttachments.MAX_BYTES - (pendingAudio?.size ?: 0)
+            val bytes = withContext(Dispatchers.IO) { PhotoShrinker.shrink(context, uri, budget) }
+            if (bytes == null) Toast.makeText(context, "That picture could not be read or made small enough.", Toast.LENGTH_LONG).show()
+            else pendingImage = bytes
+        }
+    }
     val meshNodes = GatewayService.meshtasticBle?.nodes.collectOrNull()?.value.orEmpty()
 
     val meshConnected = GatewayService.meshtasticBle?.state.collectOrNull()?.value == MeshtasticBle.State.Connected
@@ -574,7 +604,7 @@ fun ConversationChatView(
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             items(messages, key = { it.id }) { msg ->
-                ChatBubble(msg = msg, activeKey = activeKey)
+                ChatBubble(msg = msg, activeKey = activeKey, attachments = attachments.filter { it.messageId == msg.id })
             }
         }
 
@@ -596,11 +626,30 @@ fun ConversationChatView(
                 "tak" -> composeBytes <= TAK_REPLY_MAX
                 else -> true
             }
+            val hasAttachments = pendingAudio != null || pendingImage != null
+            val mayAttach = AttachmentPolicy.carries(sendTransport)
+            val canSend = fitsTheLink && AttachmentPolicy.canSend(sendTransport, composeText, hasAttachments) &&
+                AttachmentPolicy.fits(pendingAudio?.size ?: 0, pendingImage?.size ?: 0)
             val send = {
-                if (composeText.isNotBlank() && fitsTheLink) {
-                    sendMessage(context, composeText.trim(), sendTransport, peer, meshConnected, iridiumConnected, lxmfMethod)
+                if (canSend) {
+                    sendMessage(
+                        context, composeText.trim(), sendTransport, peer, meshConnected, iridiumConnected, lxmfMethod,
+                        audio = if (mayAttach) pendingAudio else null, image = if (mayAttach) pendingImage else null,
+                    )
                     composeText = ""
+                    pendingAudio = null; pendingAudioMs = 0; pendingImage = null; transcript = null
                 }
+            }
+            PendingAttachments(
+                audio = pendingAudio, audioMs = pendingAudioMs, image = pendingImage,
+                onRemoveAudio = { pendingAudio = null; pendingAudioMs = 0 }, onRemoveImage = { pendingImage = null },
+            )
+            transcript?.let { heard ->
+                TranscriptProposal(
+                    text = heard,
+                    onUse = { composeText = if (composeText.isBlank()) heard else composeText.trimEnd() + " " + heard; transcript = null },
+                    onDiscard = { transcript = null },
+                )
             }
             if (sendTransport == "lxmf") {
                 val propagationKnown = GatewayService.rnsStack?.lxmf?.propagationNode() != null
@@ -618,7 +667,19 @@ fun ConversationChatView(
                     }
                 }
             }
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                RecordNoteButton(
+                    onNote = { ogg, ms -> pendingAudio = ogg; pendingAudioMs = ms },
+                    onTranscript = { transcript = it },
+                    enabled = pendingAudio == null,
+                )
+                IconButton(
+                    onClick = { pickPhoto.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                    enabled = pendingImage == null,
+                    modifier = Modifier.size(40.dp),
+                ) {
+                    Icon(Icons.Default.AddPhotoAlternate, contentDescription = "Attach a photo", tint = if (pendingImage == null) MeshSatTeal else MeshSatTextMuted)
+                }
                 OutlinedTextField(
                     value = composeText,
                     onValueChange = { composeText = it },
@@ -647,15 +708,24 @@ fun ConversationChatView(
                 )
                 IconButton(
                     onClick = send,
-                    enabled = composeText.isNotBlank() && fitsTheLink,
+                    enabled = canSend,
                     modifier = Modifier.size(48.dp),
                 ) {
                     Icon(
                         Icons.AutoMirrored.Filled.Send,
                         contentDescription = "Send",
-                        tint = if (composeText.isNotBlank() && fitsTheLink) MeshSatTeal else MeshSatTextMuted,
+                        tint = if (canSend) MeshSatTeal else MeshSatTextMuted,
                     )
                 }
+            }
+            // What goes and what stays, before the send: the policy line first, then the bearer's own.
+            AttachmentPolicy.note(sendTransport, pendingAudio?.size ?: 0, pendingAudioMs, pendingImage?.size ?: 0)?.let { note ->
+                Text(
+                    text = note,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (mayAttach) MeshSatTextSecondary else MeshSatAmber,
+                    modifier = Modifier.padding(start = 4.dp, top = 4.dp),
+                )
             }
             Text(
                 text = composeHint(sendTransport, composeText, peer, meshConnected, iridiumConnected),
@@ -719,6 +789,8 @@ private fun sendMessage(
     meshConnected: Boolean,
     iridiumConnected: Boolean,
     lxmfMethod: String = "direct",
+    audio: ByteArray? = null,
+    image: ByteArray? = null,
 ) {
     when (transport) {
         "tak" -> {
@@ -741,13 +813,15 @@ private fun sendMessage(
         }
         "lxmf" -> {
             // A Reticulum message to an LXMF address; the row shows queued, sent, delivered or failed.
-            context.startService(
-                Intent(context, GatewayService::class.java)
-                    .setAction(GatewayService.ACTION_SEND_LXMF)
-                    .putExtra(GatewayService.EXTRA_TEXT, text)
-                    .putExtra(GatewayService.EXTRA_RECIPIENT, peer)
-                    .putExtra(GatewayService.EXTRA_LXMF_METHOD, lxmfMethod)
-            )
+            // A voice note or a photo rides in its fields (MESHSAT-1735), the one bearer that takes them.
+            val intent = Intent(context, GatewayService::class.java)
+                .setAction(GatewayService.ACTION_SEND_LXMF)
+                .putExtra(GatewayService.EXTRA_TEXT, text)
+                .putExtra(GatewayService.EXTRA_RECIPIENT, peer)
+                .putExtra(GatewayService.EXTRA_LXMF_METHOD, lxmfMethod)
+            if (audio != null) intent.putExtra(GatewayService.EXTRA_AUDIO, audio).putExtra(GatewayService.EXTRA_AUDIO_MODE, LxAttachments.AUDIO_OPUS_OGG)
+            if (image != null) intent.putExtra(GatewayService.EXTRA_IMAGE, image).putExtra(GatewayService.EXTRA_IMAGE_FORMAT, LxAttachments.IMAGE_WEBP)
+            context.startService(intent)
         }
         "sms" -> {
             // Send SMS to the peer (encryption handled in GatewayService)
@@ -868,7 +942,7 @@ private fun hubMark(s: String) = when {
  * If key is deleted/missing, shows ciphertext for encrypted messages.
  */
 @Composable
-private fun ChatBubble(msg: Message, activeKey: String?) {
+private fun ChatBubble(msg: Message, activeKey: String?, attachments: List<MessageAttachmentEntity> = emptyList()) {
     val context = LocalContext.current
     val isSelf = msg.direction == "tx"
     val transportColor = when (msg.transport) {
@@ -973,14 +1047,18 @@ private fun ChatBubble(msg: Message, activeKey: String?) {
                 }
             }
 
-            // Message text
-            SelectionContainer {
+            // Message text; a note or a photo without one shows the attachment alone (MESHSAT-1735).
+            if (displayText.isNotEmpty() || attachments.isEmpty()) SelectionContainer {
                 Text(
                     text = displayText,
                     style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier.padding(top = 4.dp),
                     color = if (isShowingCiphertext) MeshSatTextMuted else MaterialTheme.colorScheme.onSurface,
                 )
+            }
+            for (a in attachments) {
+                val att = a.toAttachment()
+                if (att.isImage) PhotoCard(att) else if (att.isAudio) VoiceNoteCard(a.id, att)
             }
         }
     }
