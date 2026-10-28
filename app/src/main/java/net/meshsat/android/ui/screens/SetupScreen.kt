@@ -27,6 +27,7 @@ import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material.icons.outlined.Outbox
 import androidx.compose.material.icons.outlined.Radio
 import androidx.compose.material.icons.outlined.Schedule
+import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material.icons.outlined.Sms
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.HorizontalDivider
@@ -177,7 +178,10 @@ fun AdvancedScreen(navigate: (String) -> Unit) {
 fun SetupPageLinks(section: SetupSection, navigate: (String) -> Unit) {
     when (section) {
         SetupSection.Satellite -> NavRow(Icons.Outlined.Schedule, "Satellite passes", "When satellites are high overhead", { navigate("passes") })
-        SetupSection.Safety -> NavRow(Icons.Outlined.Fence, "Zones", "Alerts when someone enters or leaves an area", { navigate("geofence") })
+        SetupSection.Safety -> {
+            NavRow(Icons.Outlined.Warning, "Warnings", "Public warnings a MeshSat kit relayed over the mesh", { navigate("warnings") })
+            NavRow(Icons.Outlined.Fence, "Zones", "Alerts when someone enters or leaves an area", { navigate("geofence") })
+        }
         else -> Unit
     }
 }

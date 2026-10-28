@@ -80,6 +80,10 @@ class MeshSatApp : Application() {
             }
         )
 
+        // A public warning a kit relayed over the mesh: the alarm sound, and a quieter channel
+        // for tests and all-clears (MESHSAT-1734).
+        net.meshsat.android.warnings.WarningNotifier.createChannels(manager)
+
         // Default importance on purpose, with sound, vibration, lights and badge all off: a
         // channel below default, or a notification marked silent, has its icon hidden from the
         // status bar on Pixels, which is the whole point of this one (MESHSAT-1241).

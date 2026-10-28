@@ -404,11 +404,22 @@ class GatewayService : Service() {
     private var configManager: ConfigManager? = null
     private var localApiServer: LocalApiServer? = null
 
+    /** Public warnings a kit relays over the mesh: the state behind the alarm (MESHSAT-1734). */
+    private var warningIntake: net.meshsat.android.warnings.WarningIntake? = null
+
     override fun onCreate() {
         super.onCreate()
         service = this
         settings = SettingsRepository(this)
         db = AppDatabase.getInstance(this)
+        warningIntake = net.meshsat.android.warnings.WarningIntake(db.warningDao())
+        scope.launch {
+            try {
+                db.warningDao().deleteOlderThan(System.currentTimeMillis() - net.meshsat.android.warnings.WarningIntake.KEEP_MS)
+            } catch (e: Exception) {
+                Log.w("MeshSat", "Warnings: old rows not pruned: ${e.message}")
+            }
+        }
 
         // Initialize SecureKeyStore early (triggers key migration from old storage — MESHSAT-194)
         net.meshsat.android.crypto.SecureKeyStore.getInstance(this)
@@ -3680,6 +3691,16 @@ class GatewayService : Service() {
                 ble.receivedData.collect { data ->
                     val result = MeshtasticProtocol.parseFromRadioFull(data) ?: return@collect
 
+                    // --- A public warning on ALERT_APP (MESHSAT-1734): never a chat ---
+                    result.alert?.let { msg ->
+                        ble.touchNode(msg.from)
+                        val dedupKey = "mesh:${msg.from}:${msg.id}"
+                        if (deduplicator.isDuplicateKey(dedupKey)) return@collect
+                        interfaceManager?.recordActivity("mesh_0")
+                        onMeshWarning(ble, msg)
+                        return@collect
+                    }
+
                     // --- Text message ---
                     result.textMessage?.let { msg ->
                         val nodeId = MeshtasticProtocol.formatNodeId(msg.from)
@@ -3687,6 +3708,13 @@ class GatewayService : Service() {
                         val dedupKey = "mesh:${msg.from}:${msg.id}"
                         if (deduplicator.isDuplicateKey(dedupKey)) {
                             Log.d("MeshSat", "Dedup: skipping duplicate mesh msg $dedupKey")
+                            return@collect
+                        }
+                        // The kit's plain-text copy of a warning, with its relay line: the alarm,
+                        // not a message in the mesh chat (MESHSAT-1734).
+                        if (net.meshsat.android.warnings.WarningText.isRelayedText(msg.text)) {
+                            interfaceManager?.recordActivity("mesh_0")
+                            onMeshWarning(ble, msg)
                             return@collect
                         }
                         db.messageDao().insert(
@@ -4380,6 +4408,30 @@ class GatewayService : Service() {
         } catch (e: Exception) {
             Log.w("MeshSat", "SMS to $recipient failed: ${e.message}")
             db.messageDao().setForwardedTo(messageId, net.meshsat.android.sms.SmsStatusReceiver.FAILED)
+        }
+    }
+
+    /**
+     * A warning a kit relayed over the mesh, on port 11 or as a text with the relay line
+     * (MESHSAT-1734): kept in the warnings table, the alarm raised or taken down. It is never a
+     * chat message and never forwarded by the rules: the kit relays, the phone alarms.
+     */
+    private suspend fun onMeshWarning(ble: MeshtasticBle, msg: MeshtasticProtocol.MeshTextMessage) {
+        val intake = warningIntake ?: return
+        val nodeId = MeshtasticProtocol.formatNodeId(msg.from)
+        val name = ble.nodes.value.firstOrNull { it.nodeNum == msg.from }?.longName?.ifBlank { null } ?: ""
+        when (val o = intake.onMesh(nodeId, name, msg.portnum, msg.text)) {
+            is net.meshsat.android.warnings.WarningIntake.Outcome.Alarm -> {
+                net.meshsat.android.warnings.WarningNotifier.alarm(this, o.warning)
+                Log.i("MeshSat", "Warning from $nodeId on port ${msg.portnum}: ${net.meshsat.android.warnings.WarningNotifier.title(o.warning)}")
+            }
+            is net.meshsat.android.warnings.WarningIntake.Outcome.Cleared -> {
+                net.meshsat.android.warnings.WarningNotifier.cleared(this, o.cancel, o.cleared)
+                Log.i("MeshSat", "Warning cancelled from $nodeId: ${o.cancel.event}, ${o.cleared.size} cleared")
+            }
+            net.meshsat.android.warnings.WarningIntake.Outcome.Duplicate ->
+                Log.d("MeshSat", "Warning from $nodeId on port ${msg.portnum} heard already")
+            net.meshsat.android.warnings.WarningIntake.Outcome.NotAWarning -> Unit
         }
     }
 

@@ -36,8 +36,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         HubInboxEntity::class,
         LxmfMidEntity::class,
         MessageAttachmentEntity::class,
+        WarningEntity::class,
     ],
-    version = 23,
+    version = 24,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -64,6 +65,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun hubMsgDao(): HubMsgDao
     abstract fun lxmfMidDao(): LxmfMidDao
     abstract fun messageAttachmentDao(): MessageAttachmentDao
+    abstract fun warningDao(): WarningDao
 
     companion object {
         @Volatile
@@ -338,6 +340,25 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * Public warnings a kit relayed over the mesh (MESHSAT-1734). Room's own CREATE statements
+         * for WarningEntity, as above; nothing else changes.
+         */
+        val MIGRATION_23_24 = object : Migration(23, 24) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `warnings` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`received_at` INTEGER NOT NULL, `port` INTEGER NOT NULL, `sender` TEXT NOT NULL, " +
+                        "`sender_name` TEXT NOT NULL, `kind` TEXT NOT NULL, `test` INTEGER NOT NULL, " +
+                        "`event` TEXT NOT NULL, `severity` TEXT NOT NULL, `until_utc` TEXT NOT NULL, " +
+                        "`text` TEXT NOT NULL, `label` TEXT NOT NULL, `raw` TEXT NOT NULL, `dedup_key` TEXT NOT NULL, " +
+                        "`cancelled_at` INTEGER NOT NULL, `replaced_at` INTEGER NOT NULL, `acknowledged_at` INTEGER NOT NULL)"
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_warnings_received_at` ON `warnings` (`received_at`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_warnings_dedup_key` ON `warnings` (`dedup_key`)")
+            }
+        }
+
         /** Cards handed over by QR code (MESHSAT-566, 575); nothing else changes. */
         val MIGRATION_16_17 = object : Migration(16, 17) {
             override fun migrate(db: SupportSQLiteDatabase) {
@@ -370,7 +391,7 @@ abstract class AppDatabase : RoomDatabase() {
                     MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13,
                     MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16,
                     MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20,
-                    MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23,
+                    MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23, MIGRATION_23_24,
                 )
                 .fallbackToDestructiveMigration()
                 .build()

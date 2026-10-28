@@ -71,6 +71,8 @@ import net.meshsat.android.ui.screens.AboutScreen
 import net.meshsat.android.ui.components.NodeLinkBanner
 import net.meshsat.android.ui.screens.SosBanner
 import net.meshsat.android.ui.screens.SosScreen
+import net.meshsat.android.ui.screens.WarningOverlay
+import net.meshsat.android.ui.screens.WarningsScreen
 import net.meshsat.android.ui.screens.AdvancedScreen
 import net.meshsat.android.ui.screens.NodeLogScreen
 import net.meshsat.android.ui.screens.AuditScreen
@@ -265,7 +267,11 @@ fun MeshSatUI(openRoute: String? = null, onRouteOpened: () -> Unit = {}) {
                 composable("nodelog") { SubScreen("Node log", back) { NodeLogScreen() } }
                 composable("about") { SubScreen("About", back) { AboutScreen() } }
                 composable("sos") { SubScreen("SOS", back) { SosScreen(navigate) } }
+                composable("warnings") { SubScreen("Warnings", back) { WarningsScreen() } }
             }
+            // A public warning a kit relayed takes the whole screen until it is dismissed
+            // (MESHSAT-1734); the list itself shows it in place.
+            if (currentRoute != "warnings") WarningOverlay(onOpen = { navigate("warnings") })
         }
     }
 }

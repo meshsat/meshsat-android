@@ -263,6 +263,8 @@ object MeshtasticProtocol {
      */
     data class FromRadioResult(
         val textMessage: MeshTextMessage? = null,
+        /** A text on ALERT_APP (port 11): a public warning a kit relayed, never a chat (MESHSAT-1734). */
+        val alert: MeshTextMessage? = null,
         val position: MeshPosition? = null,
         val telemetry: MeshTelemetry? = null,
         val environmentTelemetry: MeshEnvironmentTelemetry? = null,
@@ -320,6 +322,8 @@ object MeshtasticProtocol {
         return when (portnum) {
             Portnums.PortNum.TEXT_MESSAGE_APP ->
                 FromRadioResult(textMessage = MeshtasticProtoAdapter.extractTextMessage(fromRadio))
+            Portnums.PortNum.ALERT_APP ->
+                FromRadioResult(alert = MeshtasticProtoAdapter.extractAlert(fromRadio))
             Portnums.PortNum.POSITION_APP ->
                 FromRadioResult(position = MeshtasticProtoAdapter.extractPosition(fromRadio))
             Portnums.PortNum.TELEMETRY_APP -> {

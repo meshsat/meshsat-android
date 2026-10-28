@@ -44,6 +44,27 @@ object MeshtasticProtoAdapter {
         )
     }
 
+    /**
+     * A text on ALERT_APP (port 11), the same shape as a text message: what a MeshSat kit sends
+     * for a public warning, with a BEL the reader drops (MESHSAT-1734). Null if not an alert.
+     */
+    fun extractAlert(fromRadio: MeshProtos.FromRadio): MeshtasticProtocol.MeshTextMessage? {
+        if (!fromRadio.hasPacket()) return null
+        val pkt = fromRadio.packet
+        if (!pkt.hasDecoded()) return null
+        val decoded = pkt.decoded
+        if (decoded.portnum != Portnums.PortNum.ALERT_APP) return null
+
+        return MeshtasticProtocol.MeshTextMessage(
+            from = pkt.from.toLong() and 0xFFFFFFFFL,
+            to = pkt.to.toLong() and 0xFFFFFFFFL,
+            channel = pkt.channel,
+            portnum = decoded.portnumValue,
+            text = decoded.payload.toStringUtf8(),
+            id = pkt.id.toLong() and 0xFFFFFFFFL,
+        )
+    }
+
     /** Extract a position update from FromRadio, or null if not a position packet. */
     fun extractPosition(fromRadio: MeshProtos.FromRadio): MeshtasticProtocol.MeshPosition? {
         if (!fromRadio.hasPacket()) return null

@@ -279,7 +279,7 @@ class DeliveryWorkerRoomTest {
             it.version = 19
         }
         db = AppDatabase.build(context, name)
-        assertEquals(23, db.openHelper.readableDatabase.version)
+        assertEquals(24, db.openHelper.readableDatabase.version)
         assertEquals("sent" to null, row(d))
 
         register("a", 1, d)

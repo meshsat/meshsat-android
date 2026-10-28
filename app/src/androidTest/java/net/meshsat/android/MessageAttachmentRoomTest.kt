@@ -118,7 +118,7 @@ class MessageAttachmentRoomTest {
             it.version = 22
         }
         db = AppDatabase.build(context, name)
-        assertEquals(23, db.openHelper.readableDatabase.version)
+        assertEquals(24, db.openHelper.readableDatabase.version)
         assertEquals(1, count("SELECT COUNT(*) FROM messages WHERE text = 'before the upgrade'"))
         val id = db.messageDao().insert(msg("rx", "aa", "after"))
         assertEquals(1, db.insertAttachments(id, listOf(audio(10))).size)

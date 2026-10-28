@@ -109,7 +109,7 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_ROUTE = "net.meshsat.android.ROUTE"
-        private val OPENABLE_ROUTES = setOf("sos", "messages", "home")
+        private val OPENABLE_ROUTES = setOf("sos", "messages", "home", "warnings")
     }
 
     /** A `meshsat://provision/` link, confirmed by [ProvisionLinkDialog] (MESHSAT-1235). */
