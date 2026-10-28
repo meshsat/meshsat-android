@@ -26,6 +26,7 @@ import androidx.compose.material.icons.outlined.MonitorHeart
 import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material.icons.outlined.Outbox
 import androidx.compose.material.icons.outlined.Radio
+import androidx.compose.material.icons.outlined.Router
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material.icons.outlined.Sms
@@ -148,6 +149,7 @@ fun SetupScreen(navigate: (String) -> Unit) {
         NavRow(Icons.Outlined.Lock, "Messaging", "Encryption, compression, quick messages", { navigate("setup/messaging") })
         NavRow(Icons.Outlined.Map, "Maps", "Offline maps for when there is no internet", { navigate("setup/maps") })
         NavRow(Icons.Outlined.Radio, "Ham radio, TAK and Reticulum", "Other networks MeshSat can bridge", { navigate("setup/integrations") })
+        NavRow(Icons.Outlined.Router, "Field kits on your network", "A kit's address on the LAN and its API token", { navigate("setup/kits") })
         NavRow(Icons.Outlined.Tune, "Mesh radio settings", "Region, channels, transmit power", { navigate("radio-config") })
 
         GroupTitle("For experts")

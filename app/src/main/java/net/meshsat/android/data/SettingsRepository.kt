@@ -119,6 +119,8 @@ class SettingsRepository(private val context: Context) {
         val KEY_HUB_MSG_ENABLED = booleanPreferencesKey("hub_msg_enabled")
         val KEY_HUB_RELAY_TARGET = stringPreferencesKey("hub_relay_target")
         val KEY_HUB_RELAY_URL = stringPreferencesKey("hub_relay_url")
+        /** Field kits reached on the LAN, a JSON list of id, name, url (MESHSAT-1738). */
+        val KEY_KITS = stringPreferencesKey("kits_lan")
 
         // mTLS settings (MESHSAT-387)
         val KEY_HUB_CLIENT_CERT = stringPreferencesKey("hub_client_cert_pem")
@@ -757,6 +759,39 @@ class SettingsRepository(private val context: Context) {
     suspend fun setHubMsgEnabled(enabled: Boolean) { context.dataStore.edit { it[KEY_HUB_MSG_ENABLED] = enabled } }
     suspend fun setHubRelayTarget(bridgeId: String) { context.dataStore.edit { it[KEY_HUB_RELAY_TARGET] = bridgeId.trim() } }
     suspend fun setHubRelayUrl(url: String) { context.dataStore.edit { it[KEY_HUB_RELAY_URL] = url.trim() } }
+
+    // --- Field kits on the LAN (MESHSAT-1738) ---
+    // The kits' names and addresses are plain settings; each kit's API token lives in the
+    // encrypted preferences under its id, never in the DataStore and never in a log.
+
+    /** The kits this phone reaches directly, in the order they were added. */
+    val kits: Flow<List<net.meshsat.android.kit.KitConnection>> =
+        context.dataStore.data.map { net.meshsat.android.kit.KitConnection.decodeList(it[KEY_KITS] ?: "") }
+
+    suspend fun setKits(list: List<net.meshsat.android.kit.KitConnection>) {
+        context.dataStore.edit { it[KEY_KITS] = net.meshsat.android.kit.KitConnection.encodeList(list) }
+    }
+
+    /** Add or replace one kit by id. */
+    suspend fun putKit(kit: net.meshsat.android.kit.KitConnection) {
+        val current = kits.first()
+        setKits(if (current.any { it.id == kit.id }) current.map { if (it.id == kit.id) kit else it } else current + kit)
+    }
+
+    /** Forget a kit, its token with it. */
+    suspend fun removeKit(id: String) {
+        setKits(kits.first().filterNot { it.id == id })
+        secureStore.remove(net.meshsat.android.kit.KitConnection.tokenKey(id))
+    }
+
+    /** The API token for a kit, "" when none is kept. */
+    fun kitApiToken(id: String): String = secureStore.get(net.meshsat.android.kit.KitConnection.tokenKey(id)) ?: ""
+
+    fun setKitApiToken(id: String, token: String) {
+        val t = token.trim()
+        if (t.isEmpty()) secureStore.remove(net.meshsat.android.kit.KitConnection.tokenKey(id))
+        else secureStore.set(net.meshsat.android.kit.KitConnection.tokenKey(id), t)
+    }
 
     // --- mTLS settings (MESHSAT-387) ---
 

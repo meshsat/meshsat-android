@@ -113,6 +113,7 @@ enum class SetupSection(val title: String) {
     Node("Your MeshSat node"),
     Satellite("Satellite"),
     Hub("Hub"),
+    Kits("Field kits on your network"),
     Sms("SMS"),
     Safety("Safety"),
     Messaging("Messaging"),
@@ -2282,6 +2283,11 @@ fun SettingsScreen(navController: NavController? = null, section: SetupSection =
                     color = MeshSatTextMuted,
                 )
             }
+        }
+
+        if (section.shows(SetupSection.Kits)) {
+            // --- A kit's API on the LAN, with the token it may ask for (MESHSAT-1738) ---
+            KitsSection(settings)
         }
 
         if (section.shows(SetupSection.Hub)) {
