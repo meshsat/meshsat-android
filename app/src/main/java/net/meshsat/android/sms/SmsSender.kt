@@ -74,7 +74,7 @@ object SmsSender {
             text
         }
 
-        Log.d(TAG, "SMS to $to: ${text.length}B text → ${finalText.length} chars SMS" +
+        Log.d(TAG, "SMS out: ${text.length}B text → ${finalText.length} chars SMS" +
                 (if (compressed) " [codec ${frame[0]}]" else "") +
                 (if (keyed) " [encrypted]" else ""))
 
@@ -140,7 +140,7 @@ object SmsSender {
                     ?: return "The phone did not say whether the SMS left"
                 if (code != Activity.RESULT_OK) return sentFailure(code)
             }
-            Log.d(TAG, "SMS to $to left the phone (${parts.size} part(s))")
+            Log.d(TAG, "SMS out: left the phone (${parts.size} part(s))")
             return null
         } catch (e: SecurityException) {
             return "SMS is not allowed: allow it in Setup, SMS"

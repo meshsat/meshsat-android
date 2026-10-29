@@ -1473,11 +1473,28 @@ class GatewayService : Service() {
         }
     }
 
+    /**
+     * The orbit download starts once a satellite modem is set up, as the store description says:
+     * the node's Iridium pipe has been seen, or a RockBLOCK 9704's address is stored. Before that
+     * nothing is fetched; F-Droid's device test saw celestrak.org contacted 25 s into the first
+     * start of a phone with no modem at all (MESHSAT-1752). The passes screen's Update button is
+     * the one other way, on the user's tap.
+     */
+    private fun startTleRefreshOnceModemSetUp(fetcher: net.meshsat.android.satellite.TleFetcher) {
+        val pipe = meshtasticBle?.iridiumPipe ?: return
+        scope.launch {
+            combine(pipe, settings.iridium9704BtAddress) { p, addr9704 -> p != null || addr9704.isNotBlank() }
+                .first { it }
+            Log.i("MeshSat", "Satellite modem set up: orbit data is kept fresh from now on")
+            startTleRefresh(fetcher)
+        }
+    }
+
     private fun initPassScheduler() {
         val iridium = iridiumSpp ?: return
         // Offline first: the last download or the snapshot shipped in the app, never the network.
         val tleFetcher = net.meshsat.android.satellite.TleFetcher.forContext(this, db)
-        startTleRefresh(tleFetcher)
+        startTleRefreshOnceModemSetUp(tleFetcher)
         // Cache pass predictions to avoid recomputing SGP4 every 30s (MESHSAT-498)
         var cachedPasses: List<net.meshsat.android.satellite.PassPrediction> = emptyList()
         var cacheTimestampMs = 0L
@@ -1608,7 +1625,7 @@ class GatewayService : Service() {
                         val to = json.optString("to", "")
                         val text = json.optString("text", "")
                         if (!net.meshsat.android.sms.SmsCapability.included) {
-                            Log.i("MeshSat", "Hub asked for an SMS to $to: this edition has no SMS")
+                            Log.i("MeshSat", "Hub asked for an SMS: this edition has no SMS")
                         } else if (to.isNotBlank() && text.isNotBlank()) {
                             SmsSender.send(this@GatewayService, to, text)
                             db.messageDao().insert(
@@ -1617,7 +1634,7 @@ class GatewayService : Service() {
                                     text = text, timestamp = System.currentTimeMillis(),
                                 )
                             )
-                            Log.i("MeshSat", "SMS sent via Hub relay: to=$to len=${text.length}")
+                            Log.i("MeshSat", "SMS sent via Hub relay: len=${text.length}")
                         }
                     }
                     topic.contains("/tak/cot/in") -> {
@@ -4360,7 +4377,7 @@ class GatewayService : Service() {
     /** Send SMS message to a specific recipient (called from conversation compose). */
     private suspend fun sendSmsMessage(text: String, recipient: String) {
         if (!net.meshsat.android.sms.SmsCapability.included) {
-            Log.i("MeshSat", "SMS to $recipient not sent: this edition has no SMS")
+            Log.i("MeshSat", "SMS not sent: this edition has no SMS")
             return
         }
         // Key resolution: per-recipient → Hub wildcard (sms:*) → global key [MESHSAT-447]
@@ -4406,7 +4423,7 @@ class GatewayService : Service() {
                 receipt = net.meshsat.android.sms.SmsReceipt(messageId = messageId),
             )
         } catch (e: Exception) {
-            Log.w("MeshSat", "SMS to $recipient failed: ${e.message}")
+            Log.w("MeshSat", "SMS failed: ${e.message}")
             db.messageDao().setForwardedTo(messageId, net.meshsat.android.sms.SmsStatusReceiver.FAILED)
         }
     }

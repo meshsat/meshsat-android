@@ -32,6 +32,9 @@ import kotlinx.coroutines.launch
  *
  * RX pipeline: SMS → base64 decode → AES-GCM decrypt → detect MSVQ-SC header → codebook decode → text
  * Either layer can be independently present or absent.
+ *
+ * No log line here carries the sender's number or the message's text: logcat is readable by
+ * anyone with adb, and F-Droid's device test read the numbers back (MESHSAT-1752).
  */
 class SmsReceiver : BroadcastReceiver() {
 
@@ -142,7 +145,7 @@ class SmsReceiver : BroadcastReceiver() {
 
         if (rawBytes == null || rawBytes.size < 2) {
             // Plain text SMS — not encrypted, not compressed
-            Log.d(TAG, "SMS from $sender: plain text (len=${text.length})")
+            Log.d(TAG, "SMS in: plain text (len=${text.length})")
             return ProcessResult(text, "", wasEncrypted = false, wasCompressed = false)
         }
 
@@ -225,7 +228,7 @@ class SmsReceiver : BroadcastReceiver() {
                 msvqsc = codebook?.let { cb -> { b: ByteArray -> try { cb.decode(b) } catch (_: Exception) { null } } },
             )
             if (v2 is SmsWireV2.Read.Text && v2.encrypted) {
-                Log.d(TAG, "SMS from $sender: app SMS wire v2, codec ${v2.codec} ($keySource)")
+                Log.d(TAG, "SMS in: app SMS wire v2, codec ${v2.codec} ($keySource)")
                 return ProcessResult(v2.text, text, wasEncrypted = true, wasCompressed = v2.codec != SmsWireV2.CODEC_TEXT)
             }
 
@@ -235,7 +238,7 @@ class SmsReceiver : BroadcastReceiver() {
 
             // Step 0: Strip protocol version byte (if present)
             val versionResult = ProtocolVersion.stripVersionByte(payload)
-            ProtocolVersion.logVersionInfo(versionResult.version, sender)
+            ProtocolVersion.logVersionInfo(versionResult.version, "sms")
             payload = versionResult.data
 
             // Step 1: Try AES-GCM decrypt (if looks encrypted and auto-decrypt enabled)
@@ -243,19 +246,19 @@ class SmsReceiver : BroadcastReceiver() {
                 try {
                     payload = AesGcmCrypto.decrypt(payload, keyToUse)
                     wasEncrypted = true
-                    Log.d(TAG, "SMS decrypted from $sender ($keySource)")
+                    Log.d(TAG, "SMS in: decrypted ($keySource)")
                 } catch (e: Exception) {
-                    Log.w(TAG, "SMS decrypt failed from $sender: ${e.message}")
+                    Log.w(TAG, "SMS in: decrypt failed: ${e.message}")
                     // Decrypt failed — might not actually be encrypted
                     // Fall through with original rawBytes
                 }
             }
             if (v2 is SmsWireV2.Read.Text && !wasEncrypted) {
-                Log.d(TAG, "SMS from $sender: app SMS wire v2, clear, codec ${v2.codec}")
+                Log.d(TAG, "SMS in: app SMS wire v2, clear, codec ${v2.codec}")
                 return ProcessResult(v2.text, text, wasEncrypted = false, wasCompressed = v2.codec != SmsWireV2.CODEC_TEXT)
             }
             if (v2 is SmsWireV2.Read.Kept && !wasEncrypted) {
-                Log.w(TAG, "SMS from $sender: app SMS wire v2 this app does not read (or no key opens it), shown as it came")
+                Log.w(TAG, "SMS in: app SMS wire v2 this app does not read (or no key opens it), shown as it came")
                 return ProcessResult(text, "", wasEncrypted = v2.encrypted, wasCompressed = false)
             }
 
@@ -263,7 +266,7 @@ class SmsReceiver : BroadcastReceiver() {
             if (wasEncrypted || rawBytes.contentEquals(payload).not()) {
                 val decoded = smaz2Text(payload)
                 if (decoded != null) {
-                    Log.d(TAG, "SMS SMAZ2 decompressed from $sender: ${payload.size}B → \"$decoded\"")
+                    Log.d(TAG, "SMS in: SMAZ2 decompressed, ${payload.size}B → ${decoded.length} chars")
                     return ProcessResult(decoded, text, wasEncrypted, wasCompressed = true)
                 }
             }
@@ -272,7 +275,7 @@ class SmsReceiver : BroadcastReceiver() {
             if (codebook != null && MsvqscWire.looksLikeMsvqsc(payload)) {
                 try {
                     val decoded = codebook.decode(payload)
-                    Log.d(TAG, "SMS MSVQ-SC decoded from $sender: ${payload.size}B → \"$decoded\"" +
+                    Log.d(TAG, "SMS in: MSVQ-SC decoded, ${payload.size}B → ${decoded.length} chars" +
                             if (wasEncrypted) " [was encrypted]" else "")
                     return ProcessResult(decoded, text, wasEncrypted, wasCompressed = true)
                 } catch (e: Exception) {
@@ -283,12 +286,12 @@ class SmsReceiver : BroadcastReceiver() {
             // Step 3: If decrypted but not compressed, return as text
             if (wasEncrypted) {
                 val decryptedText = String(payload, Charsets.UTF_8)
-                Log.i(TAG, "SMS decrypted result from $sender: \"$decryptedText\" (${payload.size}B)")
+                Log.d(TAG, "SMS in: decrypted text (${payload.size}B)")
                 return ProcessResult(decryptedText, text, wasEncrypted = true, wasCompressed = false)
             }
 
             // Step 4: Not recognized — show as-is
-            Log.d(TAG, "SMS from $sender: unrecognized binary (${rawBytes.size}B)")
+            Log.d(TAG, "SMS in: unrecognized binary (${rawBytes.size}B)")
             return ProcessResult(text, "", wasEncrypted = false, wasCompressed = false)
         }
 

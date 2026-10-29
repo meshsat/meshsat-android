@@ -40,8 +40,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -201,17 +203,24 @@ fun MeshSatUI(openRoute: String? = null, onRouteOpened: () -> Unit = {}) {
                 .consumeWindowInsets(padding)
                 .imePadding(),
         ) {
-            // MapScreen lives outside the NavHost: always in the view tree, never destroyed by
+            // MapScreen lives outside the NavHost: once in the view tree it is never destroyed by
             // navigation, shown and hidden by alpha. It is the reliable way to keep osmdroid's
-            // MapView alive across tab switches (its tile threads die on detach).
-            Box(
-                modifier = if (currentRoute == "map") {
-                    Modifier.fillMaxSize()
-                } else {
-                    Modifier.fillMaxSize().alpha(0f).pointerInput(Unit) {}
-                },
-            ) {
-                MapScreen(visible = currentRoute == "map")
+            // MapView alive across tab switches (its tile threads die on detach). It is not built
+            // before the Map tab is first opened: osmdroid asks OpenStreetMap for tiles the moment
+            // its view exists, and F-Droid's device test saw tile.openstreetmap.org contacted
+            // while the welcome was still showing (MESHSAT-1752).
+            val mapOpened = rememberSaveable { mutableStateOf(false) }
+            if (currentRoute == "map") mapOpened.value = true
+            if (mapOpened.value) {
+                Box(
+                    modifier = if (currentRoute == "map") {
+                        Modifier.fillMaxSize()
+                    } else {
+                        Modifier.fillMaxSize().alpha(0f).pointerInput(Unit) {}
+                    },
+                ) {
+                    MapScreen(visible = currentRoute == "map")
+                }
             }
 
             // The NavHost stays composed on the Map tab too (its map route draws nothing), so Back

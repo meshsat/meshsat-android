@@ -16,7 +16,7 @@ What it does:
 
 Satellite messaging needs a RockBLOCK modem and Iridium credits from a provider; Iridium is a paid commercial network.
 
-Internet connections: the bundled world map covers country level; closer in, map tiles come from OpenStreetMap's tile servers while you look at the map online. Once a satellite modem is set up, Iridium orbit data is downloaded from celestrak.org, or tle.ivanstanojevic.me if that fails, when the stored copy is more than a day old, checked at most every 12 hours. The Hub, APRS-IS and Reticulum over TCP connect only when you set them up. Node firmware is downloaded from MeshSat's releases on github.com only when you tap Check for update. Nothing else goes online.
+Internet connections: the bundled world map covers country level; closer in, map tiles come from OpenStreetMap's tile servers while you look at the map online. Once a satellite modem is set up (the MeshSat node's modem seen, or a RockBLOCK 9704 connected), Iridium orbit data is downloaded from celestrak.org, or tle.ivanstanojevic.me if that fails, when the stored copy is more than a day old, checked at most every 12 hours; before that only when you tap Update on the passes screen. The Hub, APRS-IS and Reticulum over TCP connect only when you set them up. Node firmware is downloaded from MeshSat's releases on github.com only when you tap Check for update. Nothing else goes online.
 
 Permissions: Bluetooth and location, because Android needs location to scan for Bluetooth devices and the map shows where you are; SMS, to send and receive through your SIM; notifications. Starting after a phone restart is off until you switch it on.
 

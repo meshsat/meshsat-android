@@ -59,12 +59,14 @@ class MainActivity : ComponentActivity() {
         val missing = requiredPermissions.filter {
             ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
         }
-        if (missing.isNotEmpty()) {
+        val ask = WelcomeGate.toAsk(missing, askedOnWelcome())
+        if (ask != null) {
             // Say what each permission is for before Android asks; the service starts in the
-            // permission callback (MESHSAT-1249).
-            welcome.value = missing
+            // permission callback (MESHSAT-1249). Once per permission: a denial is not asked
+            // again at every start (MESHSAT-1752), Setup's rows and Android's settings remain.
+            welcome.value = ask
         } else {
-            // All permissions already granted — start immediately
+            // Everything granted, or declined on an earlier welcome: start with what there is.
             startGatewayService()
         }
 
@@ -77,6 +79,7 @@ class MainActivity : ComponentActivity() {
                 if (ask != null) {
                     WelcomeScreen(onContinue = {
                         welcome.value = null
+                        rememberAskedOnWelcome(ask)
                         permissionLauncher.launch(ask.toTypedArray())
                     })
                     return@MeshSatTheme
@@ -98,6 +101,16 @@ class MainActivity : ComponentActivity() {
 
     /** The permissions still to ask for, while the welcome that explains them shows. */
     private val welcome = mutableStateOf<List<String>?>(null)
+
+    /** The permissions the welcome has asked for on this phone ([WelcomeGate]). */
+    private fun askedOnWelcome(): Set<String> =
+        getSharedPreferences(WelcomeGate.PREFS, MODE_PRIVATE).getStringSet(WelcomeGate.KEY_ASKED, null) ?: emptySet()
+
+    private fun rememberAskedOnWelcome(asked: List<String>) {
+        getSharedPreferences(WelcomeGate.PREFS, MODE_PRIVATE).edit()
+            .putStringSet(WelcomeGate.KEY_ASKED, askedOnWelcome() + asked)
+            .apply()
+    }
 
     /** A screen a notification asks to open, e.g. the SOS result screen (MESHSAT-1249). */
     private val openRoute = mutableStateOf<String?>(null)
