@@ -9,7 +9,7 @@ What it does:
 • APRS through a KISS TNC over TCP (Direwolf, for example) or directly to APRS-IS.
 • Hub, optional: the phone reports to a MeshSat Hub over MQTT with a client certificate and takes remote commands. The Hub is open source and can be self-hosted.
 • TAK, through the Hub: your team's TAK picture appears on the map, and with Enable TAK on the phone sends its position, an SOS and its chat to your TAK server.
-• Reticulum: the phone runs as a Reticulum transport node and relays between its links.
+• Reticulum: the phone runs as a Reticulum transport node and relays between its links. A message to a Reticulum contact can carry a voice note, or a photo picked from your gallery; both travel on a Reticulum link only.
 • Safety: hold the SOS button for 3 seconds and the SOS goes out on every route the phone has, each retried until it is sent, until you cancel it. A check-in timer and zones drawn on the map.
 • The map works offline down to country level. Night mode turns the whole app red.
 
@@ -17,9 +17,9 @@ This edition does not send or receive SMS.
 
 Satellite messaging needs a RockBLOCK modem and Iridium credits from a provider; Iridium is a paid commercial network.
 
-Internet connections: the bundled world map covers country level; closer in, map tiles come from OpenStreetMap's tile servers while you look at the map online. Once a satellite modem is set up (the MeshSat node's modem seen, or a RockBLOCK 9704 connected), Iridium orbit data is downloaded from celestrak.org, or tle.ivanstanojevic.me if that fails, when the stored copy is more than a day old, checked at most every 12 hours; before that only when you tap Update on the passes screen. The Hub, APRS-IS and Reticulum over TCP connect only when you set them up. Node firmware is downloaded from MeshSat's releases on github.com only when you tap Check for update. Nothing else goes online.
+Internet connections: the bundled world map covers country level; closer in, map tiles come from OpenStreetMap's tile servers while you look at the map online. Once a satellite modem is set up (the MeshSat node's modem seen, or a RockBLOCK 9704 connected), Iridium orbit data is downloaded from celestrak.org, or tle.ivanstanojevic.me if that fails, when the stored copy is more than a day old, checked at most every 12 hours; before that only when you tap Update on the passes screen. The Hub, APRS-IS and Reticulum over TCP connect only when you set them up, and a field kit you add under Setup is reached at the address you give it, or through the Hub relay. A voice note's transcript, offered for routes that carry text only, comes from the phone's own speech recogniser, which may use its maker's servers; MeshSat itself sends the recording nowhere but to the contact. Node firmware is downloaded from MeshSat's releases on github.com only when you tap Check for update. Nothing else goes online.
 
-Permissions: Bluetooth and location, because Android needs location to scan for Bluetooth devices and the map shows where you are; notifications. Starting after a phone restart is off until you switch it on.
+Permissions: Bluetooth and location, because Android needs location to scan for Bluetooth devices and the map shows where you are; the microphone, only while you hold the voice note button; notifications. Starting after a phone restart is off until you switch it on.
 
 Privacy: the app has no analytics and no account, and sends nothing to MeshSat. https://meshsat.net/privacy/
 
