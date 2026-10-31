@@ -109,7 +109,6 @@ Generated from git history + tags by `scripts/sdd-generate-changelog.py` on 2026
 - show SmsReceiver-decrypted text in Messages UI [MESHSAT-447] (7f96ca55)
 - fall back to Hub wildcard key (sms:*) for SMS decryption [MESHSAT-447] (5bdd2203)
 - synchronize RLNC decoder to prevent concurrent ArrayIndexOutOfBounds [MESHSAT-447] (5c77d3b8)
-- wire HeMB inbound detection on Android RnsTransportNode [MESHSAT-443] (9ea3c81b)
 
 
 ## [v2.6.1] - 2026-03-31
@@ -120,14 +119,12 @@ Generated from git history + tags by `scripts/sdd-generate-changelog.py` on 2026
 
 ### Fixed
 
-- backport 2 HeMB bug fixes from bridge E2E integration [MESHSAT-415] (6282976b)
 
 
 ## [v2.6.0] - 2026-03-29
 
 ### Added
 
-- port HeMB bearer bonding protocol to Android [MESHSAT-431] (f83a402c)
 
 ### Changed
 

@@ -172,7 +172,7 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
-        /** Migration 11→12: HeMB bond group table [MESHSAT-431]. */
+        /** Migration 11→12: the bond group table [MESHSAT-431]; dropped in 24→25. */
         val MIGRATION_11_12 = object : Migration(11, 12) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("""
@@ -358,7 +358,7 @@ abstract class AppDatabase : RoomDatabase() {
         }
 
         /**
-         * HeMB v1 is gone from the app (MESHSAT-1763), and its bond groups with it. The table
+         * The bonding layer is gone from the app (MESHSAT-1763), and its bond groups with it. The table
          * stays in MIGRATION_11_12 (migrations are append-only) and is dropped here; nothing
          * else changes. Without this step the destructive fallback would take the messages.
          */

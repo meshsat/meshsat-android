@@ -14,13 +14,13 @@ import org.junit.Test
 import org.junit.runner.RunWith
 
 /**
- * HeMB v1 left the app (MESHSAT-1763): a version-24 database, which still has the bond-group
+ * The bonding layer left the app (MESHSAT-1763): a version-24 database, which still has the bond-group
  * table, upgrades to 25 without it and keeps its messages, so the destructive fallback never runs.
  */
 @RunWith(AndroidJUnit4::class)
-class HembRemovalRoomTest {
+class BondTableRemovalRoomTest {
     private val context = ApplicationProvider.getApplicationContext<Context>()
-    private val name = "hemb-removal-test.db"
+    private val name = "bond-table-removal-test.db"
     private lateinit var db: AppDatabase
 
     @Before

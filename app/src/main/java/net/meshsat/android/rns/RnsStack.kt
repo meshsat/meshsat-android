@@ -92,9 +92,8 @@ class RnsStack(
     /**
      * Offers a received packet to the node. True when it consumed it; false for
      * everything the node does not handle, which the legacy stack then takes.
-     * It declined HeMB frames until HeMB v1 was removed; that check (no magic,
-     * byte 7 = CRC-8 of bytes 0-6) also turned away about 1 in 256 real
-     * packets. [MESHSAT-1763]
+     * An 8-byte frame check (no magic, byte 7 = CRC-8 of bytes 0-6) used to
+     * turn away about 1 in 256 real packets here; it is gone. [MESHSAT-1763]
      */
     fun inbound(ifaceId: String, raw: ByteArray): Boolean {
         return try { node.inbound(raw, ifaceId) } catch (e: Exception) { Log.w(TAG, "node inbound failed on $ifaceId: $e"); false }

@@ -16,9 +16,8 @@ class RlncDecoderTest {
      * code: it took down the v2.16.1 release pipeline on 20 Sep 2026. Same defect as
      * MESHSAT-1269, in the second of the two RLNC implementations.
      *
-     * The Bridge's HeMB tests pre-flighted the same way before asserting on rank ("verify
-     * every C(n,k) subset decodes; if any subset is rank-deficient, regenerate the encoding
-     * with fresh coefficients"); HeMB v1 is gone since MESHSAT-1763, this RLNC is not it.
+     * The rule: verify every C(n,k) subset decodes; if any subset is rank-deficient,
+     * regenerate the encoding with fresh coefficients.
      */
     private fun encodeInnovative(
         segments: List<ByteArray>,
