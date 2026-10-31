@@ -201,7 +201,7 @@ class HubMsgRoomTest {
         }
         db = AppDatabase.build(context, name)
         store = RoomHubMsgStore(db)
-        assertEquals(24, db.openHelper.readableDatabase.version)
+        assertEquals(25, db.openHelper.readableDatabase.version)
         assertEquals(1, count("SELECT COUNT(*) FROM messages WHERE id = $id AND text = 'kept'"))
         val op = outgoing()
         store.keepEvent(event(op, "forwarded", "hub_forwarded", "hub"), true, now)

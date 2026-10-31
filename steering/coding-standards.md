@@ -12,7 +12,7 @@ Source: `app/src/main/java/net/meshsat/android/<pkg>/<File>.kt`.
 |---|---|---|
 | Transports | `aprs`, `ble`, `bt`, `sms`, `mqtt`, `tak`, `satellite` | `aprs/AprsBeacon.kt`, `ble/MeshtasticBle.kt` |
 | Codec + crypto | `codec`, `crypto`, `fec`, `rlnc` | `codec/Smaz2.kt`, `crypto/AesGcmCrypto.kt` |
-| Routing engine | `engine`, `reticulum`, `routing`, `rules`, `dtn`, `hemb`, `dedup`, `ratelimit` | `engine/Dispatcher.kt`, `hemb/HembBonder.kt` |
+| Routing engine | `engine`, `reticulum`, `routing`, `rules`, `dtn`, `dedup`, `ratelimit` | `engine/Dispatcher.kt` |
 | Data layer | `data` | `data/AppDatabase.kt`, `data/Message.kt` |
 | Service layer | `service` | `service/GatewayService.kt` |
 | Local API | `api` | `api/LocalApiServer.kt` |

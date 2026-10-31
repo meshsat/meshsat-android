@@ -1369,43 +1369,6 @@ class GatewayService : Service() {
                         Log.i("MeshSat", "Hub reboot command received, scheduling restart")
                         scheduleRestart(this@GatewayService)
                     }
-                    "hemb_bond_create" -> {
-                        val json = org.json.JSONObject(cmd.payload)
-                        val bondId = json.optString("bond_id", "")
-                        val label = json.optString("label", "")
-                        val membersArr = json.optJSONArray("members")
-                        val members = if (membersArr != null) {
-                            (0 until membersArr.length()).map { membersArr.getString(it) }
-                        } else emptyList()
-                        val costBudget = json.optDouble("cost_budget", 0.0)
-                        val db = net.meshsat.android.data.AppDatabase.getInstance(this@GatewayService)
-                        db.hembBondGroupDao().insert(
-                            net.meshsat.android.data.HembBondGroupEntity(
-                                id = bondId,
-                                label = label,
-                                members = org.json.JSONArray(members).toString(),
-                                costBudget = costBudget,
-                            )
-                        )
-                        Log.i("MeshSat", "HeMB bond group created from Hub: $bondId ($label)")
-                        hubReporter?.publishCommandResponse(
-                            net.meshsat.android.hub.CommandResponse(
-                                requestId = cmd.requestId, cmd = cmd.cmd, status = "ok",
-                            )
-                        )
-                    }
-                    "hemb_bond_delete" -> {
-                        val json = org.json.JSONObject(cmd.payload)
-                        val bondId = json.optString("bond_id", "")
-                        val db = net.meshsat.android.data.AppDatabase.getInstance(this@GatewayService)
-                        db.hembBondGroupDao().delete(bondId)
-                        Log.i("MeshSat", "HeMB bond group deleted by Hub: $bondId")
-                        hubReporter?.publishCommandResponse(
-                            net.meshsat.android.hub.CommandResponse(
-                                requestId = cmd.requestId, cmd = cmd.cmd, status = "ok",
-                            )
-                        )
-                    }
                     "key_rotate" -> {
                         val json = org.json.JSONObject(cmd.payload)
                         val channelType = json.optString("channel_type", "")
@@ -2304,15 +2267,6 @@ class GatewayService : Service() {
                             )
                         )
                     }
-                }
-
-                // HeMB inbound: persistent reassembly buffer for cross-bearer decode
-                val hembReassembly = net.meshsat.android.hemb.HembReassemblyBuffer(deliverFn = { payload ->
-                    Log.i("MeshSat", "hemb: DECODED payload ${payload.size}B")
-                })
-                node.hembCallback = net.meshsat.android.reticulum.RnsTransportNode.HembFrameCallback { sourceInterface, frameData ->
-                    Log.i("MeshSat", "hemb: received HeMB frame via $sourceInterface (${frameData.size}B)")
-                    hembReassembly.addFrame(frameData)
                 }
 
                 // The upstream-compatible node and the LXMF endpoint see every packet first (MESHSAT-1553).

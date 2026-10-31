@@ -92,7 +92,7 @@ class WarningRoomTest {
             it.version = 23
         }
         db = AppDatabase.build(context, name)
-        assertEquals(24, db.openHelper.readableDatabase.version)
+        assertEquals(25, db.openHelper.readableDatabase.version)
         assertEquals(1, count("SELECT COUNT(*) FROM messages WHERE text = 'before the upgrade'"))
         val intake = WarningIntake(db.warningDao())
         assertTrue(intake.onMesh("!1", "", WarningText.PORT_ALERT, wind) is WarningIntake.Outcome.Alarm)

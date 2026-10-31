@@ -26,7 +26,7 @@ of these externally.
 
 1. **Transport adapters** — BLE Meshtastic (`ble/`), Iridium SPP over Bluetooth (`bt/`), APRS over KISS (`aprs/`), AX.25, SMS native (`sms/`), MQTT, TAK/CoT (`tak/`).
 2. **Codec + crypto** — SMAZ2 (`codec/`), AES-GCM (`crypto/AesGcmCrypto.kt`), MSVQ-SC compression decoder (`crypto/MsvqscEncoder.kt` + tokenizer), Android Keystore (`crypto/SecureKeyStore.kt`), TOFU key-bundle import (`crypto/KeyBundleImporter.kt`).
-3. **Routing engine** — Reticulum (`reticulum/`), HeMB heterogeneous media bonding (`hemb/`), DTN bundle store/forward (`dtn/`), FEC + RLNC (`fec/` + `rlnc/`), per-rule access filtering (`rules/`).
+3. **Routing engine** — Reticulum (`reticulum/`), DTN bundle store/forward (`dtn/`), FEC + RLNC (`fec/` + `rlnc/`), per-rule access filtering (`rules/`).
 4. **Engine internals** — Dispatcher (`engine/Dispatcher.kt`), DeadManSwitch, GeofenceMonitor, HealthScorer, InterfaceManager, BurstQueue, CreditTracker, SequenceTracker, TelemetryLogger.
 5. **Data layer** — Room database with 18 entities at version 14 (`data/AppDatabase.kt`), migrations `MIGRATION_5_6` through `MIGRATION_13_14`.
 6. **Service layer** — Foreground GatewayService (`service/GatewayService.kt`) hosts transports; TransportRegistry tracks active adapters.

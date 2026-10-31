@@ -1,7 +1,6 @@
 package net.meshsat.android.rns
 
 import android.util.Log
-import net.meshsat.android.hemb.HembFrame
 import net.meshsat.android.lxmf.LxMessage
 import net.meshsat.android.lxmf.LxMethod
 import net.meshsat.android.lxmf.LxmfRouter
@@ -20,7 +19,7 @@ import java.util.concurrent.ConcurrentHashMap
  * The upstream-compatible Reticulum node and the LXMF endpoint on the app's
  * interfaces (the Bridge's rnsstack). Every packet an interface receives is
  * offered to the node first through [inbound]; what it declines falls through to
- * the MeshSat-private stack (meshsat.node, HeMB, time sync, the Hub relay).
+ * the MeshSat-private stack (meshsat.node, time sync, the Hub relay).
  * [MESHSAT-1553]
  */
 class RnsStack(
@@ -92,11 +91,12 @@ class RnsStack(
 
     /**
      * Offers a received packet to the node. True when it consumed it; false for
-     * HeMB frames and everything the node does not handle, which the legacy
-     * stack then takes.
+     * everything the node does not handle, which the legacy stack then takes.
+     * It declined HeMB frames until HeMB v1 was removed; that check (no magic,
+     * byte 7 = CRC-8 of bytes 0-6) also turned away about 1 in 256 real
+     * packets. [MESHSAT-1763]
      */
     fun inbound(ifaceId: String, raw: ByteArray): Boolean {
-        if (raw.isNotEmpty() && HembFrame.isHembFrame(raw)) return false
         return try { node.inbound(raw, ifaceId) } catch (e: Exception) { Log.w(TAG, "node inbound failed on $ifaceId: $e"); false }
     }
 

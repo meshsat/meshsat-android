@@ -379,7 +379,7 @@ class Node(val cfg: NodeConfig, internal val tx: Transmitter) {
                 }
                 Rns.DEST_PLAIN -> {
                     if (hdr.destHash.contentEquals(Rns.PATH_REQUEST_DEST_HASH)) { handlePathRequest(pkt); return true }
-                    return false   // legacy MeshSat path requests, HeMB and so on
+                    return false   // legacy MeshSat path requests and so on
                 }
                 Rns.DEST_SINGLE -> {
                     localDestination(hdr.destHash)?.let { deliverLocal(it, pkt); return true }

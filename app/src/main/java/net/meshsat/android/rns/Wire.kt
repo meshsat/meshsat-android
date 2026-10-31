@@ -19,7 +19,7 @@ import javax.crypto.spec.SecretKeySpec
  * The older `net.meshsat.android.reticulum` package is NOT this format: it omits
  * the context byte unless a context flag is set, reads a 10-byte ratchet and has
  * its own link handshake. It stays for the MeshSat-private traffic that falls
- * through the node (meshsat.node, HeMB, time sync, the Hub relay).
+ * through the node (meshsat.node, time sync, the Hub relay).
  */
 object Rns {
     const val MTU = 500

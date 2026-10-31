@@ -13,7 +13,6 @@ ALL unit tests live FLAT at `app/src/test/java/net/meshsat/android/<TestName>Tes
 | engine | `BurstQueueTest.kt`, `CreditTrackerTest.kt`, `GeofenceMonitorTest.kt`, `HealthScorerTest.kt`, `DeadManSwitchTest.kt`, `SigningServiceTest.kt`, `InterfaceManagerTest.kt`, `TelemetryLoggerTest.kt` |
 | dtn | `BundleFragmenterTest.kt`, `BundleReassemblerTest.kt`, `CustodyManagerTest.kt` |
 | fec / rlnc | `GaloisField256Test.kt`, `RlncDecoderTest.kt`, `ReedSolomonTest.kt` |
-| hemb | `HembBonderTest.kt`, `HembBondGroupManagerTest.kt`, `BearerSelectorTest.kt` |
 | reticulum | `RnsHdlcTest.kt`, `RnsInterfaceTest.kt`, `RnsTransportNodeTest.kt` |
 | timesync | `TimeSyncProtocolTest.kt`, `MeshClockTest.kt` |
 | satellite | `SatelliteTest.kt`, `PassPredictorTest.kt` |
