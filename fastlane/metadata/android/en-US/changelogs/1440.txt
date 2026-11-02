@@ -1,0 +1,1 @@
+Shows the satellite beacon of a MeshSat node with a panel switch: the satellite lane on Home says when it is on, and the node health card under Setup shows when its next position goes out, when it switches itself off and why it last went off.
