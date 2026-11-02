@@ -1,0 +1,1 @@
+With a MeshSat node's satellite switched off, the app no longer keeps trying to reach its modem: the satellite lane on Home says the satellite is off on the node, and the app sets the modem up again within seconds of the switch going on.
