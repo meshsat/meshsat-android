@@ -173,6 +173,9 @@ class GatewayService : Service() {
         private const val PIPE_CLAIM_FIRST_RETRY_MS = 3_000L
         private const val PIPE_9704_RETRY_MIN_MS = 15_000L
         private const val PIPE_9704_RETRY_MAX_MS = 120_000L
+        // How often the retry looks again while the node's satellite switch is off (MESHSAT-1772): a
+        // StateFlow read, no Bluetooth traffic, so the 9704 is set up within seconds of the switch.
+        private const val PIPE_9704_SWITCH_LOOK_MS = 2_000L
 
         /** At most one node reconnect this often when the pipe stops taking writes (MESHSAT-1270). */
         private const val PIPE_RECOVERY_COOLDOWN_MS = 60_000L
@@ -3453,6 +3456,16 @@ class GatewayService : Service() {
      * 9704 speaking JSPR); the setting can override it, and an older node without the bit is a
      * 9603 (MESHSAT-1507).
      */
+    /**
+     * The node's panel switch has its satellite off (MESHSAT-1772): the node powers its modem down
+     * then, so nothing on the pipe answers until the switch goes on. Off while its beacon sends its
+     * last message too: the node holds the modem for that. False on a node without the switch.
+     */
+    private fun nodeSatelliteSwitchedOff(pipe: net.meshsat.android.ble.IridiumBlePipe): Boolean =
+        pipe.stats.value?.beacon?.state.let {
+            it == IridiumPipeContract.BeaconState.Off || it == IridiumPipeContract.BeaconState.Sending
+        }
+
     private fun nodeCarries9704(modem: String, pipe: net.meshsat.android.ble.IridiumBlePipe): Boolean = when (modem) {
         SettingsRepository.NODE_MODEM_9704 -> true
         SettingsRepository.NODE_MODEM_9603 -> false
@@ -3593,14 +3606,32 @@ class GatewayService : Service() {
                                 waitMs = PIPE_9704_RETRY_MIN_MS
                                 continue
                             }
+                            // The node's satellite switch is off: its modem is powered down, so an init
+                            // only times out. Look again soon and set it up once the switch is on.
+                            if (nodeSatelliteSwitchedOff(pipe)) {
+                                waitMs = PIPE_9704_SWITCH_LOOK_MS
+                                continue
+                            }
+                            if (waitMs == PIPE_9704_SWITCH_LOOK_MS) waitMs = PIPE_9704_RETRY_MIN_MS
                             when (imt.state.value) {
                                 net.meshsat.android.bt.Iridium9704Spp.State.Ready -> waitMs = PIPE_9704_RETRY_MIN_MS
                                 net.meshsat.android.bt.Iridium9704Spp.State.Disconnected ->
                                     if (imt.attachIfIdle(pipe.asModemLink())) {
-                                        Log.i("MeshSat", "Iridium: the 9704 did not answer over the node's pipe; trying its init again")
+                                        Log.i("MeshSat", "Iridium: setting up the 9704 over the node's pipe again")
                                         waitMs = (waitMs * 2).coerceAtMost(PIPE_9704_RETRY_MAX_MS)
                                     }
                                 else -> {}
+                            }
+                        }
+                    }
+                    // The switch going off powers the node's modem down: let go of the 9704 at once rather
+                    // than send into a modem that is not there; the retry above sets it up again.
+                    launch {
+                        pipe.stats.collect {
+                            val imt = iridium9704Spp
+                            if (nodeSatelliteSwitchedOff(pipe) && imt != null && imt.onNodePipe) {
+                                Log.i("MeshSat", "Iridium: the node's satellite switch is off; the 9704 waits for it")
+                                imt.detach()
                             }
                         }
                     }
@@ -3620,7 +3651,7 @@ class GatewayService : Service() {
                                 iridium0ParkedForImt = false
                             }
                             if (use9704 && imt != null) {
-                                imt.attachIfIdle(pipe.asModemLink())
+                                if (!nodeSatelliteSwitchedOff(pipe)) imt.attachIfIdle(pipe.asModemLink())
                             } else if (spp.state.value == IridiumSpp.State.Disconnected) {
                                 spp.attach(pipe.asModemLink())
                             }

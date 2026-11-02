@@ -167,6 +167,12 @@ fun HomeLanes(navigate: (String) -> Unit) {
         }
     }
     val satQueueLine = if (iridiumQueue > 0) "${Words.count(iridiumQueue, "message")} waiting to go out. " else ""
+    // The node's satellite beacon (MESHSAT-1772) runs on the node whatever this phone does: say so first.
+    // With its panel switch off the node powers the modem down, which is a choice, not a fault.
+    val nodePipe = ble?.iridiumPipe?.value
+    val beaconOn = nodePipe?.status?.value?.flags?.beaconOn == true
+    val beaconEvery = nodePipe?.stats?.value?.beacon?.intervalS?.takeIf { it >= 60 }?.let { "${it / 60} min" } ?: "10 min"
+    val nodeBeaconState = nodePipe?.stats?.value?.beacon?.state
     val bluetoothOff = ble?.bluetoothOn?.value == false
     val (satState, satDetail) = when {
         bluetoothOff && savedNode.isNotBlank() ->
@@ -176,6 +182,10 @@ fun HomeLanes(navigate: (String) -> Unit) {
         // phone cannot reach the radio at all; the satellite is not the problem.
         spp?.linkBroken?.value == true ->
             LaneState.Failed to (satQueueLine + "The phone cannot reach the node's modem. Getting the link back.").trim()
+        nodeBeaconState == IridiumPipeContract.BeaconState.Off ->
+            LaneState.Off to (satQueueLine + "The satellite is switched off on the node. Switch it on to send by satellite.").trim()
+        nodeBeaconState == IridiumPipeContract.BeaconState.Sending ->
+            LaneState.Trying to (satQueueLine + "The node's beacon is sending its last message; then the satellite switches off.").trim()
         imtState == net.meshsat.android.bt.Iridium9704Spp.State.Ready ->
             LaneState.Working to (satQueueLine + (passLine ?: "Modem ready.")).trim()
         imtState != net.meshsat.android.bt.Iridium9704Spp.State.Disconnected ->
@@ -192,10 +202,6 @@ fun HomeLanes(navigate: (String) -> Unit) {
         else -> LaneState.Off to "Connect a MeshSat node to use its satellite modem."
     }
 
-    // The node's satellite beacon (MESHSAT-1772) runs on the node whatever this phone does: say so first.
-    val nodePipe = ble?.iridiumPipe?.value
-    val beaconOn = nodePipe?.status?.value?.flags?.beaconOn == true
-    val beaconEvery = nodePipe?.stats?.value?.beacon?.intervalS?.takeIf { it >= 60 }?.let { "${it / 60} min" } ?: "10 min"
     val satDetailShown = if (beaconOn) {
         "The node's satellite beacon is on: it sends its position every $beaconEvery. $satDetail".trim()
     } else {
