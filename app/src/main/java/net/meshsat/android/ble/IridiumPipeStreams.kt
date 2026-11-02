@@ -37,6 +37,8 @@ object IridiumPipeContract {
 
     const val STATS_VERSION = 2
     const val STATS_BYTES = 52
+    /** STATS of a node with the satellite beacon fields, bytes 52 to 63 (MESHSAT-1772, 2 Nov 2026). */
+    const val STATS_BEACON_BYTES = 64
 
     /**
      * Contract v2 (MESHSAT-1378): pass windows from the phone, write with response:
@@ -81,6 +83,8 @@ object IridiumPipeContract {
         val ledOff: Boolean = false,
         /** Bit 6 (MESHSAT-1671): the owner switched the node's screen off. */
         val screenOff: Boolean = false,
+        /** Bit 7 (MESHSAT-1772): the node's satellite beacon is on. */
+        val beaconOn: Boolean = false,
     ) {
         companion object {
             fun of(b: Int) = StatusFlags(
@@ -91,6 +95,7 @@ object IridiumPipeContract {
                 modemIsJspr = b and 0x10 != 0,
                 ledOff = b and 0x20 != 0,
                 screenOff = b and 0x40 != 0,
+                beaconOn = b and 0x80 != 0,
             )
         }
     }
@@ -120,6 +125,27 @@ object IridiumPipeContract {
         val nodeReceived: Long,
         val daySessionsUsed: Int,
         val daySessionsCap: Int,
+        /** The satellite beacon, STATS bytes 52 to 63; null from a node that sends 52 bytes. */
+        val beacon: Beacon? = null,
+    )
+
+    /** What the node's satellite beacon is doing (MESHSAT-1772): the panel switch has the satellite on. */
+    enum class BeaconState { NotInUse, Off, On, Sending, Unknown }
+
+    /** Why the beacon last went off. */
+    enum class BeaconOff { NotYet, Switch, Idle, Limit, CellLow, NothingSent, Unknown }
+
+    data class Beacon(
+        val state: BeaconState,
+        val lastOff: BeaconOff,
+        /** Beacon messages the node's modem has taken since the node started. */
+        val messagesToModem: Int,
+        /** The node's uptime in seconds when the beacon last went on; null when it has not since the node started. */
+        val onSinceUptimeS: Long?,
+        /** Seconds between position messages. */
+        val intervalS: Int,
+        /** Seconds the beacon stays on at most. */
+        val limitS: Int,
     )
 
     /** One pass window for the node: when a satellite is up, from the phone's prediction. */
@@ -178,6 +204,28 @@ object IridiumPipeContract {
             nodeReceived = u32(44),
             daySessionsUsed = u8(48),
             daySessionsCap = u8(49),
+            beacon = if (value.size < STATS_BEACON_BYTES) null else Beacon(
+                state = when (u8(52)) {
+                    0 -> BeaconState.NotInUse
+                    1 -> BeaconState.Off
+                    2 -> BeaconState.On
+                    3 -> BeaconState.Sending
+                    else -> BeaconState.Unknown
+                },
+                lastOff = when (u8(53)) {
+                    0 -> BeaconOff.NotYet
+                    1 -> BeaconOff.Switch
+                    2 -> BeaconOff.Idle
+                    3 -> BeaconOff.Limit
+                    4 -> BeaconOff.CellLow
+                    5 -> BeaconOff.NothingSent
+                    else -> BeaconOff.Unknown
+                },
+                messagesToModem = u16(54),
+                onSinceUptimeS = age(56),
+                intervalS = u16(60),
+                limitS = u16(62),
+            ),
         )
     }
 

@@ -192,6 +192,16 @@ fun HomeLanes(navigate: (String) -> Unit) {
         else -> LaneState.Off to "Connect a MeshSat node to use its satellite modem."
     }
 
+    // The node's satellite beacon (MESHSAT-1772) runs on the node whatever this phone does: say so first.
+    val nodePipe = ble?.iridiumPipe?.value
+    val beaconOn = nodePipe?.status?.value?.flags?.beaconOn == true
+    val beaconEvery = nodePipe?.stats?.value?.beacon?.intervalS?.takeIf { it >= 60 }?.let { "${it / 60} min" } ?: "10 min"
+    val satDetailShown = if (beaconOn) {
+        "The node's satellite beacon is on: it sends its position every $beaconEvery. $satDetail".trim()
+    } else {
+        satDetail
+    }
+
     // --- Mesh ---
     val others = nodes.count { it.nodeNum != myNum }
     val (meshLane, meshDetail) = when {
@@ -269,7 +279,7 @@ fun HomeLanes(navigate: (String) -> Unit) {
                     sppState == IridiumSpp.State.Connected -> "$bars/5"
                     else -> null
                 },
-                detail = satDetail,
+                detail = satDetailShown,
                 inFlight = iridiumQueue > 0,
                 onClick = { navigate(if (sppState == IridiumSpp.State.Connected) "passes" else "setup/satellite") },
             )

@@ -93,6 +93,61 @@ class IridiumPipeStreamsTest {
     }
 
     @Test
+    fun `STATS bytes 52 to 63 carry the satellite beacon, and flags bit 7 says it is on`() {
+        val base = byteArrayOf(2, 2, 0x96.toByte(), 3) +
+            le32(12) + le32(7) + le16(32) + le16(250) + le16(2) + le16(1) + le32(240) +
+            le32(1_000) + le32(0) + le32(0) + le32(5) + le32(4) + le32(1) +
+            byteArrayOf(0, 0, 0, 0)
+        // A node that sends 52 bytes has no beacon fields.
+        assertEquals(null, IridiumPipeContract.parseStats(base)!!.beacon)
+        val on = base + byteArrayOf(2, 1) + le16(3) + le32(580) + le16(600) + le16(1_800)
+        assertEquals(64, on.size)
+        val s = IridiumPipeContract.parseStats(on)!!
+        assertEquals(true, s.flags.beaconOn)
+        assertEquals(
+            IridiumPipeContract.Beacon(
+                state = IridiumPipeContract.BeaconState.On,
+                lastOff = IridiumPipeContract.BeaconOff.Switch,
+                messagesToModem = 3,
+                onSinceUptimeS = 580,
+                intervalS = 600,
+                limitS = 1_800,
+            ),
+            s.beacon,
+        )
+        // Uptime 1000, on since 580: 420 s in, next position in 180 s, off by itself in 1380 s.
+        assertEquals("On: next position in 3 min, off by itself in 23 min", NodeStatsText.beacon(s.beacon!!, s.uptimeS))
+        assertEquals("Satellite beacon" to "On: next position in 3 min, off by itself in 23 min", NodeStatsText.rows(s)[1])
+
+        val never = base + byteArrayOf(0, 0) + le16(0) + le32(0xFFFFFFFFL) + le16(600) + le16(1_800)
+        val n = IridiumPipeContract.parseStats(never)!!
+        assertEquals(IridiumPipeContract.BeaconState.NotInUse, n.beacon!!.state)
+        assertEquals(null, n.beacon!!.onSinceUptimeS)
+        assertEquals(false, NodeStatsText.rows(n).any { it.first == "Satellite beacon" })
+
+        val b = s.beacon!!
+        assertEquals("Off, sending its last message", NodeStatsText.beacon(b.copy(state = IridiumPipeContract.BeaconState.Sending), 0))
+        assertEquals(
+            "Off (30 min limit), 3 messages to the modem since the node started",
+            NodeStatsText.beacon(b.copy(state = IridiumPipeContract.BeaconState.Off, lastOff = IridiumPipeContract.BeaconOff.Limit), 0),
+        )
+        assertEquals(
+            "Off (switched off before anything was sent)",
+            NodeStatsText.beacon(
+                b.copy(state = IridiumPipeContract.BeaconState.Off, lastOff = IridiumPipeContract.BeaconOff.NothingSent, messagesToModem = 0),
+                0,
+            ),
+        )
+        assertEquals(
+            "Off, 1 message to the modem since the node started",
+            NodeStatsText.beacon(b.copy(state = IridiumPipeContract.BeaconState.Off, lastOff = IridiumPipeContract.BeaconOff.NotYet, messagesToModem = 1), 0),
+        )
+        assertEquals("in under a minute", NodeStatsText.inTime(59))
+        assertEquals("in 1 min", NodeStatsText.inTime(60))
+        assertEquals("in 2 min", NodeStatsText.inTime(61))
+    }
+
+    @Test
     fun `PASS is version, count, then 7 little-endian bytes per window, at most eight`() {
         val one = IridiumPipeContract.encodePassList(listOf(IridiumPipeContract.PassWindow(0x6789ABCDL, 0x0102, 47)))
         assertArrayEquals(byteArrayOf(1, 1, 0xCD.toByte(), 0xAB.toByte(), 0x89.toByte(), 0x67, 0x02, 0x01, 47), one)
