@@ -17,6 +17,7 @@ import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.Sms
 import androidx.compose.material.icons.outlined.SwapVert
 import androidx.compose.material.icons.outlined.NightsStay
+import androidx.compose.material.icons.outlined.Sensors
 import androidx.compose.material.icons.filled.NightsStay
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -59,8 +60,10 @@ import net.meshsat.android.ui.theme.ColorCellular
 import net.meshsat.android.ui.theme.ColorHub
 import net.meshsat.android.ui.theme.ColorIridium
 import net.meshsat.android.ui.theme.ColorMesh
+import net.meshsat.android.ui.theme.MeshSatAmber
 import net.meshsat.android.ui.theme.MeshSatBorder
 import net.meshsat.android.ui.theme.MeshSatSurface
+import net.meshsat.android.ui.theme.MeshSatTextMuted
 import net.meshsat.android.ui.theme.MeshSatTextSecondary
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.vectorResource
@@ -68,9 +71,9 @@ import androidx.compose.ui.res.vectorResource
 /** A pass this high clears most rooftops; the Passes screen has the full list and other masks. */
 private const val HIGH_PASS_DEG = 40.0
 
-/** The top of Home: the MeshSat lockup (the approved artwork, never re-typeset) and Arrange. */
+/** The top of Home: the MeshSat lockup (the approved artwork, never re-typeset), the node's beacon, night mode and Arrange. */
 @Composable
-fun HomeHeader(onArrange: () -> Unit, nightOn: Boolean = false, onNight: () -> Unit = {}) {
+fun HomeHeader(onArrange: () -> Unit, nightOn: Boolean = false, onNight: () -> Unit = {}, onBeacon: () -> Unit = {}) {
     Row(
         modifier = Modifier.fillMaxWidth().padding(start = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -82,6 +85,7 @@ fun HomeHeader(onArrange: () -> Unit, nightOn: Boolean = false, onNight: () -> U
             alignment = Alignment.CenterStart,
             modifier = Modifier.height(26.dp).weight(1f),
         )
+        BeaconIndicator(onBeacon)
         IconButton(onClick = onNight) {
             Icon(
                 if (nightOn) Icons.Filled.NightsStay else Icons.Outlined.NightsStay,
@@ -92,6 +96,53 @@ fun HomeHeader(onArrange: () -> Unit, nightOn: Boolean = false, onNight: () -> U
         IconButton(onClick = onArrange) {
             Icon(Icons.Outlined.SwapVert, contentDescription = "Arrange Home", tint = MeshSatTextSecondary)
         }
+    }
+}
+
+/**
+ * The node's satellite beacon (MESHSAT-1772) in the Home header (MESHSAT-1776). Absent unless the
+ * connected node has a beacon. Grey while its switch is off, amber while it sends its last message,
+ * and while it is on it lights for half a second every 3 s, the rhythm of the node's own LED and of
+ * the BCN lamp on its screen (the phone does not know the LED's phase, so the rhythm matches, not the
+ * moment). Tapping it opens Setup > Satellite, where Node health says what the beacon is doing.
+ */
+@Composable
+private fun BeaconIndicator(onOpen: () -> Unit) {
+    // The pipe and its STATUS/STATS can appear after Home is composed, so they are read on a tick.
+    val state by produceState<IridiumPipeContract.BeaconState?>(null) {
+        while (true) {
+            val pipe = GatewayService.meshtasticBle?.iridiumPipe?.value
+            val beacon = pipe?.stats?.value?.beacon?.state
+            value = when {
+                pipe == null -> null
+                // STATUS is notified on every change, STATS only on a change of substance: the flag wins.
+                pipe.status.value?.flags?.beaconOn == true -> IridiumPipeContract.BeaconState.On
+                beacon == IridiumPipeContract.BeaconState.Off || beacon == IridiumPipeContract.BeaconState.Sending -> beacon
+                else -> null
+            }
+            delay(1_000)
+        }
+    }
+    val current = state ?: return
+    var lit by remember { mutableStateOf(false) }
+    LaunchedEffect(current) {
+        lit = false
+        if (current != IridiumPipeContract.BeaconState.On) return@LaunchedEffect
+        while (true) {
+            lit = true
+            delay(500)
+            lit = false
+            delay(2_500)
+        }
+    }
+    val (tint, said) = when (current) {
+        IridiumPipeContract.BeaconState.On ->
+            (if (lit) ColorIridium else ColorIridium.copy(alpha = 0.35f)) to "Satellite beacon on"
+        IridiumPipeContract.BeaconState.Sending -> MeshSatAmber to "Satellite beacon off, sending its last message"
+        else -> MeshSatTextMuted to "Satellite beacon off"
+    }
+    IconButton(onClick = onOpen) {
+        Icon(Icons.Outlined.Sensors, contentDescription = said, tint = tint)
     }
 }
 

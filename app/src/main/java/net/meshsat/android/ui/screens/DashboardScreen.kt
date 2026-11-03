@@ -218,6 +218,7 @@ fun DashboardScreen(navigate: (String) -> Unit = {}) {
                 onArrange = { showReorderDialog = true },
                 nightOn = nightOn,
                 onNight = { scope.launch { settings.setNightMode(!nightOn) } },
+                onBeacon = { navigate("setup/satellite") },
             )
         }
         item { HomeLanes(navigate) }
