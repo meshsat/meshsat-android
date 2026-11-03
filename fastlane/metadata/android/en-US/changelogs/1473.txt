@@ -1,0 +1,1 @@
+The satellite beacon icon on Home lights red while the beacon is on, the colour of the node's own LED.
