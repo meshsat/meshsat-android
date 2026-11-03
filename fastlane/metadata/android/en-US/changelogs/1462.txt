@@ -1,0 +1,1 @@
+Home shows your MeshSat node's satellite beacon next to night mode: it lights every few seconds while the beacon is on, turns amber while the node sends its last message after the switch goes off, and is grey when it is off. Tap it for the node's satellite details.
