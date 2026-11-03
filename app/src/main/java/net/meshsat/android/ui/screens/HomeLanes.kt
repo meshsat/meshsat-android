@@ -61,6 +61,7 @@ import net.meshsat.android.ui.theme.ColorHub
 import net.meshsat.android.ui.theme.ColorIridium
 import net.meshsat.android.ui.theme.ColorMesh
 import net.meshsat.android.ui.theme.MeshSatAmber
+import net.meshsat.android.ui.theme.MeshSatRed
 import net.meshsat.android.ui.theme.MeshSatBorder
 import net.meshsat.android.ui.theme.MeshSatSurface
 import net.meshsat.android.ui.theme.MeshSatTextMuted
@@ -102,9 +103,10 @@ fun HomeHeader(onArrange: () -> Unit, nightOn: Boolean = false, onNight: () -> U
 /**
  * The node's satellite beacon (MESHSAT-1772) in the Home header (MESHSAT-1776). Absent unless the
  * connected node has a beacon. Grey while its switch is off, amber while it sends its last message,
- * and while it is on it lights for half a second every 3 s, the rhythm of the node's own LED and of
- * the BCN lamp on its screen (the phone does not know the LED's phase, so the rhythm matches, not the
- * moment). Tapping it opens Setup > Satellite, where Node health says what the beacon is doing.
+ * and while it is on it lights red, as the node's LED does, for half a second every 3 s: the rhythm
+ * of that LED and of the BCN lamp on its screen (the phone does not know the LED's phase, so the
+ * rhythm matches, not the moment). Tapping it opens Setup > Satellite, where Node health says what
+ * the beacon is doing.
  */
 @Composable
 private fun BeaconIndicator(onOpen: () -> Unit) {
@@ -137,7 +139,7 @@ private fun BeaconIndicator(onOpen: () -> Unit) {
     }
     val (tint, said) = when (current) {
         IridiumPipeContract.BeaconState.On ->
-            (if (lit) ColorIridium else ColorIridium.copy(alpha = 0.35f)) to "Satellite beacon on"
+            (if (lit) MeshSatRed else MeshSatRed.copy(alpha = 0.35f)) to "Satellite beacon on"
         IridiumPipeContract.BeaconState.Sending -> MeshSatAmber to "Satellite beacon off, sending its last message"
         else -> MeshSatTextMuted to "Satellite beacon off"
     }
