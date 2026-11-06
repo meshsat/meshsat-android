@@ -46,6 +46,12 @@
         <intent>
             <action android:name="android.speech.RecognitionService" />
         </intent>
+        <!-- Setup > Support (MESHSAT-1806) offers the phone's mail apps; Android 11+ hides them
+             from the app without this. -->
+        <intent>
+            <action android:name="android.intent.action.SENDTO" />
+            <data android:scheme="mailto" />
+        </intent>
     </queries>
 
     <application

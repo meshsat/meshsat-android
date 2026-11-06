@@ -5,7 +5,9 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.util.Log
 import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
@@ -195,8 +197,10 @@ private fun zipUri(context: Context, zip: File): Uri =
     FileProvider.getUriForFile(context, "${BuildConfig.APPLICATION_ID}.support", zip)
 
 /**
- * The user's email app, addressed to the desk: ACTION_SEND for the attachment, with a mailto
- * selector so only email apps answer. Without one, any app that sends; without that, the address.
+ * The user's mail apps, addressed to the desk: a picker of the apps that handle mailto (a
+ * selector on ACTION_SEND), so the user takes the one they are signed in to. Android's own pick
+ * opened Proton Mail's "Add account" on the owner's Pixel, which also has Thunderbird (6 Nov
+ * 2026). Without any mail app, every app that can send; without that, the address.
  */
 private fun openMail(context: Context, topic: SupportBundle.Topic, message: String, zip: File?) {
     val uri = zip?.let { zipUri(context, it) }
@@ -219,16 +223,28 @@ private fun openMail(context: Context, topic: SupportBundle.Topic, message: Stri
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
     }
-    try {
-        context.startActivity(Intent(send).apply { selector = Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:")) })
-    } catch (e: ActivityNotFoundException) {
-        try {
-            val typed = Intent(send).apply { type = if (uri != null) "application/zip" else "text/plain" }
-            context.startActivity(Intent.createChooser(typed, "Send feedback with"))
-        } catch (e2: ActivityNotFoundException) {
-            Toast.makeText(context, "No app here can send it. Write to ${SupportBundle.SUPPORT_ADDRESS}.", Toast.LENGTH_LONG).show()
-        }
+    val mailto = Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:"))
+    val target = if (hasApp(context, mailto)) {
+        Intent(send).apply { selector = mailto }
+    } else {
+        Intent(send).apply { type = if (uri != null) "application/zip" else "text/plain" }
     }
+    try {
+        context.startActivity(Intent.createChooser(target, "Send feedback with"))
+    } catch (e: ActivityNotFoundException) {
+        Toast.makeText(context, "No app here can send it. Write to ${SupportBundle.SUPPORT_ADDRESS}.", Toast.LENGTH_LONG).show()
+    }
+}
+
+@Suppress("DEPRECATION")
+private fun hasApp(context: Context, intent: Intent): Boolean {
+    val pm = context.packageManager
+    val found = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        pm.queryIntentActivities(intent, PackageManager.ResolveInfoFlags.of(0))
+    } else {
+        pm.queryIntentActivities(intent, 0)
+    }
+    return found.isNotEmpty()
 }
 
 private fun shareZip(context: Context, zip: File) {
