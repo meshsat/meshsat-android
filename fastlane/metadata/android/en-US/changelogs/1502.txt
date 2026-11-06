@@ -1,0 +1,1 @@
+Send feedback in Setup > Help > Support lets you pick which of your mail apps sends it.
