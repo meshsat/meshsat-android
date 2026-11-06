@@ -1,0 +1,1 @@
+Send feedback in Setup > Help > Support opens your email app straight away instead of the share sheet.
