@@ -200,8 +200,10 @@ private fun zipUri(context: Context, zip: File): Uri =
  */
 private fun openMail(context: Context, topic: SupportBundle.Topic, message: String, zip: File?) {
     val uri = zip?.let { zipUri(context, it) }
+    // No type on this intent: Android resolves the mailto selector below with the outer intent's
+    // type, and a mail app's mailto filter declares none, so a typed intent found no app at all
+    // and the mail went to the share sheet (seen on the API 30 emulator, 6 Nov 2026).
     val send = Intent(Intent.ACTION_SEND).apply {
-        type = if (uri != null) "application/zip" else "text/plain"
         putExtra(Intent.EXTRA_EMAIL, arrayOf(SupportBundle.SUPPORT_ADDRESS))
         putExtra(Intent.EXTRA_SUBJECT, SupportBundle.subject(topic, BuildConfig.VERSION_NAME))
         putExtra(
@@ -221,7 +223,8 @@ private fun openMail(context: Context, topic: SupportBundle.Topic, message: Stri
         context.startActivity(Intent(send).apply { selector = Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:")) })
     } catch (e: ActivityNotFoundException) {
         try {
-            context.startActivity(Intent.createChooser(send, "Send feedback with"))
+            val typed = Intent(send).apply { type = if (uri != null) "application/zip" else "text/plain" }
+            context.startActivity(Intent.createChooser(typed, "Send feedback with"))
         } catch (e2: ActivityNotFoundException) {
             Toast.makeText(context, "No app here can send it. Write to ${SupportBundle.SUPPORT_ADDRESS}.", Toast.LENGTH_LONG).show()
         }
