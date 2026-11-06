@@ -1,0 +1,1 @@
+Setup > Help > Support: send feedback to the MeshSat team from your own email app, with an optional debug.zip of the app's logs (phone numbers, emails, IMEIs and keys blanked). The node's panel switch is its beacon's only: Home no longer says the satellite is switched off.
