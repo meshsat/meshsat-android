@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Only the debug.zip folder of the cache is shared (MESHSAT-1806, SupportReport.DIR). -->
+<paths>
+    <cache-path name="support" path="support/" />
+</paths>

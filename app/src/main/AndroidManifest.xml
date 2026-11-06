@@ -103,5 +103,17 @@
             android:exported="false"
             android:foregroundServiceType="connectedDevice|location|remoteMessaging" />
 
+        <!-- Setup > Support (MESHSAT-1806): lends the debug.zip in the cache to the app the user
+             sends it with, read-only and for that one send. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.support"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/support_paths" />
+        </provider>
+
     </application>
 </manifest>

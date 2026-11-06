@@ -30,6 +30,7 @@ import androidx.compose.material.icons.outlined.Router
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material.icons.outlined.Sms
+import androidx.compose.material.icons.outlined.SupportAgent
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -154,6 +155,9 @@ fun SetupScreen(navigate: (String) -> Unit) {
 
         GroupTitle("For experts")
         NavRow(Icons.Outlined.Build, "Advanced", "Routing, links, queue, logs, diagnostics", { navigate("setup/advanced") })
+
+        GroupTitle("Help")
+        NavRow(Icons.Outlined.SupportAgent, "Support", "Send feedback, with the app's logs if you like", { navigate("support") })
         NavRow(Icons.Outlined.Info, "About", "MeshSat Android ${BuildConfig.VERSION_NAME}", { navigate("about") })
     }
 }

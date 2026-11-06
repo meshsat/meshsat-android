@@ -70,6 +70,7 @@ import net.meshsat.android.service.GatewayService
 import net.meshsat.android.ui.components.MapFocus
 import net.meshsat.android.ui.components.SubScreen
 import net.meshsat.android.ui.screens.AboutScreen
+import net.meshsat.android.ui.screens.SupportScreen
 import net.meshsat.android.ui.components.NodeLinkBanner
 import net.meshsat.android.ui.screens.SosBanner
 import net.meshsat.android.ui.screens.SosScreen
@@ -274,6 +275,7 @@ fun MeshSatUI(openRoute: String? = null, onRouteOpened: () -> Unit = {}) {
                 composable("credentials") { SubScreen("Certificates and keys", back) { CredentialsScreen() } }
                 composable("decrypt") { SubScreen("Encrypt or decrypt text", back) { DecryptScreen() } }
                 composable("nodelog") { SubScreen("Node log", back) { NodeLogScreen() } }
+                composable("support") { SubScreen("Support", back) { SupportScreen() } }
                 composable("about") { SubScreen("About", back) { AboutScreen() } }
                 composable("sos") { SubScreen("SOS", back) { SosScreen(navigate) } }
                 composable("warnings") { SubScreen("Warnings", back) { WarningsScreen() } }

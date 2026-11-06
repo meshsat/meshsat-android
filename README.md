@@ -187,6 +187,8 @@ All releases use the same key, so a new version installs over the old one. The o
 
 **"App not installed".** Usually a signature mismatch with a copy that is already installed, or the old `com.cubeos.meshsat` app from before 2.9. Uninstall it first.
 
+**Still stuck?** Setup > Help > Support writes to support@meshsat.net through your own email app, and can attach a debug.zip: the app's log, the state of each link, the queue's counts, crash reports and the node's log, with phone numbers, email addresses, IMEIs and keys blanked out. The app sends nothing itself; you see the mail and the file before they go.
+
 ## Related projects
 
 - [MeshSat](https://github.com/meshsat/meshsat), the Bridge: the same gateway on a Raspberry Pi

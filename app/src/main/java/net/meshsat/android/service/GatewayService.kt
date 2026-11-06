@@ -825,6 +825,12 @@ class GatewayService : Service() {
                         }
                     },
                     lxmfMessagesCallback = { limit -> runBlocking { db.messageDao().getByTransportSync("lxmf", limit) } },
+                    supportBundleCallback = { logs ->
+                        runBlocking {
+                            val parts = net.meshsat.android.support.SupportReport.parts(this@GatewayService, withLogs = logs)
+                            net.meshsat.android.support.SupportBundle.bytes(parts, System.currentTimeMillis())
+                        }
+                    },
                     rnsPaidCallback = { dests, extraHops, minutes ->
                         scope.launch {
                             val s = net.meshsat.android.data.SettingsRepository(this@GatewayService)

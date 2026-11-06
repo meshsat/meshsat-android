@@ -71,6 +71,8 @@ class LocalApiServer(
     /** The satellite allow-list: destinations, extra hops (-1 keeps), interval minutes (-1 keeps). */
     private val rnsPaidCallback: ((dests: List<String>, extraHops: Int, minIntervalMin: Int) -> Unit)? = null,
     private val hubSettingsCallback: ((Map<String, String>) -> Unit)? = null,
+    /** The debug.zip of Setup > Support (MESHSAT-1806), for automation; logs = false leaves the two logs out. */
+    private val supportBundleCallback: ((logs: Boolean) -> ByteArray)? = null,
 ) : NanoHTTPD("127.0.0.1", 0) {
 
     @Volatile
@@ -233,10 +235,21 @@ class LocalApiServer(
             method == Method.GET && uri == "/api/telemetry/health" -> handleTelemetry(session, "health")
             method == Method.GET && uri == "/api/telemetry/events" -> handleTelemetry(session, "event")
             method == Method.GET && uri == "/api/telemetry" -> handleTelemetryAll(session)
+            method == Method.GET && uri == "/api/support/bundle" -> handleSupportBundle(session)
             method == Method.DELETE && uri == "/api/telemetry" -> handleTelemetryClear()
 
             else -> jsonError(Response.Status.NOT_FOUND, "not found: $uri")
         }
+    }
+
+    // --- Support (MESHSAT-1806) ---
+
+    private fun handleSupportBundle(session: IHTTPSession): Response {
+        val cb = supportBundleCallback ?: return jsonError(Response.Status.SERVICE_UNAVAILABLE, "support bundle not available")
+        val bytes = cb(session.parms["logs"] != "0")
+        val resp = newFixedLengthResponse(Response.Status.OK, "application/zip", java.io.ByteArrayInputStream(bytes), bytes.size.toLong())
+        resp.addHeader("Content-Disposition", "attachment; filename=\"debug.zip\"")
+        return resp
     }
 
     // --- Health ---
