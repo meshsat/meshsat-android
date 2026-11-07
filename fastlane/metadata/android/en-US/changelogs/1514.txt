@@ -1,0 +1,1 @@
+Send feedback in Setup > Help > Support lists your mail apps and hands the message and the debug.zip to the one you pick.
