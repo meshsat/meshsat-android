@@ -1,0 +1,1 @@
+The link to your MeshSat node comes back by itself when the phone's Bluetooth restarts, for example after switching between users on the phone.
