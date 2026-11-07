@@ -1,5 +1,6 @@
 package net.meshsat.android.ble
 
+import android.util.Log
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.Channel
@@ -22,8 +23,11 @@ import kotlinx.coroutines.withTimeoutOrNull
 class GattOpQueue(
     scope: CoroutineScope,
     private val timeoutMs: Long = DEFAULT_TIMEOUT_MS,
+    private val nowMs: () -> Long = System::currentTimeMillis,
 ) {
     companion object {
+        private const val TAG = "GattOpQueue"
+
         // Long enough for Android's pairing dialog: the first protected operation on a node
         // with a BLE PIN waits while a person types it, and the stack retries it afterwards.
         const val DEFAULT_TIMEOUT_MS = 30_000L
@@ -31,7 +35,32 @@ class GattOpQueue(
         const val STATUS_REFUSED = -1
         const val STATUS_TIMEOUT = -2
         const val STATUS_CLOSED = -3
+
+        /**
+         * How long Android may refuse every operation before the client counts as dead. The
+         * first subscriptions after a connect are refused within milliseconds while the link
+         * comes up, and the next operation is accepted; a minute is far beyond that.
+         */
+        const val DEAD_AFTER_MS = 60_000L
+
+        /** And at least this many refusals in that time, so one slow retry is not enough. */
+        const val DEAD_AFTER_REFUSALS = 3
     }
+
+    /**
+     * Called once when Android has refused every operation for [DEAD_AFTER_MS], at least
+     * [DEAD_AFTER_REFUSALS] of them, and accepted none in between. That is a dead client: on
+     * 7 Nov 2026 a switch of the phone's user restarted Android's Bluetooth under the app, the
+     * client kept a binder to the old Bluetooth process (DeadObjectException on every call), no
+     * disconnect callback ever came, and the node link said connected while nothing went
+     * through for an hour (MESHSAT-1816). The owner of the connection drops it and connects again.
+     */
+    @Volatile var onDead: (() -> Unit)? = null
+
+    // Touched only by the loop in init, one operation at a time.
+    private var refusedSinceMs = 0L
+    private var refusedCount = 0
+    private var deadReported = false
 
     /**
      * One operation. [key] names what its callback will report (e.g. "w:<uuid>"), so a
@@ -100,16 +129,38 @@ class GattOpQueue(
             return
         }
         current = op
+        var thrown: Exception? = null
         val started = try {
             op.start()
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            thrown = e
             false
         }
         if (!started) {
+            // Before the caller hears of the refusal, so the verdict is in when it does.
+            noteRefused(op.key, thrown)
             op.done.complete(STATUS_REFUSED)
-        } else if (withTimeoutOrNull(timeoutMs) { op.done.await() } == null) {
-            op.done.complete(STATUS_TIMEOUT)
+        } else {
+            refusedCount = 0
+            if (withTimeoutOrNull(timeoutMs) { op.done.await() } == null) {
+                op.done.complete(STATUS_TIMEOUT)
+            }
         }
         current = null
+    }
+
+    private fun noteRefused(key: String, thrown: Exception?) {
+        val now = nowMs()
+        if (refusedCount == 0) {
+            refusedSinceMs = now
+            // Once per run of refusals, so a dead client does not flood the log.
+            Log.w(TAG, "Android refused $key" + (thrown?.let { ": ${it.javaClass.simpleName} ${it.message.orEmpty()}" } ?: ""))
+        }
+        refusedCount++
+        if (!deadReported && refusedCount >= DEAD_AFTER_REFUSALS && now - refusedSinceMs >= DEAD_AFTER_MS) {
+            deadReported = true
+            Log.w(TAG, "Android refused all $refusedCount operations for ${(now - refusedSinceMs) / 1000} s; the client is dead")
+            onDead?.invoke()
+        }
     }
 }

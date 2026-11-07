@@ -6,6 +6,7 @@ import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothStatusCodes
 import android.os.Build
+import android.util.Log
 import java.util.UUID
 
 /**
@@ -16,11 +17,17 @@ import java.util.UUID
  */
 @SuppressLint("MissingPermission")
 internal object GattCompat {
+    private const val TAG = "GattCompat"
+
     val CCC_DESCRIPTOR: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
 
     fun write(gatt: BluetoothGatt, c: BluetoothGattCharacteristic, value: ByteArray, type: Int): Boolean =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            gatt.writeCharacteristic(c, value, type) == BluetoothStatusCodes.SUCCESS
+            // The reason a write was refused (busy, not allowed, not connected, ...) used to be
+            // thrown away, which left MESHSAT-1816 with "status -1" and nothing else.
+            val status = gatt.writeCharacteristic(c, value, type)
+            if (status != BluetoothStatusCodes.SUCCESS) Log.w(TAG, "writeCharacteristic ${c.uuid} refused by Android: status $status")
+            status == BluetoothStatusCodes.SUCCESS
         } else {
             @Suppress("DEPRECATION")
             c.writeType = type

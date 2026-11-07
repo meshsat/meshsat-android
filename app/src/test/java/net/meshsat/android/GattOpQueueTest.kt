@@ -122,4 +122,49 @@ class GattOpQueueTest {
         assertEquals(GattOpQueue.STATUS_CLOSED, queued.await())
         assertEquals(GattOpQueue.STATUS_CLOSED, queue.enqueue("w:c") { true }.await())
     }
+
+    // MESHSAT-1816: a client whose Bluetooth process restarted refuses everything for ever.
+    @Test
+    fun `a client that refuses everything for a minute is reported dead once`() = runBlocking {
+        var now = 1_000_000L
+        val queue = GattOpQueue(scope, timeoutMs = 2_000, nowMs = { now })
+        var dead = 0
+        queue.onDead = { dead++ }
+        // The first refusals after a connect come within milliseconds: not dead.
+        repeat(5) { assertEquals(GattOpQueue.STATUS_REFUSED, queue.enqueue("w:a") { false }.await()) }
+        assertEquals(0, dead)
+        now += GattOpQueue.DEAD_AFTER_MS - 1
+        queue.enqueue("rssi") { false }.await()
+        assertEquals(0, dead)
+        now += 1
+        queue.enqueue("rssi") { throw IllegalStateException("DeadObjectException") }.await()
+        assertEquals(1, dead)
+        now += GattOpQueue.DEAD_AFTER_MS
+        queue.enqueue("rssi") { false }.await()
+        assertEquals(1, dead)
+    }
+
+    @Test
+    fun `an accepted operation starts the count again`() = runBlocking {
+        var now = 0L
+        val queue = GattOpQueue(scope, timeoutMs = 2_000, nowMs = { now })
+        var dead = 0
+        queue.onDead = { dead++ }
+        repeat(2) { queue.enqueue("w:a") { false }.await() }
+        now += GattOpQueue.DEAD_AFTER_MS / 2
+        val ok = queue.enqueue("r:b") { true }
+        Thread.sleep(50)
+        queue.complete("r:b", 0)
+        assertEquals(0, ok.await())
+        now += GattOpQueue.DEAD_AFTER_MS / 2 + 1
+        repeat(3) { queue.enqueue("w:a") { false }.await() }
+        assertEquals(0, dead)
+        // Two refusals alone, however far apart, are not enough either.
+        val queue2 = GattOpQueue(scope, timeoutMs = 2_000, nowMs = { now })
+        queue2.onDead = { dead++ }
+        queue2.enqueue("w:a") { false }.await()
+        now += 10 * GattOpQueue.DEAD_AFTER_MS
+        queue2.enqueue("w:a") { false }.await()
+        assertEquals(0, dead)
+    }
 }

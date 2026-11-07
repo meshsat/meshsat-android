@@ -49,6 +49,12 @@ class RnodeBleLink(private val context: Context, val address: String, scope: Cor
     @Volatile private var readyError: String? = null
     @Volatile private var closed = false
 
+    init {
+        // Bluetooth restarting under the app (a user switch, 7 Nov 2026) leaves a client that
+        // refuses everything and never reports a disconnect (MESHSAT-1816): call it one.
+        queue.onDead = { if (!closed) onDisconnected?.invoke("BLE link dead: Android refuses every operation") }
+    }
+
     val chunkSize: Int get() = maxOf(20, mtu - 3)
 
     /** Connects and brings the UART up; null when ready, else why not. Blocks up to [timeoutMs]. */

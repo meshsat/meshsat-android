@@ -491,9 +491,25 @@ class MeshtasticBle(private val context: Context) {
         teardown()
     }
 
-    /** Bluetooth is back: go and get the node again. */
+    /**
+     * Bluetooth is back: go and get the node again. A client still held now was opened on the
+     * Bluetooth that just restarted, so it is dropped first; [reconnect] would otherwise do
+     * nothing, because it never replaces a client to the same node. On 7 Nov 2026 a switch of
+     * the phone's user restarted Bluetooth twice in seven minutes and the app ended up holding a
+     * dead client that said connected (MESHSAT-1816).
+     */
     fun onBluetoothOn() {
         _bluetoothOn.value = true
+        if (gatt != null) {
+            Log.i(TAG, "Bluetooth is back while a client from before is still held; dropping it")
+            try {
+                gatt?.close()
+            } catch (e: Exception) {
+                // The Bluetooth process that knew this client is gone; nothing left to close.
+            }
+            gatt = null
+            teardown()
+        }
         if (lastAddress == null) return
         Log.i(TAG, "Bluetooth is back; reconnecting to the node")
         scope.launch {
@@ -503,8 +519,13 @@ class MeshtasticBle(private val context: Context) {
     }
 
     fun disconnect() {
-        gatt?.disconnect()
-        gatt?.close()
+        // A client whose Bluetooth process is gone answers with DeadObjectException (MESHSAT-1816).
+        try {
+            gatt?.disconnect()
+            gatt?.close()
+        } catch (e: Exception) {
+            Log.w(TAG, "Closing the node link: ${e.javaClass.simpleName}")
+        }
         gatt = null
         teardown()
     }
@@ -687,6 +708,16 @@ class MeshtasticBle(private val context: Context) {
             }
 
             val q = GattOpQueue(scope)
+            // Android refusing every operation for a minute is a dead client that no callback
+            // will ever report (MESHSAT-1816): drop it and connect again.
+            q.onDead = {
+                scope.launch {
+                    if (gatt === g) {
+                        Log.w(TAG, "The node link takes no operations at all; reconnecting")
+                        forceReconnect()
+                    }
+                }
+            }
             queue = q
             startSession(g, q, service)
         }
