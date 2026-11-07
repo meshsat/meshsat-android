@@ -79,4 +79,28 @@ class SupportBundleTest {
         assertFalse(SupportBundle.mailBody("x", "2.26.0", 1490, "e", "a", "d", attached = false).contains("debug.zip"))
         assertEquals("MeshSat Android 2.26.0: a problem", SupportBundle.subject(SupportBundle.Topic.Problem, "2.26.0"))
     }
+
+    @Test
+    fun `the picker lists each mail app once, by name, never this app`() {
+        val found = listOf(
+            SupportBundle.MailApp("net.thunderbird.android", "Thunderbird"),
+            SupportBundle.MailApp("ch.protonmail.android", "Proton Mail"),
+            SupportBundle.MailApp("net.thunderbird.android", "Thunderbird"),
+            SupportBundle.MailApp("net.meshsat.android", "MeshSat"),
+            SupportBundle.MailApp("com.google.android.gm", "gmail"),
+        )
+        assertEquals(
+            listOf("com.google.android.gm", "ch.protonmail.android", "net.thunderbird.android"),
+            SupportBundle.mailApps(found, "net.meshsat.android").map { it.pkg },
+        )
+        assertTrue(SupportBundle.mailApps(emptyList(), "net.meshsat.android").isEmpty())
+    }
+
+    @Test
+    fun `a mailto link encodes spaces as %20 and keeps new lines`() {
+        assertEquals(
+            "mailto:support@meshsat.net?subject=MeshSat%20Android%202.26.3%3A%20a%20problem&body=It%20stopped.%0A--%0Aa%26b%3Dc",
+            SupportBundle.mailtoUri("support@meshsat.net", "MeshSat Android 2.26.3: a problem", "It stopped.\n--\na&b=c"),
+        )
+    }
 }

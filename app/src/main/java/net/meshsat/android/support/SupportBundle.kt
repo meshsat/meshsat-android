@@ -68,6 +68,27 @@ object SupportBundle {
     /** Subject line by topic, so the desk can sort without opening the mail. */
     fun subject(topic: Topic, versionName: String): String = "MeshSat Android $versionName: ${topic.subject}"
 
+    /** A mail app the user can pick: its package and the name the launcher shows. */
+    data class MailApp(val pkg: String, val label: String)
+
+    /**
+     * The phone's mail apps as the picker lists them: one row per package (an app may answer
+     * mailto with several activities), never this app itself, by name.
+     */
+    fun mailApps(found: List<MailApp>, ownPackage: String): List<MailApp> =
+        found.filter { it.pkg != ownPackage }
+            .distinctBy { it.pkg }
+            .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.label })
+
+    /**
+     * mailto: link with subject and body, for a mail app that takes mailto but no file. RFC 6068:
+     * percent-encoded, a space is %20, never "+".
+     */
+    fun mailtoUri(address: String, subject: String, body: String): String {
+        fun enc(v: String) = java.net.URLEncoder.encode(v, "UTF-8").replace("+", "%20")
+        return "mailto:$address?subject=${enc(subject)}&body=${enc(body)}"
+    }
+
     enum class Topic(val label: String, val subject: String) {
         Problem("Something is wrong", "a problem"),
         Idea("An idea", "an idea"),
