@@ -241,6 +241,18 @@ dependencies {
     // WebSocket client for the Hub relay tunnel (MESHSAT-1157)
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
+    // Play Age Signals API, Google Play edition ONLY (MESHSAT-1908): the play flavor asks Play for
+    // an age signal where a law makes sharing mandatory (California's Digital Age Assurance Act
+    // from 1 Jan 2027, Brazil). Never move this to a configuration the fdroid flavor resolves:
+    // F-Droid's build carries no Play library, and its scanner reads only fdroid/unflavored lines.
+    // 0.0.6 is the first version on Google's Maven with getApplicableAgeFeatures (0.0.5 was
+    // documented but never published). Its testing.FakeAgeSignalsManager is in the same AAR.
+    "playImplementation"("com.google.android.play:age-signals:0.0.6")
+    // play-services-basement under it brings androidx.fragment 1.1.0, and lint's
+    // InvalidFragmentVersionForActivityResult then fails the play release build: any fragment
+    // below 1.3.0 mishandles ActivityResult request codes. Lift it for the play flavor only.
+    "playImplementation"("androidx.fragment:fragment:1.8.5")
+
     // Test
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")

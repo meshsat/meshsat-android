@@ -12,6 +12,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.mutableStateOf
 import androidx.core.content.ContextCompat
+import net.meshsat.android.age.AgeSignals
 import net.meshsat.android.crypto.ProvisionImporter
 import net.meshsat.android.ui.MeshSatUI
 import net.meshsat.android.ui.screens.WelcomeScreen
@@ -91,6 +92,9 @@ class MainActivity : ComponentActivity() {
                 ProvisionClaimHost()
             }
         }
+        // The Google Play edition asks Play for an age signal where a law requires one, at most
+        // once a day; a no-op in the fdroid edition (MESHSAT-1908).
+        AgeSignals.onLaunch(this)
     }
 
     override fun onNewIntent(intent: Intent) {
