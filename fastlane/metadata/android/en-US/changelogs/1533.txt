@@ -1,0 +1,1 @@
+Nothing changes in this edition. The Google Play edition now asks Google Play for the user's age range where a law makes sharing it mandatory (California and Brazil from January 2027); it shows no prompt elsewhere and keeps no answer.
