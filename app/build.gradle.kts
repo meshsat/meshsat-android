@@ -244,7 +244,9 @@ dependencies {
     // Play Age Signals API, Google Play edition ONLY (MESHSAT-1908): the play flavor asks Play for
     // an age signal where a law makes sharing mandatory (California's Digital Age Assurance Act
     // from 1 Jan 2027, Brazil). Never move this to a configuration the fdroid flavor resolves:
-    // F-Droid's build carries no Play library, and its scanner reads only fdroid/unflavored lines.
+    // F-Droid's build must carry no Play library, and F-Droid's scanner has no signature for this
+    // one (checked 19 Nov 2026: it passes even as plain `implementation`), so only this flavor
+    // line keeps it out. Proof per release: no com/google/android/play class in the fdroid dex.
     // 0.0.6 is the first version on Google's Maven with getApplicableAgeFeatures (0.0.5 was
     // documented but never published). Its testing.FakeAgeSignalsManager is in the same AAR.
     "playImplementation"("com.google.android.play:age-signals:0.0.6")
